@@ -21,9 +21,11 @@ import com.example.aiaccounting.R
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
-    onNavigateToAdd: () -> Unit,
+    onNavigateToAddTransaction: () -> Unit,
     onNavigateToStatistics: () -> Unit,
-    onNavigateToAI: () -> Unit
+    onNavigateToAI: () -> Unit,
+    onNavigateToAccounts: () -> Unit = {},
+    onNavigateToSettings: () -> Unit = {}
 ) {
     Scaffold(
         topBar = {

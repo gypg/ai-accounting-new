@@ -102,4 +102,32 @@ class BudgetRepository @Inject constructor(
         val budgetsWithSpent = getBudgetsWithSpent(budget.startDate, budget.endDate ?: System.currentTimeMillis()).first()
         return budgetsWithSpent.any { it.id == budget.id && it.isOverBudget }
     }
+
+    /**
+     * Get all budgets
+     */
+    fun getAllBudgets(): Flow<List<Budget>> {
+        return budgetDao.getAllBudgets()
+    }
+
+    /**
+     * Get budget by category
+     */
+    fun getBudgetByCategory(categoryId: Long): Flow<Budget?> {
+        return budgetDao.getBudgetByCategory(categoryId)
+    }
+
+    /**
+     * Update budget spent amount
+     */
+    suspend fun updateBudgetSpent(budgetId: Long, spent: Double) {
+        budgetDao.updateBudgetSpent(budgetId, spent)
+    }
+
+    /**
+     * Check if category has budget
+     */
+    fun hasBudgetForCategory(categoryId: Long): Flow<Boolean> {
+        return budgetDao.hasBudgetForCategory(categoryId)
+    }
 }

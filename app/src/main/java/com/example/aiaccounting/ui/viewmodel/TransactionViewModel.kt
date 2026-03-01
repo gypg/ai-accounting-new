@@ -121,6 +121,73 @@ class TransactionViewModel @Inject constructor(
         }
     }
 
+    // 兼容Screen调用的方法
+    fun addTransaction(
+        amount: Double,
+        type: TransactionType,
+        accountId: Long,
+        categoryId: Long,
+        date: java.util.Date,
+        note: String
+    ) {
+        createTransaction(
+            accountId = accountId,
+            categoryId = categoryId,
+            type = type,
+            amount = amount,
+            date = date.time,
+            note = note
+        )
+    }
+
+    fun updateTransaction(
+        transactionId: Long,
+        amount: Double,
+        type: TransactionType,
+        accountId: Long,
+        categoryId: Long,
+        date: java.util.Date,
+        note: String
+    ) {
+        viewModelScope.launch {
+            try {
+                _uiState.update { it.copy(isLoading = true, error = null) }
+                val transaction = Transaction(
+                    id = transactionId,
+                    accountId = accountId,
+                    categoryId = categoryId,
+                    type = type,
+                    amount = amount,
+                    date = date.time,
+                    note = note
+                )
+                transactionRepository.updateTransaction(transaction)
+                _uiState.update { it.copy(isLoading = false, showEditDialog = false) }
+                loadMonthSummary()
+            } catch (e: Exception) {
+                _uiState.update { it.copy(isLoading = false, error = e.message) }
+            }
+        }
+    }
+
+    fun deleteTransaction(transactionId: Long) {
+        viewModelScope.launch {
+            try {
+                val transaction = transactionRepository.getTransactionById(transactionId)
+                transaction?.let {
+                    transactionRepository.deleteTransaction(it)
+                    loadMonthSummary()
+                }
+            } catch (e: Exception) {
+                _uiState.update { it.copy(error = e.message) }
+            }
+        }
+    }
+
+    fun getTransactionById(transactionId: Long): Flow<Transaction?> {
+        return transactionRepository.getTransactionById(transactionId)
+    }
+
     fun getTransactionsByDateRange(startDate: Long, endDate: Long): Flow<List<Transaction>> {
         return transactionRepository.getTransactionsByDateRange(startDate, endDate)
     }
