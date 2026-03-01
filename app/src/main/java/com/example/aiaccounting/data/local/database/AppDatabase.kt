@@ -7,6 +7,11 @@ import androidx.room.TypeConverters
 import androidx.sqlite.db.SupportSQLiteDatabase
 import net.sqlcipher.database.SupportFactory
 import com.example.aiaccounting.data.local.converter.Converters
+import com.example.aiaccounting.data.local.dao.AccountDao
+import com.example.aiaccounting.data.local.dao.CategoryDao
+import com.example.aiaccounting.data.local.dao.TransactionDao
+import com.example.aiaccounting.data.local.dao.BudgetDao
+import com.example.aiaccounting.data.local.dao.AIConversationDao
 import com.example.aiaccounting.data.local.entity.Account
 import com.example.aiaccounting.data.local.entity.Category
 import com.example.aiaccounting.data.local.entity.Transaction
