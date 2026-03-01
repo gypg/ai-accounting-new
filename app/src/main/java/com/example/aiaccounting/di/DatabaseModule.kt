@@ -7,6 +7,7 @@ import com.example.aiaccounting.data.local.dao.BudgetDao
 import com.example.aiaccounting.data.local.dao.CategoryDao
 import com.example.aiaccounting.data.local.dao.TransactionDao
 import com.example.aiaccounting.data.local.database.AppDatabase
+import com.example.aiaccounting.data.local.database.DatabaseFactory
 import com.example.aiaccounting.data.local.repository.AccountRepository
 import com.example.aiaccounting.data.local.repository.AIConversationRepository
 import com.example.aiaccounting.data.local.repository.BudgetRepository
@@ -25,6 +26,13 @@ import javax.inject.Singleton
 @Module
 @InstallIn(SingletonComponent::class)
 object DatabaseModule {
+
+    @Provides
+    @Singleton
+    fun provideAppDatabase(databaseFactory: DatabaseFactory): AppDatabase {
+        // Note: This is a placeholder. In production, database should be initialized with PIN
+        return databaseFactory.getDatabase()
+    }
 
     @Provides
     @Singleton
