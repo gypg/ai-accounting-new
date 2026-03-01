@@ -10,7 +10,6 @@ import dagger.hilt.android.AndroidEntryPoint
 import java.util.Calendar
 import javax.inject.Inject
 
-@AndroidEntryPoint
 class AutoBackupManager @Inject constructor(
     private val context: Context
 ) {

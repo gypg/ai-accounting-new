@@ -235,7 +235,7 @@ class ExcelExporter(private val context: Context) {
         font.color = IndexedColors.WHITE.index
         
         style.setFont(font)
-        style.fillForegroundColor = IndexedColors.BLUE_GREY.index)
+        style.fillForegroundColor = IndexedColors.BLUE_GREY.index
         style.fillPattern = FillPatternType.SOLID_FOREGROUND
         style.alignment = HorizontalAlignment.CENTER
         style.verticalAlignment = VerticalAlignment.CENTER

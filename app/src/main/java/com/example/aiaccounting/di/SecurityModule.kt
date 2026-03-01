@@ -1,7 +1,6 @@
 package com.example.aiaccounting.di
 
 import android.content.Context
-import com.example.aiaccounting.data.local.database.DatabaseFactory
 import com.example.aiaccounting.security.SecurityManager
 import dagger.Module
 import dagger.Provides
@@ -21,14 +20,5 @@ object SecurityModule {
     @Singleton
     fun provideSecurityManager(@ApplicationContext context: Context): SecurityManager {
         return SecurityManager(context)
-    }
-
-    @Provides
-    @Singleton
-    fun provideDatabaseFactory(
-        @ApplicationContext context: Context,
-        securityManager: SecurityManager
-    ): DatabaseFactory {
-        return DatabaseFactory(context, securityManager)
     }
 }
