@@ -1,0 +1,54 @@
+<resources>
+    <string name="app_name">AI记账</string>
+    
+    <string name="navigation_home">首页</string>
+    <string name="navigation_statistics">统计</string>
+    <string name="navigation_add">记账</string>
+    <string name="navigation_accounts">账户</string>
+    <string name="navigation_settings">设置</string>
+    
+    <string name="income">收入</string>
+    <string name="expense">支出</string>
+    <string name="transfer">转账</string>
+    
+    <string name="amount">金额</string>
+    <string name="category">分类</string>
+    <string name="account">账户</string>
+    <string name="date">日期</string>
+    <string name="remark">备注</string>
+    
+    <string name="save">保存</string>
+    <string name="cancel">取消</string>
+    <string name="delete">删除</string>
+    <string name="edit">编辑</string>
+    <string name="confirm">确认</string>
+    
+    <string name="ai_assistant">AI助手</string>
+    <string name="ai_input_hint">输入您的问题或记账内容...</string>
+    <string name="ai_example_1">今天午饭花了25元</string>
+    <string name="ai_example_2">这个月花了多少钱</string>
+    <string name="ai_example_3">昨天收入5000元工资</string>
+    
+    <string name="total_income">总收入</string>
+    <string name="total_expense">总支出</string>
+    <string name="balance">结余</string>
+    
+    <string name="monthly_bill">月度账单</string>
+    <string name="export_excel">导出Excel</string>
+    
+    <string name="settings_server">服务器设置</string>
+    <string name="settings_ai">AI设置</string>
+    <string name="settings_backup">数据备份</string>
+    <string name="settings_about">关于</string>
+    
+    <string name="server_address">服务器地址</string>
+    <string name="api_key">API密钥</string>
+    <string name="model_name">模型名称</string>
+    
+    <string name="backup_now">立即备份</string>
+    <string name="restore_data">恢复数据</string>
+    
+    <string name="version">版本</string>
+    <string name="developer">开发者</string>
+    <string name="feedback">反馈</string>
+</resources>
