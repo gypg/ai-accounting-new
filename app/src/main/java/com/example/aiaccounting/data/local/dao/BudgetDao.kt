@@ -47,19 +47,12 @@ interface BudgetDao {
     suspend fun deactivateBudget(budgetId: Long)
 
     @Query("""
-        SELECT b.*, 
-               (SELECT SUM(t.amount) 
-                FROM transactions t 
-                WHERE t.categoryId = b.categoryId 
-                AND t.type = 'EXPENSE'
-                AND t.date >= :startDate 
-                AND t.date <= :endDate) as spent
-        FROM budgets b
-        WHERE b.isActive = 1
-        AND b.startDate <= :endDate
-        AND (b.endDate IS NULL OR b.endDate >= :startDate)
+        SELECT * FROM budgets
+        WHERE isActive = 1
+        AND startDate <= :endDate
+        AND (endDate IS NULL OR endDate >= :startDate)
     """)
-    fun getBudgetsWithSpent(startDate: Long, endDate: Long): Flow<List<BudgetWithSpent>>
+    fun getBudgetsWithSpent(startDate: Long, endDate: Long): Flow<List<Budget>>
 
     @Query("SELECT COUNT(*) FROM budgets WHERE isActive = 1")
     suspend fun getActiveBudgetCount(): Int
@@ -77,31 +70,3 @@ interface BudgetDao {
     fun hasBudgetForCategory(categoryId: Long): Flow<Boolean>
 }
 
-/**
- * Data class for budget with spent amount
- */
-data class BudgetWithSpent(
-    val id: Long,
-    val categoryId: Long,
-    val amount: Double,
-    val period: com.example.aiaccounting.data.local.entity.BudgetPeriod,
-    val startDate: Long,
-    val endDate: Long?,
-    val alertThreshold: Double,
-    val isActive: Boolean,
-    val createdAt: Long,
-    val updatedAt: Long,
-    val spent: Double?
-) {
-    val remaining: Double
-        get() = (amount - (spent ?: 0.0))
-
-    val percentageUsed: Double
-        get() = if (amount > 0) ((spent ?: 0.0) / amount) else 0.0
-
-    val isOverBudget: Boolean
-        get() = (spent ?: 0.0) > amount
-
-    val isNearLimit: Boolean
-        get() = percentageUsed >= alertThreshold && !isOverBudget
-}
