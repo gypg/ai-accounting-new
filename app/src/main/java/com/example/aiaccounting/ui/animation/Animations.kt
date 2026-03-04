@@ -1,5 +1,6 @@
 package com.example.aiaccounting.ui.animation
 
+import android.annotation.SuppressLint
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.layout.*
@@ -263,6 +264,7 @@ fun ExpandCollapseAnimation(
 /**
  * 页面切换动画
  */
+@SuppressLint("UnusedContentLambdaTargetStateParameter")
 @Composable
 fun PageTransition(
     currentPage: Int,
@@ -289,7 +291,7 @@ fun PageTransition(
             )
         },
         modifier = modifier
-    ) { page ->
+    ) { _ ->
         content()
     }
 }

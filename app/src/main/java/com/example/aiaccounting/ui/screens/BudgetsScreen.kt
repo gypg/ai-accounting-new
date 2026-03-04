@@ -9,10 +9,13 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.example.aiaccounting.data.local.entity.BudgetProgress
 import com.example.aiaccounting.ui.viewmodel.BudgetViewModel
-import com.example.aiaccounting.ui.viewmodel.BudgetWithDetails
 import com.example.aiaccounting.utils.NumberUtils
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -22,9 +25,21 @@ fun BudgetsScreen(
     viewModel: BudgetViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    val budgets by viewModel.budgetsWithDetails.collectAsState()
+    val budgets by viewModel.budgets.collectAsState()
+    val totalBudget by viewModel.totalBudget.collectAsState()
+    val alertBudgets by viewModel.alertBudgets.collectAsState()
+    val currentYear by viewModel.currentYear.collectAsState()
+    val currentMonth by viewModel.currentMonth.collectAsState()
 
     var showAddDialog by remember { mutableStateOf(false) }
+
+    // 显示消息
+    uiState.message?.let { message ->
+        LaunchedEffect(message) {
+            // 可以在这里显示Snackbar
+            viewModel.clearMessage()
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -50,54 +65,59 @@ fun BudgetsScreen(
                 Icon(Icons.Default.Add, contentDescription = "添加预算")
             }
         }
-    ) { padding ->
+    ) { paddingValues ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding)
+                .padding(paddingValues)
+                .padding(16.dp)
         ) {
+            // 月份选择器
+            MonthSelector(
+                year = currentYear,
+                month = currentMonth,
+                onYearMonthChanged = { year, month ->
+                    viewModel.setYearMonth(year, month)
+                }
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // 总预算卡片
+            totalBudget?.let { budget ->
+                TotalBudgetCard(budgetProgress = budget)
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+
+            // 超支提醒
+            if (alertBudgets.isNotEmpty()) {
+                AlertCard(alertBudgets = alertBudgets)
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+
+            // 预算列表
+            Text(
+                text = "预算列表",
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+
             if (budgets.isEmpty()) {
-                // 空状态
                 Box(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
                 ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.AccountBalance,
-                            contentDescription = null,
-                            modifier = Modifier.size(64.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-                        )
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text(
-                            text = "暂无预算",
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "点击右下角添加预算",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                        )
-                    }
+                    Text(
+                        text = "暂无预算设置",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             } else {
-                // 预算列表
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    items(budgets) { budgetWithDetails ->
-                        BudgetCard(
-                            budgetWithDetails = budgetWithDetails,
-                            onEdit = { viewModel.editBudget(budgetWithDetails.budget) },
-                            onDelete = { viewModel.deleteBudget(budgetWithDetails.budget.id) }
-                        )
+                LazyColumn {
+                    items(budgets) { budgetProgress ->
+                        BudgetItem(budgetProgress = budgetProgress)
+                        Spacer(modifier = Modifier.height(8.dp))
                     }
                 }
             }
@@ -108,8 +128,8 @@ fun BudgetsScreen(
     if (showAddDialog) {
         AddBudgetDialog(
             onDismiss = { showAddDialog = false },
-            onConfirm = { categoryId, amount, period ->
-                viewModel.addBudget(categoryId, amount, period)
+            onConfirm = { amount ->
+                viewModel.createTotalBudget(amount)
                 showAddDialog = false
             }
         )
@@ -117,20 +137,136 @@ fun BudgetsScreen(
 }
 
 @Composable
-fun BudgetCard(
-    budgetWithDetails: BudgetWithDetails,
-    onEdit: () -> Unit,
-    onDelete: () -> Unit
+fun MonthSelector(
+    year: Int,
+    month: Int,
+    onYearMonthChanged: (Int, Int) -> Unit
 ) {
-    val budget = budgetWithDetails.budget
-    val progress = if (budget.amount > 0) {
-        (budgetWithDetails.spent / budget.amount).toFloat().coerceIn(0f, 1f)
-    } else 0f
+    var showPicker by remember { mutableStateOf(false) }
 
-    val progressColor = when {
-        progress < 0.5f -> MaterialTheme.colorScheme.primary
-        progress < 0.8f -> MaterialTheme.colorScheme.secondary
-        else -> MaterialTheme.colorScheme.error
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        onClick = { showPicker = true }
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "${year}年${month}月",
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Icon(Icons.Default.CalendarToday, contentDescription = "选择月份")
+        }
+    }
+}
+
+@Composable
+fun TotalBudgetCard(budgetProgress: BudgetProgress) {
+    val percentage = (budgetProgress.percentage * 100).toInt()
+    val color = when {
+        budgetProgress.isOverBudget -> Color(0xFFF44336)
+        percentage >= 80 -> Color(0xFFFF9800)
+        else -> Color(0xFF4CAF50)
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp)
+        ) {
+            Text(
+                text = "月度总预算",
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Medium
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = "${NumberUtils.formatMoney(budgetProgress.spent)} / ${NumberUtils.formatMoney(budgetProgress.budget.amount)}",
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            LinearProgressIndicator(
+                progress = budgetProgress.percentage,
+                modifier = Modifier.fillMaxWidth(),
+                color = color,
+                trackColor = MaterialTheme.colorScheme.surfaceVariant
+            )
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            Text(
+                text = "已使用 $percentage%",
+                fontSize = 12.sp,
+                color = color
+            )
+        }
+    }
+}
+
+@Composable
+fun AlertCard(alertBudgets: List<BudgetProgress>) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.errorContainer
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Warning,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.error
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "预算提醒",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            alertBudgets.forEach { budget ->
+                val message = if (budget.isOverBudget) {
+                    "${budget.budget.name}已超支${NumberUtils.formatMoney(budget.spent - budget.budget.amount)}"
+                } else {
+                    "${budget.budget.name}已使用${(budget.percentage * 100).toInt()}%"
+                }
+                Text(
+                    text = "• $message",
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onErrorContainer
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun BudgetItem(budgetProgress: BudgetProgress) {
+    val percentage = (budgetProgress.percentage * 100).toInt()
+    val color = when {
+        budgetProgress.isOverBudget -> Color(0xFFF44336)
+        percentage >= 80 -> Color(0xFFFF9800)
+        else -> Color(0xFF4CAF50)
     }
 
     Card(
@@ -144,62 +280,35 @@ fun BudgetCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
-                    Text(
-                        text = budgetWithDetails.categoryName,
-                        style = MaterialTheme.typography.titleMedium
-                    )
-                    Text(
-                        text = "${budget.period.displayName}预算",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                Row {
-                    IconButton(onClick = onEdit) {
-                        Icon(Icons.Default.Edit, contentDescription = "编辑")
-                    }
-                    IconButton(onClick = onDelete) {
-                        Icon(Icons.Default.Delete, contentDescription = "删除")
-                    }
-                }
+                Text(
+                    text = budgetProgress.budget.name,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Medium
+                )
+                Text(
+                    text = "$percentage%",
+                    fontSize = 14.sp,
+                    color = color,
+                    fontWeight = FontWeight.Bold
+                )
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(4.dp))
 
-            // 进度条
-            LinearProgressIndicator(
-                progress = progress,
-                modifier = Modifier.fillMaxWidth(),
-                color = progressColor,
-                trackColor = MaterialTheme.colorScheme.surfaceVariant
+            Text(
+                text = "${NumberUtils.formatMoney(budgetProgress.spent)} / ${NumberUtils.formatMoney(budgetProgress.budget.amount)}",
+                fontSize = 14.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            Row(
+            LinearProgressIndicator(
+                progress = budgetProgress.percentage,
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    text = "已用: ${NumberUtils.formatMoney(budgetWithDetails.spent)}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = progressColor
-                )
-                Text(
-                    text = "预算: ${NumberUtils.formatMoney(budget.amount)}",
-                    style = MaterialTheme.typography.bodyMedium
-                )
-            }
-
-            if (progress >= 1f) {
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "⚠️ 预算已超支",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error
-                )
-            }
+                color = color,
+                trackColor = MaterialTheme.colorScheme.surfaceVariant
+            )
         }
     }
 }
@@ -207,44 +316,24 @@ fun BudgetCard(
 @Composable
 fun AddBudgetDialog(
     onDismiss: () -> Unit,
-    onConfirm: (Long, Double, com.example.aiaccounting.data.local.entity.BudgetPeriod) -> Unit
+    onConfirm: (Double) -> Unit
 ) {
-    var selectedCategory by remember { mutableStateOf<Long?>(null) }
     var amount by remember { mutableStateOf("") }
-    var selectedPeriod by remember { mutableStateOf(com.example.aiaccounting.data.local.entity.BudgetPeriod.MONTHLY) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("添加预算") },
+        title = { Text("设置月度预算") },
         text = {
             Column {
+                Text("请输入本月总预算金额")
+                Spacer(modifier = Modifier.height(8.dp))
                 OutlinedTextField(
                     value = amount,
-                    onValueChange = { 
-                        if (it.isEmpty() || it.matches(Regex("^\\d*\\.?\\d{0,2}$"))) {
-                            amount = it
-                        }
-                    },
+                    onValueChange = { amount = it },
                     label = { Text("预算金额") },
-                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                        keyboardType = androidx.compose.ui.text.input.KeyboardType.Decimal
-                    ),
-                    modifier = Modifier.fillMaxWidth()
+                    prefix = { Text("¥") },
+                    singleLine = true
                 )
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                Text("预算周期", style = MaterialTheme.typography.labelMedium)
-                Row {
-                    com.example.aiaccounting.data.local.entity.BudgetPeriod.values().forEach { period ->
-                        FilterChip(
-                            selected = selectedPeriod == period,
-                            onClick = { selectedPeriod = period },
-                            label = { Text(period.displayName) }
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                    }
-                }
             }
         },
         confirmButton = {
@@ -252,12 +341,11 @@ fun AddBudgetDialog(
                 onClick = {
                     val amountValue = amount.toDoubleOrNull() ?: 0.0
                     if (amountValue > 0) {
-                        onConfirm(selectedCategory ?: 0, amountValue, selectedPeriod)
+                        onConfirm(amountValue)
                     }
-                },
-                enabled = amount.isNotEmpty()
+                }
             ) {
-                Text("添加")
+                Text("确定")
             }
         },
         dismissButton = {
@@ -267,11 +355,3 @@ fun AddBudgetDialog(
         }
     )
 }
-
-val com.example.aiaccounting.data.local.entity.BudgetPeriod.displayName: String
-    get() = when (this) {
-        com.example.aiaccounting.data.local.entity.BudgetPeriod.DAILY -> "每日"
-        com.example.aiaccounting.data.local.entity.BudgetPeriod.WEEKLY -> "每周"
-        com.example.aiaccounting.data.local.entity.BudgetPeriod.MONTHLY -> "每月"
-        com.example.aiaccounting.data.local.entity.BudgetPeriod.YEARLY -> "每年"
-    }

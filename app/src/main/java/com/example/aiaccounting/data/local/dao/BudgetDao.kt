@@ -2,37 +2,27 @@ package com.example.aiaccounting.data.local.dao
 
 import androidx.room.*
 import com.example.aiaccounting.data.local.entity.Budget
+import com.example.aiaccounting.data.local.entity.BudgetPeriod
 import kotlinx.coroutines.flow.Flow
 
 /**
- * Data Access Object for Budget entity
+ * 预算数据访问对象
  */
 @Dao
 interface BudgetDao {
+    // ==================== 基础CRUD ====================
 
-    @Query("SELECT * FROM budgets WHERE isActive = 1 ORDER BY startDate DESC")
+    @Query("SELECT * FROM budgets WHERE isActive = 1 ORDER BY createdAt DESC")
     fun getAllActiveBudgets(): Flow<List<Budget>>
+
+    @Query("SELECT * FROM budgets ORDER BY createdAt DESC")
+    fun getAllBudgets(): Flow<List<Budget>>
 
     @Query("SELECT * FROM budgets WHERE id = :budgetId")
     suspend fun getBudgetById(budgetId: Long): Budget?
 
-    @Query("SELECT * FROM budgets WHERE categoryId = :categoryId AND isActive = 1")
-    fun getBudgetsByCategory(categoryId: Long): Flow<List<Budget>>
-
-    @Query("""
-        SELECT * FROM budgets 
-        WHERE categoryId = :categoryId 
-        AND startDate <= :currentDate 
-        AND (endDate IS NULL OR endDate >= :currentDate)
-        AND isActive = 1
-    """)
-    suspend fun getCurrentBudgetForCategory(categoryId: Long, currentDate: Long): Budget?
-
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertBudget(budget: Budget): Long
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertBudgets(budgets: List<Budget>)
 
     @Update
     suspend fun updateBudget(budget: Budget)
@@ -43,30 +33,59 @@ interface BudgetDao {
     @Query("DELETE FROM budgets WHERE id = :budgetId")
     suspend fun deleteBudgetById(budgetId: Long)
 
-    @Query("UPDATE budgets SET isActive = 0 WHERE id = :budgetId")
-    suspend fun deactivateBudget(budgetId: Long)
+    // ==================== 查询方法 ====================
 
+    /**
+     * 获取月度预算
+     */
+    @Query("SELECT * FROM budgets WHERE period = 'MONTHLY' AND year = :year AND month = :month AND isActive = 1")
+    fun getMonthlyBudgets(year: Int, month: Int): Flow<List<Budget>>
+
+    /**
+     * 获取年度预算
+     */
+    @Query("SELECT * FROM budgets WHERE period = 'YEARLY' AND year = :year AND isActive = 1")
+    fun getYearlyBudgets(year: Int): Flow<List<Budget>>
+
+    /**
+     * 获取总预算（不关联分类的预算）
+     */
+    @Query("SELECT * FROM budgets WHERE categoryId IS NULL AND period = 'MONTHLY' AND year = :year AND month = :month AND isActive = 1")
+    fun getTotalBudget(year: Int, month: Int): Flow<Budget?>
+
+    /**
+     * 获取分类预算
+     */
+    @Query("SELECT * FROM budgets WHERE categoryId = :categoryId AND period = 'MONTHLY' AND year = :year AND month = :month AND isActive = 1")
+    fun getCategoryBudget(categoryId: Long, year: Int, month: Int): Flow<Budget?>
+
+    /**
+     * 获取特定月份的所有预算
+     */
     @Query("""
-        SELECT * FROM budgets
-        WHERE isActive = 1
-        AND startDate <= :endDate
-        AND (endDate IS NULL OR endDate >= :startDate)
+        SELECT * FROM budgets 
+        WHERE isActive = 1 
+        AND (
+            (period = 'MONTHLY' AND year = :year AND month = :month)
+            OR (period = 'YEARLY' AND year = :year)
+        )
+        ORDER BY categoryId ASC
     """)
-    fun getBudgetsWithSpent(startDate: Long, endDate: Long): Flow<List<Budget>>
+    fun getBudgetsForMonth(year: Int, month: Int): Flow<List<Budget>>
+
+    // ==================== 统计方法 ====================
 
     @Query("SELECT COUNT(*) FROM budgets WHERE isActive = 1")
     suspend fun getActiveBudgetCount(): Int
 
-    @Query("SELECT * FROM budgets ORDER BY startDate DESC")
-    fun getAllBudgets(): Flow<List<Budget>>
+    @Query("SELECT COUNT(*) FROM budgets WHERE categoryId IS NULL AND isActive = 1")
+    suspend fun getTotalBudgetCount(): Int
 
-    @Query("SELECT * FROM budgets WHERE categoryId = :categoryId AND isActive = 1 LIMIT 1")
-    fun getBudgetByCategory(categoryId: Long): Flow<Budget?>
+    @Query("SELECT COUNT(*) FROM budgets WHERE categoryId IS NOT NULL AND isActive = 1")
+    suspend fun getCategoryBudgetCount(): Int
 
-    @Query("UPDATE budgets SET updatedAt = :updatedAt WHERE id = :budgetId")
-    suspend fun updateBudgetTimestamp(budgetId: Long, updatedAt: Long = System.currentTimeMillis())
+    // ==================== 激活/停用 ====================
 
-    @Query("SELECT EXISTS(SELECT 1 FROM budgets WHERE categoryId = :categoryId AND isActive = 1)")
-    fun hasBudgetForCategory(categoryId: Long): Flow<Boolean>
+    @Query("UPDATE budgets SET isActive = :isActive WHERE id = :budgetId")
+    suspend fun setBudgetActive(budgetId: Long, isActive: Boolean)
 }
-

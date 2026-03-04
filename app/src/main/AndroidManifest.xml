@@ -5,13 +5,17 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" 
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="29" />
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
         tools:ignore="ScopedStorage" />
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- 悬浮窗权限 -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <application
         android:name=".AIAccountingApplication"
@@ -35,6 +39,115 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        
+        <!-- 1x1 快速记账小组件 -->
+        <receiver
+            android:name=".widget.WidgetProvider1x1"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/accounting_widget_info_1x1" />
+        </receiver>
+
+        <!-- 2x1 时间结余小组件 -->
+        <receiver
+            android:name=".widget.WidgetProvider2x1"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/accounting_widget_info_2x1" />
+        </receiver>
+
+        <!-- 3x1 时间收支小组件 -->
+        <receiver
+            android:name=".widget.WidgetProvider3x1"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/accounting_widget_info_3x1" />
+        </receiver>
+
+        <!-- 3x2 收支详情小组件 -->
+        <receiver
+            android:name=".widget.WidgetProvider3x2"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/accounting_widget_info_3x2" />
+        </receiver>
+
+        <!-- 4x3 完整信息小组件 -->
+        <receiver
+            android:name=".widget.WidgetProvider4x3"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/accounting_widget_info_4x3" />
+        </receiver>
+
+        <!-- 小组件点击广播接收器 -->
+        <receiver
+            android:name=".widget.WidgetClickReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.example.aiaccounting.widget.ACTION_CLICK_1x1" />
+                <action android:name="com.example.aiaccounting.widget.ACTION_CLICK_2x1" />
+                <action android:name="com.example.aiaccounting.widget.ACTION_CLICK_3x1" />
+                <action android:name="com.example.aiaccounting.widget.ACTION_EXPENSE" />
+                <action android:name="com.example.aiaccounting.widget.ACTION_INCOME" />
+                <action android:name="com.example.aiaccounting.widget.ACTION_EXPENSE_4x3" />
+                <action android:name="com.example.aiaccounting.widget.ACTION_INCOME_4x3" />
+            </intent-filter>
+        </receiver>
+
+        <!-- 悬浮窗记账服务 -->
+        <service
+            android:name=".widget.FloatingWidgetService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="specialUse" />
+
+        <!-- 备份服务 -->
+        <service
+            android:name=".service.BackupService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <!-- 快速记账弹窗 Activity (备用) -->
+        <activity
+            android:name=".widget.WidgetQuickAddActivity"
+            android:exported="true"
+            android:theme="@style/Theme.Transparent"
+            android:excludeFromRecents="true"
+            android:launchMode="singleInstance"
+            android:taskAffinity="" />
+
+        <!-- WorkManager Initialization -->
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            android:exported="false"
+            tools:node="merge">
+            <meta-data
+                android:name="androidx.work.WorkManagerInitializer"
+                android:value="androidx.startup" />
+        </provider>
     </application>
 
 </manifest>

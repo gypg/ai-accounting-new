@@ -1,5 +1,6 @@
 package com.example.aiaccounting.ui.viewmodel
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.aiaccounting.data.local.entity.Account
@@ -9,7 +10,9 @@ import com.example.aiaccounting.data.local.entity.TransactionType
 import com.example.aiaccounting.data.repository.AccountRepository
 import com.example.aiaccounting.data.repository.CategoryRepository
 import com.example.aiaccounting.data.repository.TransactionRepository
+import com.example.aiaccounting.widget.WidgetUpdateService
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -23,7 +26,9 @@ import javax.inject.Inject
 class TransactionViewModel @Inject constructor(
     private val transactionRepository: TransactionRepository,
     private val accountRepository: AccountRepository,
-    private val categoryRepository: CategoryRepository
+    private val categoryRepository: CategoryRepository,
+    private val widgetUpdateService: WidgetUpdateService,
+    @ApplicationContext private val context: Context
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(TransactionUiState())
@@ -154,14 +159,30 @@ class TransactionViewModel @Inject constructor(
         date: java.util.Date,
         note: String
     ) {
-        createTransaction(
-            accountId = accountId,
-            categoryId = categoryId,
-            type = type,
-            amount = amount,
-            date = date.time,
-            note = note
-        )
+        viewModelScope.launch {
+            try {
+                _uiState.update { it.copy(isLoading = true, error = null) }
+                
+                val transaction = Transaction(
+                    accountId = accountId,
+                    categoryId = categoryId,
+                    type = type,
+                    amount = amount,
+                    date = date.time,
+                    note = note
+                )
+                
+                transactionRepository.insertTransaction(transaction)
+                
+                // 更新小组件数据
+                widgetUpdateService.updateWidgetStats(context)
+                
+                _uiState.update { it.copy(isLoading = false) }
+                loadMonthSummary() // Update summary
+            } catch (e: Exception) {
+                _uiState.update { it.copy(isLoading = false, error = e.message) }
+            }
+        }
     }
 
     fun updateTransaction(

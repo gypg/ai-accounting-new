@@ -52,7 +52,8 @@ fun AppNavigation(
     appStateManager: AppStateManager,
     onSetupComplete: (String) -> Unit = {},
     onLoginSuccess: (String) -> Unit = {},
-    onInitialSetupComplete: () -> Unit = {}
+    onInitialSetupComplete: () -> Unit = {},
+    onThemeChanged: () -> Unit = {}
 ) {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
@@ -108,6 +109,13 @@ fun AppNavigation(
                         onLoginSuccess(pin)
                         navController.navigate("overview") {
                             popUpTo(Screen.Login.route) { inclusive = true }
+                        }
+                    },
+                    onForgotPassword = {
+                        // 清除所有数据并重新初始化
+                        appStateManager.clearAllData()
+                        navController.navigate(Screen.SetupPin.route) {
+                            popUpTo(0) { inclusive = true }
                         }
                     }
                 )
@@ -186,7 +194,18 @@ fun AppNavigation(
                     },
                     onNavigateToAISettings = {
                         navController.navigate(Screen.AISettings.route)
-                    }
+                    },
+                    onNavigateToBudgets = {
+                        navController.navigate(Screen.Budgets.route)
+                    },
+                    onLogout = {
+                        // 清除登录状态并跳转到登录页面
+                        appStateManager.setLoggedIn(false)
+                        navController.navigate(Screen.Login.route) {
+                            popUpTo(0) { inclusive = true }
+                        }
+                    },
+                    onThemeChanged = onThemeChanged
                 )
             }
 

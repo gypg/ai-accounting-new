@@ -111,7 +111,12 @@ class BackupService : Service() {
                 val backupInfo = BackupInfo(
                     version = 1,
                     timestamp = timestamp,
-                    appVersion = packageManager.getPackageInfo(packageName, 0).longVersionCode.toInt()
+                    appVersion = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                        packageManager.getPackageInfo(packageName, 0).longVersionCode.toInt()
+                    } else {
+                        @Suppress("DEPRECATION")
+                        packageManager.getPackageInfo(packageName, 0).versionCode
+                    }
                 )
                 val backupInfoFile = File(cacheDir, BACKUP_INFO_FILE)
                 backupInfoFile.writeText(com.google.gson.Gson().toJson(backupInfo))

@@ -2,6 +2,7 @@ package com.example.aiaccounting.di
 
 import android.content.Context
 import androidx.room.Room
+import com.example.aiaccounting.data.exporter.CsvExporter
 import com.example.aiaccounting.data.local.dao.AccountDao
 import com.example.aiaccounting.data.local.dao.AIConversationDao
 import com.example.aiaccounting.data.local.dao.BudgetDao
@@ -114,8 +115,11 @@ object DatabaseModule {
 
     @Provides
     @Singleton
-    fun provideTransactionRepository(transactionDao: TransactionDao): TransactionRepository {
-        return TransactionRepository(transactionDao)
+    fun provideTransactionRepository(
+        transactionDao: TransactionDao,
+        @ApplicationContext context: Context
+    ): TransactionRepository {
+        return TransactionRepository(transactionDao, context)
     }
 
     @Provides
@@ -138,8 +142,11 @@ object DatabaseModule {
 
     @Provides
     @Singleton
-    fun provideBudgetRepository(budgetDao: BudgetDao): BudgetRepository {
-        return BudgetRepository(budgetDao)
+    fun provideBudgetRepository(
+        budgetDao: BudgetDao,
+        transactionDao: TransactionDao
+    ): BudgetRepository {
+        return BudgetRepository(budgetDao, transactionDao)
     }
 
     @Provides
@@ -168,7 +175,6 @@ object DatabaseModule {
     }
 
     @Provides
-    @Singleton
     fun provideChatMemoryDao(database: AppDatabase): ChatMemoryDao {
         return database.chatMemoryDao()
     }
@@ -181,5 +187,16 @@ object DatabaseModule {
         memoryDao: ChatMemoryDao
     ): ChatSessionRepository {
         return ChatSessionRepository(sessionDao, messageDao, memoryDao)
+    }
+
+    // CSV Exporter
+    @Provides
+    @Singleton
+    fun provideCsvExporter(
+        @ApplicationContext context: Context,
+        accountRepository: AccountRepository,
+        categoryRepository: CategoryRepository
+    ): CsvExporter {
+        return CsvExporter(context, accountRepository, categoryRepository)
     }
 }

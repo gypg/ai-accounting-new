@@ -896,7 +896,7 @@ fun ChatInputArea(
                         contentDescription = "发送图片"
                     )
                 }
-                
+
                 Spacer(modifier = Modifier.width(8.dp))
                 
                 OutlinedTextField(

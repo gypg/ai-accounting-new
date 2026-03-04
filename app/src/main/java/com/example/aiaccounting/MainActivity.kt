@@ -38,12 +38,29 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // 隐藏标题栏
+        actionBar?.hide()
+
+        // 获取小组件传来的action
+        val widgetAction = intent.getStringExtra("action")
+
         setContent {
-            AIAccountingTheme {
+            // 使用remember来监听主题变化
+            var themeKey by remember { mutableStateOf(0) }
+            
+            // 读取当前主题设置
+            val themeSetting = remember(themeKey) { appStateManager.getTheme() }
+            
+            AIAccountingTheme(
+                themeSetting = themeSetting
+            ) {
                 MainApp(
                     securityManager = securityManager,
                     appStateManager = appStateManager,
-                    onRequestStoragePermission = { requestStoragePermission() }
+                    themeKey = themeKey,
+                    onThemeChanged = { themeKey++ },
+                    onRequestStoragePermission = { requestStoragePermission() },
+                    widgetAction = widgetAction
                 )
             }
         }
@@ -75,47 +92,85 @@ class MainActivity : ComponentActivity() {
 fun MainApp(
     securityManager: SecurityManager,
     appStateManager: AppStateManager,
-    onRequestStoragePermission: () -> Unit
+    themeKey: Int,
+    onThemeChanged: () -> Unit,
+    onRequestStoragePermission: () -> Unit,
+    widgetAction: String? = null
 ) {
-    // 使用持久化的状态
-    var isPinSet by remember { mutableStateOf(securityManager.isPinSet()) }
-    var isDatabaseInitialized by remember { mutableStateOf(appStateManager.isDatabaseInitialized()) }
-    var hasInitialSetup by remember { mutableStateOf(appStateManager.isInitialSetupCompleted()) }
+    // 使用remember来强制重新读取状态
+    var refreshKey by remember { mutableStateOf(0) }
+    
+    // 内存中的登录状态 - 每次启动都是false，需要重新登录
+    var isLoggedIn by remember { mutableStateOf(false) }
+    
+    // 每次refreshKey变化时重新读取持久化状态
+    val isPinSet = remember(refreshKey) { securityManager.isPinSet() }
+    val hasInitialSetup = remember(refreshKey) { appStateManager.isInitialSetupCompleted() }
 
-    // Determine start destination - 跳过PIN码验证
+    // 如果有小组件action且已设置PIN，自动标记为已登录（简化流程）
+    val autoLoginFromWidget = widgetAction != null && isPinSet && hasInitialSetup
+    
+    // 实际登录状态
+    val effectiveIsLoggedIn = isLoggedIn || autoLoginFromWidget
+
+    // Determine start destination
     val startDestination = when {
         !hasInitialSetup -> Screen.InitialSetup.route
-        else -> "overview"  // 主界面使用底部导航，默认显示总览
+        !isPinSet -> Screen.SetupPin.route
+        !effectiveIsLoggedIn -> Screen.Login.route
+        else -> "overview"
     }
 
     val navController = rememberNavController()
 
     // Global PIN holder for database initialization
     var globalPin by remember { mutableStateOf<String?>(null) }
+    
+    // 小组件跳转目标
+    var widgetTargetRoute by remember { mutableStateOf<String?>(null) }
+    
+    // 处理小组件action
+    LaunchedEffect(widgetAction, effectiveIsLoggedIn) {
+        if (effectiveIsLoggedIn && widgetAction != null) {
+            widgetTargetRoute = when (widgetAction) {
+                "add_expense" -> "add_transaction/expense"
+                "add_income" -> "add_transaction/income"
+                "ai_chat" -> "ai_assistant"
+                else -> null
+            }
+        }
+    }
+    
+    // 当登录成功后，如果有小组件目标，自动跳转
+    LaunchedEffect(effectiveIsLoggedIn, widgetTargetRoute) {
+        if (effectiveIsLoggedIn && widgetTargetRoute != null) {
+            // 延迟一点确保导航已准备好
+            kotlinx.coroutines.delay(100)
+            navController.navigate(widgetTargetRoute!!) {
+                popUpTo("overview") { inclusive = false }
+            }
+            widgetTargetRoute = null
+        }
+    }
 
     AppNavigation(
         navController = navController,
         startDestination = startDestination,
         appStateManager = appStateManager,
         onSetupComplete = { pin ->
-            // PIN setup completed
-            isPinSet = true
             globalPin = pin
-            // 持久化数据库初始化状态
-            appStateManager.setDatabaseInitialized(true)
-            isDatabaseInitialized = true
+            isLoggedIn = true
+            refreshKey++
         },
         onLoginSuccess = { pin ->
-            // Login successful
             globalPin = pin
-            // 持久化数据库初始化状态
-            appStateManager.setDatabaseInitialized(true)
-            isDatabaseInitialized = true
+            isLoggedIn = true
+            refreshKey++
         },
         onInitialSetupComplete = {
-            // 持久化初始设置完成状态
             appStateManager.setInitialSetupCompleted(true)
-            hasInitialSetup = true
-        }
+            refreshKey++
+        },
+        onThemeChanged = onThemeChanged
     )
 }

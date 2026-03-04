@@ -35,6 +35,7 @@ import java.util.*
 fun TransactionListScreen(
     onNavigateToAddTransaction: () -> Unit,
     onNavigateToExport: () -> Unit,
+    onNavigateToEditTransaction: (Long) -> Unit = {},
     viewModel: TransactionListViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -131,7 +132,8 @@ fun TransactionListScreen(
                     items(transactions) { transaction ->
                         TransactionItem(
                             transaction = transaction,
-                            onClick = { /* TODO: 编辑交易 */ }
+                            categoryName = viewModel.getCategoryName(transaction.categoryId),
+                            onClick = { onNavigateToEditTransaction(transaction.id) }
                         )
                     }
                 }
@@ -324,6 +326,7 @@ fun FilterPanel(
 @Composable
 fun TransactionItem(
     transaction: Transaction,
+    categoryName: String,
     onClick: () -> Unit
 ) {
     Card(
@@ -357,7 +360,7 @@ fun TransactionItem(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "${transaction.categoryId}", // TODO: 显示分类名称
+                        text = categoryName,
                         fontSize = 12.sp,
                         color = Color.Gray
                     )

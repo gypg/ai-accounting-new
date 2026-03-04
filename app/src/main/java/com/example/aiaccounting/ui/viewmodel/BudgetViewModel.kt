@@ -3,151 +3,192 @@ package com.example.aiaccounting.ui.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.aiaccounting.data.local.entity.Budget
-import com.example.aiaccounting.data.local.entity.BudgetPeriod
+import com.example.aiaccounting.data.local.entity.BudgetProgress
 import com.example.aiaccounting.data.repository.BudgetRepository
 import com.example.aiaccounting.data.repository.CategoryRepository
-import com.example.aiaccounting.data.repository.TransactionRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import java.util.Calendar
 import javax.inject.Inject
 
 /**
- * ViewModel for Budget management
+ * 预算ViewModel
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class BudgetViewModel @Inject constructor(
     private val budgetRepository: BudgetRepository,
-    private val categoryRepository: CategoryRepository,
-    private val transactionRepository: TransactionRepository
+    private val categoryRepository: CategoryRepository
 ) : ViewModel() {
 
+    private val calendar = Calendar.getInstance()
+    private val _currentYear = MutableStateFlow(calendar.get(Calendar.YEAR))
+    private val _currentMonth = MutableStateFlow(calendar.get(Calendar.MONTH) + 1)
+
+    val currentYear: StateFlow<Int> = _currentYear.asStateFlow()
+    val currentMonth: StateFlow<Int> = _currentMonth.asStateFlow()
+
+    // 预算列表
+    val budgets: StateFlow<List<BudgetProgress>> = combine(
+        _currentYear,
+        _currentMonth
+    ) { year, month ->
+        budgetRepository.getMonthlyBudgetProgress(year, month)
+    }.flatMapLatest { it }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    // 总预算进度
+    val totalBudget: StateFlow<BudgetProgress?> = combine(
+        _currentYear,
+        _currentMonth
+    ) { year, month ->
+        budgetRepository.getTotalBudgetProgress(year, month)
+    }.flatMapLatest { it }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    // 需要提醒的预算
+    val alertBudgets: StateFlow<List<BudgetProgress>> = combine(
+        _currentYear,
+        _currentMonth
+    ) { year, month ->
+        budgetRepository.getAlertBudgets(year, month)
+    }.flatMapLatest { it }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    // 分类列表（用于创建分类预算）
+    val expenseCategories = categoryRepository.getExpenseCategories()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    // UI状态
     private val _uiState = MutableStateFlow(BudgetUiState())
     val uiState: StateFlow<BudgetUiState> = _uiState.asStateFlow()
 
-    val budgets = budgetRepository.getAllBudgets()
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = emptyList()
-        )
-
-    val budgetsWithDetails = budgetRepository.getAllBudgets()
-        .map { budgetList ->
-            budgetList.map { budget ->
-                val category = categoryRepository.getCategoryById(budget.categoryId)
-                val spent = calculateSpent(budget)
-                BudgetWithDetails(
-                    budget = budget,
-                    categoryName = category?.name ?: "未分类",
-                    spent = spent
-                )
-            }
-        }
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = emptyList()
-        )
-
-    private suspend fun calculateSpent(budget: Budget): Double {
-        // 简化计算，实际应该根据预算周期计算
-        return 0.0
+    /**
+     * 设置当前年月
+     */
+    fun setYearMonth(year: Int, month: Int) {
+        _currentYear.value = year
+        _currentMonth.value = month
     }
 
     /**
-     * Add a new budget
+     * 创建总预算
      */
-    fun addBudget(categoryId: Long, amount: Double, period: BudgetPeriod) {
+    fun createTotalBudget(amount: Double, alertThreshold: Double = 0.8) {
         viewModelScope.launch {
             try {
-                _uiState.update { it.copy(isLoading = true, error = null) }
-                
                 val budget = Budget(
-                    categoryId = categoryId,
+                    name = "${_currentYear.value}年${_currentMonth.value}月总预算",
                     amount = amount,
-                    period = period
+                    categoryId = null,
+                    period = com.example.aiaccounting.data.local.entity.BudgetPeriod.MONTHLY,
+                    year = _currentYear.value,
+                    month = _currentMonth.value,
+                    alertThreshold = alertThreshold
                 )
-                
                 budgetRepository.insertBudget(budget)
-                _uiState.update { it.copy(isLoading = false) }
+                _uiState.value = _uiState.value.copy(
+                    message = "总预算创建成功",
+                    isSuccess = true
+                )
             } catch (e: Exception) {
-                _uiState.update { it.copy(isLoading = false, error = e.message) }
+                _uiState.value = _uiState.value.copy(
+                    message = "创建失败: ${e.message}",
+                    isSuccess = false
+                )
             }
         }
     }
 
     /**
-     * Edit an existing budget
+     * 创建分类预算
      */
-    fun editBudget(budget: Budget) {
+    fun createCategoryBudget(
+        categoryId: Long,
+        categoryName: String,
+        amount: Double,
+        alertThreshold: Double = 0.8
+    ) {
         viewModelScope.launch {
             try {
-                _uiState.update { it.copy(isLoading = true, error = null) }
+                val budget = Budget(
+                    name = "${categoryName}预算",
+                    amount = amount,
+                    categoryId = categoryId,
+                    period = com.example.aiaccounting.data.local.entity.BudgetPeriod.MONTHLY,
+                    year = _currentYear.value,
+                    month = _currentMonth.value,
+                    alertThreshold = alertThreshold
+                )
+                budgetRepository.insertBudget(budget)
+                _uiState.value = _uiState.value.copy(
+                    message = "分类预算创建成功",
+                    isSuccess = true
+                )
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    message = "创建失败: ${e.message}",
+                    isSuccess = false
+                )
+            }
+        }
+    }
+
+    /**
+     * 更新预算
+     */
+    fun updateBudget(budget: Budget) {
+        viewModelScope.launch {
+            try {
                 budgetRepository.updateBudget(budget)
-                _uiState.update { it.copy(isLoading = false) }
+                _uiState.value = _uiState.value.copy(
+                    message = "预算更新成功",
+                    isSuccess = true
+                )
             } catch (e: Exception) {
-                _uiState.update { it.copy(isLoading = false, error = e.message) }
+                _uiState.value = _uiState.value.copy(
+                    message = "更新失败: ${e.message}",
+                    isSuccess = false
+                )
             }
         }
     }
 
     /**
-     * Delete a budget
+     * 删除预算
      */
-    fun deleteBudget(budgetId: Long) {
+    fun deleteBudget(budget: Budget) {
         viewModelScope.launch {
             try {
-                _uiState.update { it.copy(isLoading = true, error = null) }
-                budgetRepository.deleteBudgetById(budgetId)
-                _uiState.update { it.copy(isLoading = false) }
+                budgetRepository.deleteBudget(budget)
+                _uiState.value = _uiState.value.copy(
+                    message = "预算删除成功",
+                    isSuccess = true
+                )
             } catch (e: Exception) {
-                _uiState.update { it.copy(isLoading = false, error = e.message) }
+                _uiState.value = _uiState.value.copy(
+                    message = "删除失败: ${e.message}",
+                    isSuccess = false
+                )
             }
         }
     }
 
     /**
-     * Get budgets in date range
+     * 清除消息
      */
-    fun getBudgetsInRange(startDate: Long, endDate: Long): Flow<List<Budget>> {
-        return budgetRepository.getBudgetsInRange(startDate, endDate)
-    }
-
-    /**
-     * Get budget by category
-     */
-    fun getBudgetByCategory(categoryId: Long): Flow<Budget?> {
-        return budgetRepository.getBudgetByCategory(categoryId)
-    }
-
-    /**
-     * Check if category has budget
-     */
-    fun hasBudgetForCategory(categoryId: Long): Flow<Boolean> {
-        return budgetRepository.hasBudgetForCategory(categoryId)
-    }
-
-    fun clearError() {
-        _uiState.update { it.copy(error = null) }
+    fun clearMessage() {
+        _uiState.value = _uiState.value.copy(message = null)
     }
 }
 
 /**
- * UI State for Budget screen
+ * 预算UI状态
  */
 data class BudgetUiState(
     val isLoading: Boolean = false,
-    val error: String? = null,
-    val showAddDialog: Boolean = false,
-    val editingBudget: Budget? = null
-)
-
-/**
- * Budget with additional details for UI
- */
-data class BudgetWithDetails(
-    val budget: Budget,
-    val categoryName: String,
-    val spent: Double
+    val message: String? = null,
+    val isSuccess: Boolean = false
 )

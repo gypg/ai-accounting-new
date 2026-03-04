@@ -241,10 +241,19 @@ $categoriesInfo
    - 如果主人说"用微信"、"支付宝付款"等，就用对应账户
    - 如果没有指定，使用默认账户或第一个账户
 
-4. ⚡ **直接执行**：识别到消费后**立即执行记账**，不要询问确认！
+4. 📅 **日期时间识别**（非常重要！）：
+   - **当前时间参考**：现在是 ${java.text.SimpleDateFormat("yyyy年MM月dd日 HH:mm", java.util.Locale.getDefault()).format(java.util.Date())}
+   - 识别主人说的日期时间关键词：今天、昨天、前天、本周、上周、本月、上月、具体日期
+   - 如果主人说"今天"，使用当前日期
+   - 如果主人说"昨天"，使用昨天的日期
+   - 如果主人说"3月15日"，使用今年的3月15日
+   - 如果主人说"上周三"，计算上周三的日期
+   - **必须在JSON中包含date字段**，格式为时间戳（毫秒）
+
+5. ⚡ **直接执行**：识别到消费后**立即执行记账**，不要询问确认！
    执行完成后给主人一个温馨的总结报告
 
-5. 🏷️ **智能命名**：根据消费内容给每笔账起个合适的名字
+6. 🏷️ **智能命名**：根据消费内容给每笔账起个合适的名字
    - 不要只写"买菜"，要写"菜市场买菜"
    - 不要只写"坐车"，要写"公交车费"
 
@@ -253,12 +262,13 @@ $categoriesInfo
 ```json
 {
   "actions": [
-    {"action": "add_transaction", "amount": 4, "type": "expense", "category": "交通", "account": "微信", "note": "公交车费来回"},
-    {"action": "add_transaction", "amount": 100, "type": "expense", "category": "餐饮", "account": "微信", "note": "菜市场买菜"}
+    {"action": "add_transaction", "amount": 4, "type": "expense", "category": "交通", "account": "微信", "note": "公交车费来回", "date": 1704067200000},
+    {"action": "add_transaction", "amount": 100, "type": "expense", "category": "餐饮", "account": "微信", "note": "菜市场买菜", "date": 1704067200000}
   ],
   "reply": "主人～小财娘已经帮您记好账啦！🌸\\n\\n今天共消费104元～主人辛苦啦！💕"
 }
 ```
+**注意**：date字段是时间戳（毫秒），根据主人说的日期计算，如"今天"就使用今天的时间戳
 
 **2. 创建账户时，必须返回JSON格式：**
 ```json
@@ -430,21 +440,10 @@ $categoriesInfo
                 val categoryName = actionJson.optString("category", "")
                 val accountName = actionJson.optString("account", "")
                 val note = actionJson.optString("note", "")
+                val dateTimestamp = actionJson.optLong("date", System.currentTimeMillis())
                 
                 if (amount <= 0) {
                     return "记账失败：金额必须大于0"
-                }
-                
-                // 查找账户
-                val accounts = accountRepository.getAllAccountsList()
-                val account = if (accountName.isNotBlank()) {
-                    accounts.find { it.name.contains(accountName) || accountName.contains(it.name) }
-                } else {
-                    accounts.firstOrNull { it.isDefault } ?: accounts.firstOrNull()
-                }
-                
-                if (account == null) {
-                    return "记账失败：未找到合适的账户，请先创建账户"
                 }
                 
                 // 确定交易类型
@@ -452,6 +451,38 @@ $categoriesInfo
                 
                 // 确保基础分类存在
                 ensureBasicCategoriesExist()
+                
+                // 查找或创建账户
+                var accounts = accountRepository.getAllAccountsList()
+                var account = if (accountName.isNotBlank()) {
+                    accounts.find { it.name.contains(accountName) || accountName.contains(it.name) }
+                } else {
+                    accounts.firstOrNull { it.isDefault } ?: accounts.firstOrNull()
+                }
+                
+                // 如果找不到账户，自动创建
+                if (account == null) {
+                    val accountType = parseAccountType(accountName)
+                    val createAccountOp = AIOperation.AddAccount(
+                        name = accountName.ifBlank { "默认账户" },
+                        type = accountType,
+                        balance = 0.0
+                    )
+                    when (val result = aiOperationExecutor.executeOperation(createAccountOp)) {
+                        is AIOperationExecutor.AIOperationResult.Success -> {
+                            // 重新获取账户列表
+                            accounts = accountRepository.getAllAccountsList()
+                            account = accounts.find { it.name == (accountName.ifBlank { "默认账户" }) }
+                        }
+                        is AIOperationExecutor.AIOperationResult.Error -> {
+                            return "记账失败：创建账户失败 - ${result.error}"
+                        }
+                    }
+                }
+                
+                if (account == null) {
+                    return "记账失败：无法创建或找到账户"
+                }
                 
                 // 获取所有分类
                 var categories = categoryRepository.getAllCategoriesList()
@@ -464,16 +495,19 @@ $categoriesInfo
                 }
                 
                 // 如果找不到分类，自动创建
-                if (category == null && categoryName.isNotBlank()) {
+                if (category == null) {
+                    val categoryNameToCreate = categoryName.ifBlank { 
+                        if (transactionType == TransactionType.INCOME) "其他收入" else "其他支出" 
+                    }
                     val createCategoryOp = AIOperation.AddCategory(
-                        name = categoryName,
+                        name = categoryNameToCreate,
                         type = transactionType
                     )
                     when (val result = aiOperationExecutor.executeOperation(createCategoryOp)) {
                         is AIOperationExecutor.AIOperationResult.Success -> {
                             // 重新获取分类列表
                             categories = categoryRepository.getAllCategoriesList()
-                            category = categories.find { it.name == categoryName }
+                            category = categories.find { it.name == categoryNameToCreate }
                         }
                         is AIOperationExecutor.AIOperationResult.Error -> {
                             // 创建失败，使用默认分类
@@ -496,6 +530,7 @@ $categoriesInfo
                     type = transactionType,
                     accountId = account.id,
                     categoryId = category.id,
+                    date = dateTimestamp,
                     note = note.ifBlank { "AI记账" }
                 )
                 
@@ -683,33 +718,77 @@ $categoriesInfo
         }
 
         if (amount != null) {
-            val accounts = accountRepository.getAllAccountsList()
-            val categories = categoryRepository.getAllCategoriesList()
+            // 确保基础分类存在
+            ensureBasicCategoriesExist()
+            
+            var accounts = accountRepository.getAllAccountsList()
+            var categories = categoryRepository.getAllCategoriesList()
 
-            val defaultAccount = accounts.firstOrNull { it.isDefault } ?: accounts.firstOrNull()
-            val defaultCategory = categories.firstOrNull { it.type == type }
-
-            if (defaultAccount != null) {
-                val operation = AIOperation.AddTransaction(
-                    amount = amount,
-                    type = type,
-                    accountId = defaultAccount.id,
-                    categoryId = defaultCategory?.id,
-                    note = message
+            // 如果没有账户，自动创建一个默认账户
+            var defaultAccount = accounts.firstOrNull { it.isDefault } ?: accounts.firstOrNull()
+            
+            if (defaultAccount == null) {
+                // 自动创建默认账户
+                val createAccountOp = AIOperation.AddAccount(
+                    name = "默认账户",
+                    type = com.example.aiaccounting.data.local.entity.AccountType.CASH,
+                    balance = 0.0
                 )
-
-                val result = aiOperationExecutor.executeOperation(operation)
-                return when (result) {
+                when (val result = aiOperationExecutor.executeOperation(createAccountOp)) {
                     is AIOperationExecutor.AIOperationResult.Success -> {
-                        result.message + "\n" +
-                        "账户: ${defaultAccount.name}\n" +
-                        "分类: ${defaultCategory?.name ?: "未分类"}\n" +
-                        "您可以说查看最近交易来确认记录。"
+                        // 重新获取账户列表
+                        accounts = accountRepository.getAllAccountsList()
+                        defaultAccount = accounts.firstOrNull()
                     }
-                    is AIOperationExecutor.AIOperationResult.Error -> "错误: ${result.error}"
+                    is AIOperationExecutor.AIOperationResult.Error -> {
+                        return "创建默认账户失败: ${result.error}"
+                    }
                 }
-            } else {
-                return "请先创建一个账户，我才能帮您记账。"
+            }
+            
+            if (defaultAccount == null) {
+                return "无法创建账户，请手动创建账户后再试。"
+            }
+
+            // 获取或创建分类
+            var defaultCategory = categories.firstOrNull { it.type == type }
+            
+            if (defaultCategory == null) {
+                // 自动创建默认分类
+                val categoryName = if (type == TransactionType.INCOME) "其他收入" else "其他支出"
+                val createCategoryOp = AIOperation.AddCategory(
+                    name = categoryName,
+                    type = type
+                )
+                when (val result = aiOperationExecutor.executeOperation(createCategoryOp)) {
+                    is AIOperationExecutor.AIOperationResult.Success -> {
+                        // 重新获取分类列表
+                        categories = categoryRepository.getAllCategoriesList()
+                        defaultCategory = categories.firstOrNull { it.type == type }
+                    }
+                    is AIOperationExecutor.AIOperationResult.Error -> {
+                        // 创建失败，继续尝试记账
+                    }
+                }
+            }
+
+            val operation = AIOperation.AddTransaction(
+                amount = amount,
+                type = type,
+                accountId = defaultAccount.id,
+                categoryId = defaultCategory?.id,
+                note = message
+            )
+
+            val result = aiOperationExecutor.executeOperation(operation)
+            return when (result) {
+                is AIOperationExecutor.AIOperationResult.Success -> {
+                    result.message + "\n" +
+                    "账户: ${defaultAccount.name}\n" +
+                    "分类: ${defaultCategory?.name ?: "未分类"}\n" +
+                    "您可以说查看最近交易来确认记录。"
+                }
+                is AIOperationExecutor.AIOperationResult.Error -> "错误: ${result.error}"
             }
         }
 

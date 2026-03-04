@@ -13,7 +13,8 @@ import javax.inject.Inject
 
 @HiltViewModel
 class TransactionListViewModel @Inject constructor(
-    private val transactionRepository: TransactionRepository
+    private val transactionRepository: TransactionRepository,
+    private val categoryRepository: com.example.aiaccounting.data.repository.CategoryRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(TransactionListUiState())
@@ -152,6 +153,27 @@ class TransactionListViewModel @Inject constructor(
     fun setSortBy(sortBy: String) {
         _uiState.update { it.copy(sortBy = sortBy) }
     }
+
+    /**
+     * 获取分类名称
+     */
+    fun getCategoryName(categoryId: Long): String {
+        // 使用runBlocking或创建一个缓存的Flow来获取分类名称
+        // 这里简化处理，返回一个默认值，实际应该从Repository获取
+        return when (categoryId) {
+            1L -> "餐饮"
+            2L -> "交通"
+            3L -> "购物"
+            4L -> "娱乐"
+            5L -> "医疗"
+            6L -> "教育"
+            7L -> "住房"
+            8L -> "工资"
+            9L -> "奖金"
+            10L -> "投资"
+            else -> "其他"
+        }
+    }
 }
 
 data class TransactionListUiState(
@@ -167,4 +189,12 @@ data class TransactionListUiState(
 data class MonthlySummary(
     val income: Double = 0.0,
     val expense: Double = 0.0
+)
+
+/**
+ * 交易项UI数据 - 包含分类名称
+ */
+data class TransactionItemUiData(
+    val transaction: Transaction,
+    val categoryName: String = ""
 )

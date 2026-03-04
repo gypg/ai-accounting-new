@@ -2,7 +2,7 @@ package com.example.aiaccounting.ui.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.aiaccounting.data.exporter.ExcelExporter
+import com.example.aiaccounting.data.exporter.CsvExporter
 import com.example.aiaccounting.data.local.entity.Transaction
 import com.example.aiaccounting.data.local.entity.TransactionType
 import com.example.aiaccounting.data.repository.TransactionRepository
@@ -19,7 +19,7 @@ import javax.inject.Inject
 @HiltViewModel
 class ExportViewModel @Inject constructor(
     private val transactionRepository: TransactionRepository,
-    private val excelExporter: ExcelExporter
+    private val csvExporter: CsvExporter
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ExportUiState())
@@ -69,9 +69,9 @@ class ExportViewModel @Inject constructor(
                     return@launch
                 }
 
-                val result = excelExporter.exportTransactions(
+                val result = csvExporter.exportTransactions(
                     transactions = allTransactions,
-                    fileName = "all_transactions_${System.currentTimeMillis()}.xlsx"
+                    fileName = "all_transactions_${System.currentTimeMillis()}.csv"
                 )
 
                 _uiState.update { it.copy(isExporting = false) }
@@ -124,13 +124,13 @@ class ExportViewModel @Inject constructor(
                 val totalIncome = transactionRepository.getTotalIncome(monthStart, monthEnd)
                 val totalExpense = transactionRepository.getTotalExpense(monthStart, monthEnd)
 
-                val result = excelExporter.exportMonthlySummary(
+                val result = csvExporter.exportMonthlySummary(
                     year = year,
                     month = month,
                     transactions = monthTransactions,
                     totalIncome = totalIncome,
                     totalExpense = totalExpense,
-                    fileName = "monthly_summary_${year}_${month}.xlsx"
+                    fileName = "monthly_summary_${year}_${month}.csv"
                 )
 
                 _uiState.update { it.copy(isExporting = false) }
@@ -162,9 +162,9 @@ class ExportViewModel @Inject constructor(
                 val totalIncome = transactionRepository.getTotalIncome(startDate, endDate)
                 val totalExpense = transactionRepository.getTotalExpense(startDate, endDate)
 
-                val result = excelExporter.exportTransactions(
+                val result = csvExporter.exportTransactions(
                     transactions = rangeTransactions,
-                    fileName = "transactions_${startDate}_${endDate}.xlsx"
+                    fileName = "transactions_${startDate}_${endDate}.csv"
                 )
 
                 _uiState.update { it.copy(isExporting = false) }
@@ -193,9 +193,9 @@ class ExportViewModel @Inject constructor(
                     return@launch
                 }
 
-                val result = excelExporter.exportTransactions(
+                val result = csvExporter.exportTransactions(
                     transactions = typeTransactions,
-                    fileName = "${type.name}_transactions_${System.currentTimeMillis()}.xlsx"
+                    fileName = "${type.name}_transactions_${System.currentTimeMillis()}.csv"
                 )
 
                 _uiState.update { it.copy(isExporting = false) }

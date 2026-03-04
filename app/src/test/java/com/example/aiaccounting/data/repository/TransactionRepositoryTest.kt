@@ -1,5 +1,6 @@
 package com.example.aiaccounting.data.repository
 
+import android.content.Context
 import com.example.aiaccounting.data.local.dao.TransactionDao
 import com.example.aiaccounting.data.local.entity.Transaction
 import com.example.aiaccounting.data.local.entity.TransactionType
@@ -10,6 +11,7 @@ import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.impl.annotations.MockK
 import io.mockk.just
+import io.mockk.mockk
 import io.mockk.verify
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
@@ -25,11 +27,13 @@ class TransactionRepositoryTest {
     private lateinit var transactionDao: TransactionDao
 
     private lateinit var repository: TransactionRepository
+    private lateinit var context: Context
 
     @Before
     fun setup() {
         MockKAnnotations.init(this)
-        repository = TransactionRepository(transactionDao)
+        context = mockk(relaxed = true)
+        repository = TransactionRepository(transactionDao, context)
     }
 
     @Test

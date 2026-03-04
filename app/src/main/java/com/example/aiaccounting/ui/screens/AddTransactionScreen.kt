@@ -110,15 +110,23 @@ fun AddTransactionScreen(
             Spacer(modifier = Modifier.height(24.dp))
 
             // 保存按钮
+            val canSave = amount.isNotBlank() && 
+                         amount.toDoubleOrNull() != null && 
+                         amount.toDoubleOrNull()!! > 0 && 
+                         selectedAccount != null && 
+                         selectedCategory != null
+            
             Button(
                 onClick = {
                     val amountValue = amount.toDoubleOrNull() ?: 0.0
-                    if (amountValue > 0 && selectedAccount != null && selectedCategory != null) {
+                    val account = selectedAccount
+                    val category = selectedCategory
+                    if (amountValue > 0 && account != null && category != null) {
                         viewModel.addTransaction(
                             amount = amountValue,
                             type = selectedType,
-                            accountId = selectedAccount!!.id,
-                            categoryId = selectedCategory!!.id,
+                            accountId = account.id,
+                            categoryId = category.id,
                             date = date,
                             note = note
                         )
@@ -128,7 +136,7 @@ fun AddTransactionScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp),
-                enabled = amount.isNotEmpty() && selectedAccount != null && selectedCategory != null
+                enabled = canSave
             ) {
                 Text("保存")
             }

@@ -1,117 +1,182 @@
 package com.example.aiaccounting.data.repository
 
 import com.example.aiaccounting.data.local.dao.BudgetDao
+import com.example.aiaccounting.data.local.dao.TransactionDao
 import com.example.aiaccounting.data.local.entity.Budget
 import com.example.aiaccounting.data.local.entity.BudgetPeriod
+import com.example.aiaccounting.data.local.entity.BudgetProgress
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import java.util.Calendar
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Repository for Budget data
+ * 预算仓库
  */
 @Singleton
 class BudgetRepository @Inject constructor(
-    private val budgetDao: BudgetDao
+    private val budgetDao: BudgetDao,
+    private val transactionDao: TransactionDao
 ) {
+    // ==================== 基础CRUD ====================
+
+    fun getAllActiveBudgets(): Flow<List<Budget>> = budgetDao.getAllActiveBudgets()
+
+    fun getAllBudgets(): Flow<List<Budget>> = budgetDao.getAllBudgets()
+
+    suspend fun getBudgetById(budgetId: Long): Budget? = budgetDao.getBudgetById(budgetId)
+
+    suspend fun insertBudget(budget: Budget): Long = budgetDao.insertBudget(budget)
+
+    suspend fun updateBudget(budget: Budget) = budgetDao.updateBudget(budget)
+
+    suspend fun deleteBudget(budget: Budget) = budgetDao.deleteBudget(budget)
+
+    suspend fun deleteBudgetById(budgetId: Long) = budgetDao.deleteBudgetById(budgetId)
+
+    // ==================== 预算进度查询 ====================
 
     /**
-     * Get all active budgets
+     * 获取月度预算进度（包含总预算和分类预算）
      */
-    fun getAllActiveBudgets(): Flow<List<Budget>> {
-        return budgetDao.getAllActiveBudgets()
+    fun getMonthlyBudgetProgress(year: Int, month: Int): Flow<List<BudgetProgress>> {
+        return budgetDao.getBudgetsForMonth(year, month).map { budgets ->
+            budgets.map { budget ->
+                val spent = calculateSpentAmount(budget, year, month)
+                BudgetProgress.calculate(budget, spent)
+            }
+        }
     }
 
     /**
-     * Get budget by ID
+     * 获取总预算进度
      */
-    suspend fun getBudgetById(budgetId: Long): Budget? {
-        return budgetDao.getBudgetById(budgetId)
+    fun getTotalBudgetProgress(year: Int, month: Int): Flow<BudgetProgress?> {
+        return budgetDao.getTotalBudget(year, month).map { budget ->
+            budget?.let {
+                val spent = calculateTotalSpent(year, month)
+                BudgetProgress.calculate(it, spent)
+            }
+        }
     }
 
     /**
-     * Get budgets by category
+     * 获取分类预算进度
      */
-    fun getBudgetsByCategory(categoryId: Long): Flow<List<Budget>> {
-        return budgetDao.getBudgetsByCategory(categoryId)
+    fun getCategoryBudgetProgress(categoryId: Long, year: Int, month: Int): Flow<BudgetProgress?> {
+        return budgetDao.getCategoryBudget(categoryId, year, month).map { budget ->
+            budget?.let {
+                val spent = calculateCategorySpent(categoryId, year, month)
+                BudgetProgress.calculate(it, spent)
+            }
+        }
     }
 
     /**
-     * Get current budget for category
+     * 获取需要提醒的预算（超过阈值或超支）
      */
-    suspend fun getCurrentBudgetForCategory(categoryId: Long): Budget? {
-        val currentDate = System.currentTimeMillis()
-        return budgetDao.getCurrentBudgetForCategory(categoryId, currentDate)
+    fun getAlertBudgets(year: Int, month: Int): Flow<List<BudgetProgress>> {
+        return getMonthlyBudgetProgress(year, month).map { progresses ->
+            progresses.filter { it.shouldAlert }
+        }
+    }
+
+    // ==================== 计算支出金额 ====================
+
+    /**
+     * 计算预算的已支出金额
+     */
+    private suspend fun calculateSpentAmount(budget: Budget, year: Int, month: Int): Double {
+        return if (budget.categoryId == null) {
+            // 总预算 - 计算所有支出
+            calculateTotalSpent(year, month)
+        } else {
+            // 分类预算 - 计算特定分类支出
+            calculateCategorySpent(budget.categoryId, year, month)
+        }
     }
 
     /**
-     * Insert new budget
+     * 计算总支出
      */
-    suspend fun insertBudget(budget: Budget): Long {
+    private suspend fun calculateTotalSpent(year: Int, month: Int): Double {
+        val calendar = Calendar.getInstance()
+        calendar.set(year, month - 1, 1, 0, 0, 0)
+        val startDate = calendar.timeInMillis
+
+        calendar.set(year, month - 1, calendar.getActualMaximum(Calendar.DAY_OF_MONTH), 23, 59, 59)
+        val endDate = calendar.timeInMillis
+
+        return transactionDao.getTransactionsByDateRange(startDate, endDate)
+            .first()
+            .filter { it.type.name.lowercase() == "expense" }
+            .sumOf { it.amount }
+    }
+
+    /**
+     * 计算分类支出
+     */
+    private suspend fun calculateCategorySpent(categoryId: Long, year: Int, month: Int): Double {
+        val calendar = Calendar.getInstance()
+        calendar.set(year, month - 1, 1, 0, 0, 0)
+        val startDate = calendar.timeInMillis
+
+        calendar.set(year, month - 1, calendar.getActualMaximum(Calendar.DAY_OF_MONTH), 23, 59, 59)
+        val endDate = calendar.timeInMillis
+
+        return transactionDao.getTransactionsByDateRange(startDate, endDate)
+            .first()
+            .filter { it.type.name.lowercase() == "expense" && it.categoryId == categoryId }
+            .sumOf { it.amount }
+    }
+
+    // ==================== 默认预算设置 ====================
+
+    /**
+     * 创建默认月度总预算
+     */
+    suspend fun createDefaultMonthlyBudget(amount: Double, year: Int, month: Int): Long {
+        val budget = Budget(
+            name = "${year}年${month}月总预算",
+            amount = amount,
+            categoryId = null,
+            period = BudgetPeriod.MONTHLY,
+            year = year,
+            month = month,
+            alertThreshold = 0.8
+        )
         return budgetDao.insertBudget(budget)
     }
 
     /**
-     * Update budget
+     * 创建分类预算
      */
-    suspend fun updateBudget(budget: Budget) {
-        budgetDao.updateBudget(budget.copy(updatedAt = System.currentTimeMillis()))
+    suspend fun createCategoryBudget(
+        name: String,
+        amount: Double,
+        categoryId: Long,
+        year: Int,
+        month: Int
+    ): Long {
+        val budget = Budget(
+            name = name,
+            amount = amount,
+            categoryId = categoryId,
+            period = BudgetPeriod.MONTHLY,
+            year = year,
+            month = month,
+            alertThreshold = 0.8
+        )
+        return budgetDao.insertBudget(budget)
     }
 
-    /**
-     * Delete budget
-     */
-    suspend fun deleteBudget(budget: Budget) {
-        budgetDao.deleteBudget(budget)
-    }
+    // ==================== 统计 ====================
 
-    /**
-     * Delete budget by ID
-     */
-    suspend fun deleteBudgetById(budgetId: Long) {
-        budgetDao.deleteBudgetById(budgetId)
-    }
+    suspend fun getActiveBudgetCount(): Int = budgetDao.getActiveBudgetCount()
 
-    /**
-     * Deactivate budget
-     */
-    suspend fun deactivateBudget(budgetId: Long) {
-        budgetDao.deactivateBudget(budgetId)
-    }
-
-    /**
-     * Get budgets in date range
-     */
-    fun getBudgetsInRange(startDate: Long, endDate: Long): Flow<List<Budget>> {
-        return budgetDao.getBudgetsWithSpent(startDate, endDate)
-    }
-
-    /**
-     * Get active budget count
-     */
-    suspend fun getActiveBudgetCount(): Int {
-        return budgetDao.getActiveBudgetCount()
-    }
-
-    /**
-     * Get all budgets
-     */
-    fun getAllBudgets(): Flow<List<Budget>> {
-        return budgetDao.getAllBudgets()
-    }
-
-    /**
-     * Get budget by category
-     */
-    fun getBudgetByCategory(categoryId: Long): Flow<Budget?> {
-        return budgetDao.getBudgetByCategory(categoryId)
-    }
-
-    /**
-     * Check if category has budget
-     */
-    fun hasBudgetForCategory(categoryId: Long): Flow<Boolean> {
-        return budgetDao.hasBudgetForCategory(categoryId)
+    suspend fun hasBudgetForMonth(year: Int, month: Int): Boolean {
+        return budgetDao.getBudgetsForMonth(year, month).first().isNotEmpty()
     }
 }

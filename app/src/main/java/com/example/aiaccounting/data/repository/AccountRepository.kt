@@ -58,6 +58,19 @@ class AccountRepository @Inject constructor(
     }
 
     /**
+     * Find account by name (case-insensitive, partial match)
+     */
+    suspend fun findAccountByName(name: String): Account? {
+        val accounts = getAllAccountsList()
+        val lowerName = name.lowercase()
+        return accounts.find { account ->
+            account.name.lowercase() == lowerName ||
+            account.name.lowercase().contains(lowerName) ||
+            lowerName.contains(account.name.lowercase())
+        }
+    }
+
+    /**
      * Insert new account
      */
     suspend fun insertAccount(account: Account): Long {

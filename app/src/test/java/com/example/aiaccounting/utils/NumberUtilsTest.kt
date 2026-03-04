@@ -32,13 +32,13 @@ class NumberUtilsTest {
     @Test
     fun `test parse money with symbol`() {
         val result = NumberUtils.parseMoney("¥1,234.56")
-        assertEquals(1234.56, result, 0.01)
+        assertEquals(1234.56, result ?: 0.0, 0.01)
     }
 
     @Test
     fun `test parse money with spaces`() {
         val result = NumberUtils.parseMoney("¥ 1 234.56")
-        assertEquals(1234.56, result, 0.01)
+        assertEquals(1234.56, result ?: 0.0, 0.01)
     }
 
     @Test
@@ -52,6 +52,6 @@ class NumberUtilsTest {
         val original = 1234.56
         val formatted = NumberUtils.formatMoney(original)
         val parsed = NumberUtils.parseMoney(formatted)
-        assertEquals(original, parsed, 0.01)
+        assertEquals(original, parsed ?: 0.0, 0.01)
     }
 }

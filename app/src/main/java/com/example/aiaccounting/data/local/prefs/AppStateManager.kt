@@ -25,6 +25,7 @@ class AppStateManager @Inject constructor(
         private const val KEY_CURRENCY = "currency"
         private const val KEY_LANGUAGE = "language"
         private const val KEY_THEME = "theme"
+        private const val KEY_IS_LOGGED_IN = "is_logged_in"
 
         // AI 模型类型
         const val AI_MODEL_DEFAULT = "default"
@@ -125,9 +126,29 @@ class AppStateManager @Inject constructor(
         prefs.edit().putString(KEY_THEME, theme).apply()
     }
 
+    // ==================== 登录状态 ====================
+
+    fun isLoggedIn(): Boolean {
+        return prefs.getBoolean(KEY_IS_LOGGED_IN, false)
+    }
+
+    fun setLoggedIn(loggedIn: Boolean) {
+        prefs.edit().putBoolean(KEY_IS_LOGGED_IN, loggedIn).apply()
+    }
+
     // ==================== 清除所有状态 ====================
 
     fun clearAll() {
         prefs.edit().clear().apply()
+    }
+
+    /**
+     * 清除所有数据（用于忘记密码重置）
+     */
+    fun clearAllData() {
+        // 清除所有SharedPreferences
+        prefs.edit().clear().apply()
+        // 清除数据库
+        context.deleteDatabase("ai_accounting_db")
     }
 }

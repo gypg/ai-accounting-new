@@ -86,8 +86,9 @@ fun ExportScreen(
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "• 导出文件为Excel格式(.xlsx)\n" +
-                               "• 文件保存在手机存储的Download目录\n" +
+                        text = "• 导出文件为CSV格式(.csv)\n" +
+                               "• 文件保存在应用专属目录\n" +
+                               "• 可用Excel或WPS打开查看\n" +
                                "• 包含交易明细、收支汇总等信息",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant

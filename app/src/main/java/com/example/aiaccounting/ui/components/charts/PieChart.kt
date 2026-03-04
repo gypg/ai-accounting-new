@@ -46,6 +46,7 @@ fun PieChart(
     }
 
     val animationProgress = remember { Animatable(0f) }
+    val surfaceColor = MaterialTheme.colorScheme.surface
 
     LaunchedEffect(data) {
         animationProgress.snapTo(0f)
@@ -110,7 +111,7 @@ fun PieChart(
                 // 绘制中心空心圆（甜甜圈效果）
                 if (holeRadius > 0) {
                     drawCircle(
-                        color = Color.White,
+                        color = surfaceColor,
                         radius = radius * holeRadius,
                         center = Offset(centerX, centerY)
                     )

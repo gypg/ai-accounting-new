@@ -61,6 +61,14 @@
 # Keep Apache POI
 -keep class org.apache.poi.** { *; }
 -dontwarn org.apache.poi.**
+-dontwarn org.apache.xmlbeans.**
+-dontwarn org.apache.logging.log4j.**
+-dontwarn com.graphbuilder.curve.**
+-dontwarn aQute.bnd.annotation.spi.**
+-dontwarn java.awt.**
+-dontwarn javax.xml.stream.**
+-dontwarn net.sf.saxon.**
+-dontwarn org.osgi.framework.**
 
 # Keep MPAndroidChart
 -keep class com.github.mikephil.charting.** { *; }

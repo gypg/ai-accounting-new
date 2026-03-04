@@ -1,8 +1,11 @@
 package com.example.aiaccounting.data.repository
 
+import android.content.Context
 import com.example.aiaccounting.data.local.dao.TransactionDao
 import com.example.aiaccounting.data.local.entity.Transaction
 import com.example.aiaccounting.data.local.entity.TransactionType
+import com.example.aiaccounting.widget.WidgetDataSyncHelper
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import java.util.Calendar
@@ -14,7 +17,8 @@ import javax.inject.Singleton
  */
 @Singleton
 class TransactionRepository @Inject constructor(
-    private val transactionDao: TransactionDao
+    private val transactionDao: TransactionDao,
+    @ApplicationContext private val context: Context
 ) {
 
     /**
@@ -106,7 +110,10 @@ class TransactionRepository @Inject constructor(
      * Insert new transaction
      */
     suspend fun insertTransaction(transaction: Transaction): Long {
-        return transactionDao.insertTransaction(transaction)
+        val id = transactionDao.insertTransaction(transaction)
+        // 更新小组件数据
+        WidgetDataSyncHelper.onTransactionInserted(context, transaction)
+        return id
     }
 
     /**
@@ -128,6 +135,8 @@ class TransactionRepository @Inject constructor(
      */
     suspend fun deleteTransaction(transaction: Transaction) {
         transactionDao.deleteTransaction(transaction)
+        // 更新小组件数据
+        WidgetDataSyncHelper.onTransactionDeleted(context, transaction)
     }
 
     /**

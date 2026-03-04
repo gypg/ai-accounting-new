@@ -1,5 +1,6 @@
 package com.example.aiaccounting.data.local.dao
 
+import androidx.paging.PagingSource
 import androidx.room.*
 import com.example.aiaccounting.data.local.entity.Transaction
 import kotlinx.coroutines.flow.Flow
@@ -122,4 +123,28 @@ interface TransactionDao {
 
     @Query("SELECT MAX(date) FROM transactions")
     suspend fun getLastTransactionDate(): Long?
+
+    // Paging3 support
+    @Query("SELECT * FROM transactions ORDER BY date DESC, createdAt DESC")
+    fun getTransactionsPagingSource(): PagingSource<Int, Transaction>
+
+    @Query("SELECT * FROM transactions WHERE accountId = :accountId ORDER BY date DESC, createdAt DESC")
+    fun getTransactionsByAccountPagingSource(accountId: Long): PagingSource<Int, Transaction>
+
+    @Query("SELECT * FROM transactions WHERE categoryId = :categoryId ORDER BY date DESC, createdAt DESC")
+    fun getTransactionsByCategoryPagingSource(categoryId: Long): PagingSource<Int, Transaction>
+
+    @Query("""
+        SELECT * FROM transactions 
+        WHERE date >= :startDate AND date <= :endDate 
+        ORDER BY date DESC, createdAt DESC
+    """)
+    fun getTransactionsByDateRangePagingSource(startDate: Long, endDate: Long): PagingSource<Int, Transaction>
+
+    @Query("""
+        SELECT * FROM transactions 
+        WHERE note LIKE '%' || :query || '%' OR tags LIKE '%' || :query || '%'
+        ORDER BY date DESC, createdAt DESC
+    """)
+    fun searchTransactionsPagingSource(query: String): PagingSource<Int, Transaction>
 }

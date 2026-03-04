@@ -4,6 +4,7 @@ import com.example.aiaccounting.data.local.entity.*
 import com.example.aiaccounting.data.repository.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.util.Locale
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -57,24 +58,41 @@ class AIOperationExecutor @Inject constructor(
      * 添加交易记录并更新账户余额
      */
     private suspend fun addTransaction(op: AIOperation.AddTransaction): AIOperationResult {
-        // 先更新账户余额
-        val account = accountRepository.getAccountById(op.accountId ?: 0)
-        if (account != null) {
-            val newBalance = when (op.type) {
-                TransactionType.INCOME -> account.balance + op.amount
-                TransactionType.EXPENSE -> account.balance - op.amount
-                TransactionType.TRANSFER -> account.balance // 转账需要特殊处理
-            }
-            val updatedAccount = account.copy(balance = newBalance)
-            accountRepository.updateAccount(updatedAccount)
+        // 验证账户ID
+        val accountId = op.accountId ?: 0
+        if (accountId <= 0) {
+            return AIOperationResult.Error("无效的账户ID，请先创建账户")
         }
+        
+        // 验证分类ID
+        val categoryId = op.categoryId ?: 0
+        if (categoryId <= 0) {
+            return AIOperationResult.Error("无效的分类ID")
+        }
+        
+        // 检查账户是否存在
+        val account = accountRepository.getAccountById(accountId)
+            ?: return AIOperationResult.Error("账户不存在，请先创建账户")
+        
+        // 检查分类是否存在
+        val category = categoryRepository.getCategoryById(categoryId)
+            ?: return AIOperationResult.Error("分类不存在")
+        
+        // 先更新账户余额
+        val newBalance = when (op.type) {
+            TransactionType.INCOME -> account.balance + op.amount
+            TransactionType.EXPENSE -> account.balance - op.amount
+            TransactionType.TRANSFER -> account.balance // 转账需要特殊处理
+        }
+        val updatedAccount = account.copy(balance = newBalance)
+        accountRepository.updateAccount(updatedAccount)
         
         // 插入交易记录
         val transaction = Transaction(
             amount = op.amount,
             type = op.type,
-            categoryId = op.categoryId ?: 0,
-            accountId = op.accountId ?: 0,
+            categoryId = categoryId,
+            accountId = accountId,
             date = op.date,
             note = op.note ?: ""
         )
@@ -148,6 +166,17 @@ class AIOperationExecutor @Inject constructor(
     }
     
     private suspend fun addAccount(op: AIOperation.AddAccount): AIOperationResult {
+        // 检查是否已存在同名账户
+        val existingAccount = accountRepository.findAccountByName(op.name)
+        if (existingAccount != null) {
+            // 如果账户已存在，更新余额
+            val updated = existingAccount.copy(
+                balance = existingAccount.balance + op.balance
+            )
+            accountRepository.updateAccount(updated)
+            return AIOperationResult.Success("账户 ${op.name} 已存在，已更新余额为 ${updated.balance}")
+        }
+        
         val account = Account(
             name = op.name,
             type = op.type,
@@ -364,12 +393,14 @@ class AIOperationExecutor @Inject constructor(
     }
     
     private suspend fun addBudget(op: AIOperation.AddBudget): AIOperationResult {
+        val calendar = java.util.Calendar.getInstance()
         val budget = Budget(
-            categoryId = op.categoryId,
+            name = op.categoryId?.let { "分类预算" } ?: "月度总预算",
             amount = op.amount,
+            categoryId = op.categoryId,
             period = op.period,
-            startDate = op.startDate,
-            endDate = op.endDate
+            year = calendar.get(java.util.Calendar.YEAR),
+            month = calendar.get(java.util.Calendar.MONTH) + 1
         )
         budgetRepository.insertBudget(budget)
         return AIOperationResult.Success("已添加预算: ${op.amount}元")

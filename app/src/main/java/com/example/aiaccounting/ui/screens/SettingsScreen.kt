@@ -35,10 +35,16 @@ fun SettingsScreen(
     onNavigateToTemplates: () -> Unit = {},
     onNavigateToImport: () -> Unit = {},
     onNavigateToAISettings: () -> Unit = {},
+    onNavigateToBudgets: () -> Unit = {},
+    onLogout: () -> Unit = {},
+    onThemeChanged: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     var showAboutDialog by remember { mutableStateOf(false) }
     var showNoticeDialog by remember { mutableStateOf(false) }
+    var showLogoutConfirmDialog by remember { mutableStateOf(false) }
+    var showThemeDialog by remember { mutableStateOf(false) }
+    val currentTheme = appStateManager.getTheme()
 
     Scaffold(
         topBar = {
@@ -151,8 +157,102 @@ fun SettingsScreen(
                     modifier = Modifier.weight(1f),
                     iconBackgroundColor = Color(0xFFFFF8E1)
                 )
-                // 占位
-                Spacer(modifier = Modifier.weight(1f))
+                SettingsGridItem(
+                    icon = Icons.Default.AccountBalanceWallet,
+                    title = "预算管理",
+                    subtitle = "设置月度预算",
+                    onClick = onNavigateToBudgets,
+                    modifier = Modifier.weight(1f),
+                    iconBackgroundColor = Color(0xFFE3F2FD)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // 安全设置区域
+            SettingsSectionTitle("安全")
+
+            val uiState by viewModel.uiState.collectAsState()
+            var showBiometricDialog by remember { mutableStateOf(false) }
+
+            // 生物识别开关
+            SettingsListItem(
+                icon = Icons.Default.Fingerprint,
+                title = "生物识别解锁",
+                subtitle = if (uiState.isBiometricEnabled) "已开启" else "已关闭",
+                onClick = {
+                    showBiometricDialog = true
+                }
+            )
+
+            // 生物识别设置对话框
+            if (showBiometricDialog) {
+                AlertDialog(
+                    onDismissRequest = { showBiometricDialog = false },
+                    title = { Text("生物识别解锁") },
+                    text = {
+                        Column {
+                            Text("使用指纹或面部识别快速解锁应用")
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("启用生物识别")
+                                Switch(
+                                    checked = uiState.isBiometricEnabled,
+                                    onCheckedChange = { enabled ->
+                                        viewModel.toggleBiometric(enabled)
+                                    }
+                                )
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(onClick = { showBiometricDialog = false }) {
+                            Text("确定")
+                        }
+                    }
+                )
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // 外观设置区域
+            SettingsSectionTitle("外观")
+
+            // 主题设置
+            val themeText = when (currentTheme) {
+                "light" -> "浅色"
+                "dark" -> "深色"
+                "amoled" -> "AMOLED纯黑"
+                "dynamic" -> "Material You动态"
+                else -> "跟随系统"
+            }
+
+            SettingsListItem(
+                icon = Icons.Default.Palette,
+                title = "主题",
+                subtitle = themeText,
+                onClick = { showThemeDialog = true }
+            )
+
+            // Material You动态主题开关（仅Android 12+）
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                var dynamicThemeEnabled by remember { mutableStateOf(currentTheme == "dynamic") }
+                
+                SettingsListItem(
+                    icon = Icons.Default.ColorLens,
+                    title = "Material You动态主题",
+                    subtitle = "跟随系统主题色自动调整",
+                    onClick = {
+                        dynamicThemeEnabled = !dynamicThemeEnabled
+                        val newTheme = if (dynamicThemeEnabled) "dynamic" else "system"
+                        appStateManager.setTheme(newTheme)
+                        onThemeChanged()
+                    }
+                )
             }
 
             Spacer(modifier = Modifier.height(24.dp))
@@ -202,7 +302,7 @@ fun SettingsScreen(
                 
                 // 退出登录按钮
                 OutlinedButton(
-                    onClick = { /* TODO: 退出登录 */ },
+                    onClick = { showLogoutConfirmDialog = true },
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(8.dp),
                     colors = ButtonDefaults.outlinedButtonColors(
@@ -270,6 +370,91 @@ fun SettingsScreen(
             }
         )
     }
+
+    // 退出登录确认对话框
+    if (showLogoutConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showLogoutConfirmDialog = false },
+            title = { Text("确认退出") },
+            text = { Text("确定要退出登录吗？") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showLogoutConfirmDialog = false
+                        onLogout()
+                    }
+                ) {
+                    Text("确定", color = Color(0xFFF44336))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showLogoutConfirmDialog = false }) {
+                    Text("取消")
+                }
+            }
+        )
+    }
+
+    // 主题选择对话框
+    if (showThemeDialog) {
+        val themes = listOf(
+            Triple("system", "跟随系统", "自动切换浅色/深色模式"),
+            Triple("light", "浅色", "明亮的浅色主题"),
+            Triple("dark", "深色", "深色主题，护眼模式"),
+            Triple("amoled", "AMOLED纯黑", "纯黑背景，OLED省电")
+        )
+
+        AlertDialog(
+            onDismissRequest = { showThemeDialog = false },
+            title = { Text("选择主题") },
+            text = {
+                Column {
+                    themes.forEach { (theme, title, desc) ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    appStateManager.setTheme(theme)
+                                    showThemeDialog = false
+                                    // 通知主题变化
+                                    onThemeChanged()
+                                }
+                                .padding(vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = currentTheme == theme,
+                                onClick = {
+                                    appStateManager.setTheme(theme)
+                                    showThemeDialog = false
+                                    // 通知主题变化
+                                    onThemeChanged()
+                                }
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text(
+                                    text = title,
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                Text(
+                                    text = desc,
+                                    fontSize = 12.sp,
+                                    color = Color(0xFF888888)
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showThemeDialog = false }) {
+                    Text("取消")
+                }
+            }
+        )
+    }
 }
 
 @Composable
@@ -296,7 +481,7 @@ fun SettingsGridItem(
             .clickable(onClick = onClick),
         shape = RoundedCornerShape(12.dp),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         Row(
             modifier = Modifier
@@ -309,13 +494,13 @@ fun SettingsGridItem(
                 modifier = Modifier
                     .size(48.dp)
                     .clip(RoundedCornerShape(12.dp))
-                    .background(iconBackgroundColor),
+                    .background(iconBackgroundColor.copy(alpha = 0.3f)),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = icon,
                     contentDescription = null,
-                    tint = Color(0xFF2196F3),
+                    tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(24.dp)
                 )
             }
@@ -328,12 +513,12 @@ fun SettingsGridItem(
                     text = title,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Medium,
-                    color = Color(0xFF333333)
+                    color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
                     text = subtitle,
                     fontSize = 12.sp,
-                    color = Color(0xFF888888)
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
 
@@ -341,7 +526,73 @@ fun SettingsGridItem(
             Icon(
                 imageVector = Icons.Default.ChevronRight,
                 contentDescription = null,
-                tint = Color(0xFFCCCCCC),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+    }
+}
+
+@Composable
+fun SettingsListItem(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(12.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // 图标
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(MaterialTheme.colorScheme.primaryContainer),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.width(16.dp))
+
+            // 文字内容
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = subtitle,
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            // 右箭头
+            Icon(
+                imageVector = Icons.Default.ChevronRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(20.dp)
             )
         }
