@@ -13,6 +13,7 @@ import javax.inject.Inject
  */
 data class SettingsUiState(
     val isBiometricEnabled: Boolean = false,
+    val isPinSet: Boolean = false,
     val isAIConfigured: Boolean = false,
     val aiModel: String = "",
     val isLoading: Boolean = false,
@@ -37,7 +38,8 @@ class SettingsViewModel @Inject constructor(
     private fun loadSettings() {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(
-                isBiometricEnabled = securityManager.isBiometricEnabled()
+                isBiometricEnabled = securityManager.isBiometricEnabled(),
+                isPinSet = securityManager.isPinSet()
             )
         }
     }
@@ -59,6 +61,16 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             val success = securityManager.changePin(oldPin, newPin)
             onComplete(success)
+        }
+    }
+
+    /**
+     * Clear PIN
+     */
+    fun clearPin() {
+        viewModelScope.launch {
+            securityManager.clearPin()
+            _uiState.value = _uiState.value.copy(isPinSet = false)
         }
     }
 

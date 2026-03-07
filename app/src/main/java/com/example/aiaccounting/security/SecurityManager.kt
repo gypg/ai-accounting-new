@@ -127,6 +127,22 @@ class SecurityManager(private val context: Context) {
     }
 
     /**
+     * Clear PIN
+     */
+    fun clearPin(): Boolean {
+        if (!isPinSet()) {
+            return false // No PIN set
+        }
+        encryptedPrefs.edit()
+            .remove(PIN_HASH_KEY)
+            .remove(PIN_SALT_KEY)
+            .putInt(FAILED_ATTEMPTS_KEY, 0)
+            .putLong(LOCK_TIME_KEY, 0)
+            .apply()
+        return true
+    }
+
+    /**
      * Check if app is locked due to too many failed attempts
      */
     fun isLocked(): Boolean {
