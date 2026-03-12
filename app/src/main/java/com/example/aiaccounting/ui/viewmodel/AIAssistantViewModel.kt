@@ -7,10 +7,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.aiaccounting.ai.AIOperation
 import com.example.aiaccounting.ai.AIOperationExecutor
-import com.example.aiaccounting.ai.AIInformationSystem
 import com.example.aiaccounting.ai.AIReasoningEngine
-import com.example.aiaccounting.ai.NaturalLanguageParser
-import com.example.aiaccounting.ai.QueryIntentParser
 import com.example.aiaccounting.ai.TransactionModificationHandler
 import com.example.aiaccounting.data.local.entity.AIConversation
 import com.example.aiaccounting.data.local.entity.TransactionType
@@ -28,7 +25,6 @@ import com.example.aiaccounting.data.repository.ChatSessionRepository
 import com.example.aiaccounting.data.service.AIService
 import com.example.aiaccounting.data.service.ImageAction
 import com.example.aiaccounting.data.service.ImageProcessingService
-import com.example.aiaccounting.data.service.ParsedTransaction
 import com.example.aiaccounting.utils.NetworkUtils
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
@@ -44,7 +40,6 @@ import javax.inject.Inject
 @HiltViewModel
 class AIAssistantViewModel @Inject constructor(
     private val conversationRepository: AIConversationRepository,
-    private val naturalLanguageParser: NaturalLanguageParser,
     private val aiOperationExecutor: AIOperationExecutor,
     private val accountRepository: AccountRepository,
     private val categoryRepository: CategoryRepository,
@@ -55,8 +50,6 @@ class AIAssistantViewModel @Inject constructor(
     private val imageProcessingService: ImageProcessingService,
     private val chatSessionRepository: ChatSessionRepository,
     private val butlerRepository: ButlerRepository,
-    private val aiInformationSystem: AIInformationSystem,
-    private val queryIntentParser: QueryIntentParser,
     private val aiReasoningEngine: AIReasoningEngine,
     private val transactionModificationHandler: TransactionModificationHandler
 ) : ViewModel() {
@@ -86,7 +79,6 @@ class AIAssistantViewModel @Inject constructor(
     private var currentAIConfig: AIConfig = AIConfig()
 
     init {
-        loadConversations()
         loadAIConfig()
         checkNetworkStatus()
         loadCurrentButler()
@@ -113,14 +105,6 @@ class AIAssistantViewModel @Inject constructor(
      * 获取所有可用管家
      */
     fun getAllButlers() = butlerRepository.getAllButlers()
-
-    private fun loadConversations() {
-        viewModelScope.launch {
-            conversationRepository.getAllConversations().collect { conversationList ->
-                _uiState.update { it.copy(conversations = conversationList) }
-            }
-        }
-    }
 
     private fun loadAIConfig() {
         viewModelScope.launch {
@@ -1392,16 +1376,6 @@ $categoriesInfo
         return null
     }
 
-    fun clearConversations() {
-        viewModelScope.launch {
-            try {
-                conversationRepository.clearAllConversations()
-            } catch (e: Exception) {
-                _uiState.update { it.copy(error = e.message) }
-            }
-        }
-    }
-
     /**
      * 创建新对话会话
      */
@@ -1526,105 +1500,8 @@ $categoriesInfo
         }
     }
 
-    fun bookmarkConversation(conversationId: Long, isBookmarked: Boolean) {
-        viewModelScope.launch {
-            try {
-                conversationRepository.updateBookmarkStatus(conversationId, isBookmarked)
-            } catch (e: Exception) {
-                _uiState.update { it.copy(error = e.message) }
-            }
-        }
-    }
-
-    fun showConfigDialog() {
-        _uiState.update { it.copy(showConfigDialog = true, error = null) }
-    }
-
-    fun hideConfigDialog() {
-        _uiState.update { it.copy(showConfigDialog = false) }
-    }
-
     fun clearError() {
         _uiState.update { it.copy(error = null) }
-    }
-
-    /**
-     * 发送图片进行识别和记账
-     */
-    fun sendImage(imageUri: Uri, context: Context) {
-        viewModelScope.launch {
-            try {
-                _uiState.update { it.copy(isLoading = true, error = null) }
-
-                // 检查网络状态
-                val isNetworkAvailable = networkUtils.isNetworkAvailable()
-                _uiState.update { it.copy(isNetworkAvailable = isNetworkAvailable) }
-
-                if (!isNetworkAvailable) {
-                    conversationRepository.addAssistantMessage("📡 网络不可用，无法识别图片。请检查网络连接后重试。")
-                    _uiState.update { it.copy(isLoading = false) }
-                    return@launch
-                }
-
-                // 检查AI是否配置
-                if (!currentAIConfig.isEnabled || currentAIConfig.apiKey.isBlank()) {
-                    conversationRepository.addAssistantMessage("🔑 请先配置AI API密钥，才能使用图片识别功能。")
-                    _uiState.update { it.copy(isLoading = false) }
-                    return@launch
-                }
-
-                // 检查模型是否支持图片识别
-                if (!aiService.isImageSupported(currentAIConfig)) {
-                    conversationRepository.addAssistantMessage("⚠️ 当前模型「${currentAIConfig.model}」不支持图片识别功能。\n\n请切换到支持图片识别的模型，例如：\n• GPT-4 Vision (gpt-4-vision-preview)\n• Claude 3 系列\n• Gemini 1.5 系列\n\n您可以在AI设置中更换模型。")
-                    _uiState.update { it.copy(isLoading = false) }
-                    return@launch
-                }
-
-                // 添加用户发送图片的消息
-                conversationRepository.addUserMessageWithImage("[图片]", imageUri.toString())
-
-                // 调用图片识别
-                val result = withTimeoutOrNull(30000L) {
-                    aiService.analyzeImageAndRecord(imageUri, currentAIConfig, context)
-                }
-
-                if (result == null) {
-                    aiUsageRepository.recordCall(success = false)
-                    conversationRepository.addAssistantMessage("⏱️ 图片识别超时，请稍后重试。")
-                    _uiState.update { it.copy(isLoading = false) }
-                    return@launch
-                }
-
-                // 记录调用
-                aiUsageRepository.recordCall(success = result.success)
-
-                if (result.success && result.actions != null && result.actions.isNotEmpty()) {
-                    // 执行识别到的记账操作
-                    val executionResults = executeImageActions(result.actions)
-                    val finalMessage = if (executionResults.isNotEmpty()) {
-                        "${result.message}\n\n${executionResults.joinToString("\n")}"
-                    } else {
-                        result.message
-                    }
-                    conversationRepository.addAssistantMessage(finalMessage)
-                } else {
-                    // 没有识别到消费信息或识别失败
-                    conversationRepository.addAssistantMessage(result.message)
-                }
-
-                _uiState.update { it.copy(isLoading = false) }
-            } catch (e: Exception) {
-                aiUsageRepository.recordCall(success = false)
-                _uiState.update { it.copy(isLoading = false, error = e.message) }
-                
-                // 检查是否是模型不支持图片的错误
-                if (e.message?.contains("UNSUPPORTED_MODEL") == true) {
-                    conversationRepository.addAssistantMessage("⚠️ 当前模型不支持图片识别功能。\n\n请切换到支持图片识别的模型，例如：\n• GPT-4 Vision\n• Claude 3 系列\n• Gemini 1.5 系列")
-                } else {
-                    conversationRepository.addAssistantMessage("❌ 图片识别失败: ${e.message}")
-                }
-            }
-        }
     }
 
     /**
@@ -1826,15 +1703,10 @@ $categoriesInfo
  * UI State for AI Assistant screen
  */
 data class AIAssistantUiState(
-    val conversations: List<AIConversation> = emptyList(),
     val isLoading: Boolean = false,
-    val isParsing: Boolean = false,
     val error: String? = null,
     val isAIConfigured: Boolean = false,
     val isNetworkAvailable: Boolean = true,
-    val showConfigDialog: Boolean = false,
-    val parsedTransaction: ParsedTransaction? = null,
-    val aiConfig: AIConfig? = null,
     val currentSessionId: String? = null,
     val currentButler: Butler? = null
 )
