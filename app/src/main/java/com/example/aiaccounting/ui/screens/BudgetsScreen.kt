@@ -115,7 +115,7 @@ fun BudgetsScreen(
                 }
             } else {
                 LazyColumn {
-                    items(budgets) { budgetProgress ->
+                    items(budgets, key = { it.budget.id }) { budgetProgress ->
                         BudgetItem(budgetProgress = budgetProgress)
                         Spacer(modifier = Modifier.height(8.dp))
                     }

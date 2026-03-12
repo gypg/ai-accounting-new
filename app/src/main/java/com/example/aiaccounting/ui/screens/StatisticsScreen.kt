@@ -1028,7 +1028,7 @@ fun YearSelector(
                 .height(280.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            items(years) { year ->
+            items(years, key = { it }) { year ->
                 val isSelected = selectedYear == year
                 DateSelectorItem(
                     text = "${year}年",
@@ -1083,7 +1083,7 @@ fun MonthSelector(
                 .height(280.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            items(months) { month ->
+            items(months, key = { it }) { month ->
                 val isSelected = selectedMonth == month
                 DateSelectorItem(
                     text = "${month}月",
@@ -1152,7 +1152,7 @@ fun DaySelector(
                 .height(240.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            items(days) { day ->
+            items(days, key = { it }) { day ->
                 val isSelected = selectedDay == day
                 DateSelectorItem(
                     text = "${day}日",

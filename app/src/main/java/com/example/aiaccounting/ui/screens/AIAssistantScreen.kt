@@ -178,7 +178,7 @@ fun AIAssistantScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                     reverseLayout = true
                 ) {
-                    items(conversations.reversed()) { conversation ->
+                    items(conversations, key = { it.id }) { conversation ->
                         ChatBubble(
                             conversation = conversation,
                             onCopy = { text ->
@@ -289,7 +289,7 @@ fun SessionDrawerContent(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(vertical = 8.dp)
         ) {
-            items(sessions) { session ->
+            items(sessions, key = { it.id }) { session ->
                 SessionItem(
                     session = session,
                     isSelected = session.id == currentSessionId,

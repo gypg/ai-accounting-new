@@ -129,7 +129,7 @@ fun TransactionListScreen(
                 }
             } else {
                 LazyColumn {
-                    items(transactions) { transaction ->
+                    items(transactions, key = { it.id }) { transaction ->
                         TransactionItem(
                             transaction = transaction,
                             categoryName = viewModel.getCategoryName(transaction.categoryId),

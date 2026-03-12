@@ -182,7 +182,7 @@ fun TransactionListView(transactions: List<Transaction>) {
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(bottom = 100.dp)
         ) {
-            items(transactions) { transaction ->
+            items(transactions, key = { it.id }) { transaction ->
                 TransactionCard(transaction = transaction, dateFormat = dateFormat)
                 Spacer(modifier = Modifier.height(8.dp))
             }

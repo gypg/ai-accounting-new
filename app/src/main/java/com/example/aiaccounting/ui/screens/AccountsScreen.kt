@@ -83,7 +83,7 @@ fun AccountsScreen(
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                items(accounts) { account ->
+                items(accounts, key = { it.id }) { account ->
                     AccountCard(
                         account = account,
                         onEdit = {

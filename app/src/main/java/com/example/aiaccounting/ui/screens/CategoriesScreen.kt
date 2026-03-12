@@ -100,7 +100,7 @@ fun CategoriesScreen(
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(displayCategories) { category ->
+                items(displayCategories, key = { it.id }) { category ->
                     val subCategories = categories.filter { it.parentId == category.id }
                     CategoryCard(
                         category = category,

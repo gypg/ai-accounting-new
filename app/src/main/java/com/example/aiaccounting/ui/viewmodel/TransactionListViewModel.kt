@@ -44,8 +44,21 @@ class TransactionListViewModel @Inject constructor(
         initialValue = MonthlySummary()
     )
 
+    // 分类名称缓存，从 DB 加载
+    private val _categoryMap = MutableStateFlow<Map<Long, String>>(emptyMap())
+    val categoryMap: StateFlow<Map<Long, String>> = _categoryMap.asStateFlow()
+
     init {
         loadTransactions()
+        loadCategories()
+    }
+
+    private fun loadCategories() {
+        viewModelScope.launch {
+            categoryRepository.getAllCategories().collect { categories ->
+                _categoryMap.value = categories.associate { it.id to it.name }
+            }
+        }
     }
 
     private fun loadTransactions() {
@@ -155,24 +168,10 @@ class TransactionListViewModel @Inject constructor(
     }
 
     /**
-     * 获取分类名称
+     * 获取分类名称（从缓存的分类 Map 中查找）
      */
     fun getCategoryName(categoryId: Long): String {
-        // 使用runBlocking或创建一个缓存的Flow来获取分类名称
-        // 这里简化处理，返回一个默认值，实际应该从Repository获取
-        return when (categoryId) {
-            1L -> "餐饮"
-            2L -> "交通"
-            3L -> "购物"
-            4L -> "娱乐"
-            5L -> "医疗"
-            6L -> "教育"
-            7L -> "住房"
-            8L -> "工资"
-            9L -> "奖金"
-            10L -> "投资"
-            else -> "其他"
-        }
+        return _categoryMap.value[categoryId] ?: "其他"
     }
 }
 
