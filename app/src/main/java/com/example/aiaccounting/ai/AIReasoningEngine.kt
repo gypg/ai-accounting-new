@@ -516,16 +516,110 @@ class AIReasoningEngine @Inject constructor(
     }
 
     /**
-     * 生成分类管理动作
+     * 生成分类管理动作 - 支持创建顶级分类和子分类
      */
     private suspend fun generateCategoryManagementActions(
         context: ReasoningContext,
         intentAnalysis: IntentAnalysis
     ): List<AIAction> {
-        // 暂时返回查询分类信息
+        val message = context.userMessage
+
+        // 解析子分类语义：在X下创建Y / 给X添加子分类Y / X下新建Y
+        val subCategoryInfo = parseSubCategoryIntent(message)
+
+        if (subCategoryInfo != null) {
+            val (parentName, childName) = subCategoryInfo
+            // 查找父分类
+            val allCategories = categoryRepository.getAllCategoriesList()
+            val parentCategory = allCategories.firstOrNull {
+                it.name.contains(parentName) || parentName.contains(it.name)
+            }
+
+            if (parentCategory != null) {
+                val op = AIOperation.AddCategory(
+                    name = childName,
+                    type = parentCategory.type,
+                    parentId = parentCategory.id
+                )
+                val result = aiOperationExecutor.executeOperation(op)
+                val responseMsg = when (result) {
+                    is AIOperationExecutor.AIOperationResult.Success -> result.message
+                    is AIOperationExecutor.AIOperationResult.Error -> "创建子分类失败: ${result.error}"
+                }
+                return listOf(AIAction.GenerateResponse(responseMsg))
+            } else {
+                return listOf(AIAction.GenerateResponse("未找到名为「$parentName」的分类，无法创建子分类。请先确认父分类名称。"))
+            }
+        }
+
+        // 解析普通分类创建：创建XX分类
+        val categoryName = parseCategoryName(message)
+        if (categoryName != null && (message.contains("创建") || message.contains("添加") || message.contains("新建"))) {
+            val type = if (message.contains("收入")) TransactionType.INCOME else TransactionType.EXPENSE
+            val op = AIOperation.AddCategory(name = categoryName, type = type)
+            val result = aiOperationExecutor.executeOperation(op)
+            val responseMsg = when (result) {
+                is AIOperationExecutor.AIOperationResult.Success -> result.message
+                is AIOperationExecutor.AIOperationResult.Error -> "创建分类失败: ${result.error}"
+            }
+            return listOf(AIAction.GenerateResponse(responseMsg))
+        }
+
+        // 默认返回分类信息查询
         return listOf(AIAction.QueryInformation(
             queryType = AIInformationSystem.QueryType.CATEGORY_INFO
         ))
+    }
+
+    /**
+     * 解析子分类创建意图
+     * 支持语义：在餐饮下创建火锅 / 给交通添加子分类打车 / 餐饮下新建奶茶
+     * 返回 Pair(父分类名, 子分类名) 或 null
+     */
+    private fun parseSubCategoryIntent(message: String): Pair<String, String>? {
+        // 模式1: 在X下创建/添加/新建Y
+        val pattern1 = Regex("在[「「]?(.+?)[」」]?下[面]?(?:创建|添加|新建)[「「]?(.+?)[」」]?(?:分类|子分类)?$")
+        pattern1.find(message)?.let {
+            return it.groupValues[1].trim() to it.groupValues[2].trim()
+        }
+
+        // 模式2: 给X添加子分类Y
+        val pattern2 = Regex("给[「「]?(.+?)[」」]?(?:添加|创建|新建)子分类[「「]?(.+?)[」」]?$")
+        pattern2.find(message)?.let {
+            return it.groupValues[1].trim() to it.groupValues[2].trim()
+        }
+
+        // 模式3: X下新建/创建/添加Y
+        val pattern3 = Regex("[「「]?(.+?)[」」]?下(?:创建|添加|新建)[「「]?(.+?)[」」]?(?:分类|子分类)?$")
+        pattern3.find(message)?.let {
+            return it.groupValues[1].trim() to it.groupValues[2].trim()
+        }
+
+        // 模式4: 创建/添加子分类Y到X / 把Y归到X下
+        val pattern4 = Regex("把[「「]?(.+?)[」」]?归[到入][「「]?(.+?)[」」]?下")
+        pattern4.find(message)?.let {
+            return it.groupValues[2].trim() to it.groupValues[1].trim()
+        }
+
+        return null
+    }
+
+    /**
+     * 从消息中提取分类名称
+     */
+    private fun parseCategoryName(message: String): String? {
+        val patterns = listOf(
+            Regex("(?:创建|添加|新建)[「「]?(.+?)[」」]?分类"),
+            Regex("分类[「「]?(.+?)[」」]?$"),
+            Regex("(?:创建|添加|新建)(?:一个)?[「「]?(.+?)[」」]?(?:的)?(?:支出|收入)?分类")
+        )
+        for (pattern in patterns) {
+            pattern.find(message)?.let {
+                val name = it.groupValues[1].trim()
+                if (name.isNotEmpty() && name.length <= 10) return name
+            }
+        }
+        return null
     }
 
     /**
@@ -731,7 +825,12 @@ class AIReasoningEngine @Inject constructor(
     }
 
     private fun containsCategoryManagementKeywords(message: String): Boolean {
-        val keywords = listOf("添加分类", "新建分类", "创建分类", "删除分类")
+        val keywords = listOf(
+            "添加分类", "新建分类", "创建分类", "删除分类",
+            "添加子分类", "新建子分类", "创建子分类",
+            "子分类", "下面添加", "下面创建", "下新建",
+            "下添加", "下创建", "归到", "归入"
+        )
         return keywords.any { message.contains(it) }
     }
 

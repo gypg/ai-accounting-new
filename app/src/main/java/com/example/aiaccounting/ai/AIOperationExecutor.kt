@@ -227,20 +227,115 @@ class AIOperationExecutor @Inject constructor(
     }
     
     /**
-     * 添加分类 - 使用智能图标和颜色
+     * 添加分类 - 使用智能图标和颜色，支持子分类自动推断
      */
     private suspend fun addCategory(op: AIOperation.AddCategory): AIOperationResult {
         // 根据分类名称智能选择图标和颜色
         val (smartIcon, smartColor) = getSmartIconAndColor(op.name, op.type)
-        
+
+        // 确定父分类ID：优先使用显式指定的，否则自动推断
+        val parentId = op.parentId ?: inferParentCategory(op.name, op.type)
+
         val category = Category(
             name = op.name,
             type = op.type,
             color = op.color.takeIf { it != "#2196F3" } ?: smartColor,
-            icon = op.icon.takeIf { it != "📁" } ?: smartIcon
+            icon = op.icon.takeIf { it != "📁" } ?: smartIcon,
+            parentId = parentId
         )
         categoryRepository.insertCategory(category)
-        return AIOperationResult.Success("已添加分类: ${op.name}")
+
+        val parentInfo = if (parentId != null) {
+            val parent = categoryRepository.getCategoryById(parentId)
+            "（归属于「${parent?.name ?: "未知"}」）"
+        } else ""
+
+        return AIOperationResult.Success("已添加分类: ${op.name}$parentInfo")
+    }
+
+    /**
+     * 根据分类名称自动推断应归属的父分类
+     * 通过关键词匹配已有的顶级分类
+     */
+    private suspend fun inferParentCategory(name: String, type: TransactionType): Long? {
+        val allCategories = categoryRepository.getAllCategoriesList()
+        val topCategories = allCategories.filter { it.parentId == null && it.type == type }
+
+        // 子分类名称 → 父分类关键词映射
+        val subcategoryMapping = mapOf(
+            // 餐饮子分类
+            "火锅" to listOf("餐饮", "吃饭", "美食"),
+            "烧烤" to listOf("餐饮", "吃饭", "美食"),
+            "奶茶" to listOf("餐饮", "饮品", "美食"),
+            "咖啡" to listOf("餐饮", "饮品", "美食"),
+            "外卖" to listOf("餐饮", "吃饭", "美食"),
+            "零食" to listOf("餐饮", "美食"),
+            "水果" to listOf("餐饮", "美食"),
+            "早餐" to listOf("餐饮", "吃饭"),
+            "午餐" to listOf("餐饮", "吃饭"),
+            "晚餐" to listOf("餐饮", "吃饭"),
+            "夜宵" to listOf("餐饮", "吃饭"),
+            // 交通子分类
+            "打车" to listOf("交通", "出行"),
+            "地铁" to listOf("交通", "出行"),
+            "公交" to listOf("交通", "出行"),
+            "加油" to listOf("交通", "出行", "汽车"),
+            "停车" to listOf("交通", "出行", "汽车"),
+            "高铁" to listOf("交通", "出行"),
+            "机票" to listOf("交通", "出行", "旅行"),
+            // 购物子分类
+            "衣服" to listOf("购物", "服饰"),
+            "鞋子" to listOf("购物", "服饰"),
+            "化妆品" to listOf("购物", "美妆"),
+            "护肤" to listOf("购物", "美妆"),
+            "数码" to listOf("购物", "电子"),
+            "家电" to listOf("购物", "家居"),
+            "日用品" to listOf("购物", "家居"),
+            // 娱乐子分类
+            "电影" to listOf("娱乐", "休闲"),
+            "游戏" to listOf("娱乐", "休闲"),
+            "KTV" to listOf("娱乐", "休闲"),
+            "健身" to listOf("娱乐", "运动"),
+            "旅游" to listOf("娱乐", "旅行"),
+            // 教育子分类
+            "书籍" to listOf("教育", "学习"),
+            "课程" to listOf("教育", "学习"),
+            "培训" to listOf("教育", "学习"),
+            // 医疗子分类
+            "药品" to listOf("医疗", "健康"),
+            "体检" to listOf("医疗", "健康"),
+            "挂号" to listOf("医疗", "健康"),
+            // 住房子分类
+            "房租" to listOf("住房", "居住"),
+            "水电" to listOf("住房", "居住"),
+            "物业" to listOf("住房", "居住"),
+            "维修" to listOf("住房", "居住")
+        )
+
+        // 1. 精确匹配映射表
+        for ((keyword, parentKeywords) in subcategoryMapping) {
+            if (name.contains(keyword)) {
+                for (parentKeyword in parentKeywords) {
+                    val match = topCategories.find { it.name.contains(parentKeyword) }
+                    if (match != null) return match.id
+                }
+            }
+        }
+
+        // 2. 模糊语义推断：检查新分类名是否是某个已有分类的细化
+        for (parent in topCategories) {
+            val parentName = parent.name
+            // 如果新分类名包含父分类名的一部分（如"中餐"包含"餐"）
+            if (parentName.length >= 2 && name != parentName) {
+                val parentChars = parentName.toList()
+                val matchCount = parentChars.count { name.contains(it) }
+                if (matchCount >= parentName.length / 2 && matchCount > 0) {
+                    return parent.id
+                }
+            }
+        }
+
+        return null
     }
     
     /**
@@ -525,7 +620,8 @@ sealed class AIOperation {
         val name: String,
         val type: TransactionType,
         val color: String = "#2196F3",
-        val icon: String = "📁"
+        val icon: String = "📁",
+        val parentId: Long? = null
     ) : AIOperation()
     
     data class UpdateCategory(
