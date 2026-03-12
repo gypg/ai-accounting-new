@@ -15,6 +15,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.animation.core.*
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -26,6 +27,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -530,15 +532,30 @@ fun ChatBubble(
     onCopy: (String) -> Unit
 ) {
     val isUser = conversation.role == ConversationRole.USER
-    val backgroundColor = if (isUser) {
-        MaterialTheme.colorScheme.primary
-    } else {
-        MaterialTheme.colorScheme.surfaceVariant
+    val isSuccess = !isUser && conversation.content.startsWith("✅")
+    val isError = !isUser && conversation.content.startsWith("❌")
+
+    val backgroundColor = when {
+        isUser -> MaterialTheme.colorScheme.primary
+        isSuccess -> Color(0xFF1B5E20).copy(alpha = 0.15f)
+        isError -> MaterialTheme.colorScheme.errorContainer
+        else -> MaterialTheme.colorScheme.surfaceVariant
     }
-    val textColor = if (isUser) {
-        MaterialTheme.colorScheme.onPrimary
-    } else {
-        MaterialTheme.colorScheme.onSurfaceVariant
+    val textColor = when {
+        isUser -> MaterialTheme.colorScheme.onPrimary
+        isSuccess -> Color(0xFF2E7D32)
+        isError -> MaterialTheme.colorScheme.onErrorContainer
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+
+    // 成功消息入场动画：缩放 + 透明度
+    val animatedScale = remember { Animatable(if (isSuccess) 0.8f else 1f) }
+    val animatedAlpha = remember { Animatable(if (isSuccess) 0f else 1f) }
+    LaunchedEffect(conversation.id) {
+        if (isSuccess) {
+            launch { animatedScale.animateTo(1f, spring(dampingRatio = 0.6f, stiffness = 300f)) }
+            launch { animatedAlpha.animateTo(1f, tween(200)) }
+        }
     }
 
     Row(
@@ -605,7 +622,12 @@ fun ChatBubble(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = if (isUser) 0.dp else 40.dp, vertical = 0.dp),
+                    .padding(horizontal = if (isUser) 0.dp else 40.dp, vertical = 0.dp)
+                    .graphicsLayer {
+                        scaleX = animatedScale.value
+                        scaleY = animatedScale.value
+                        alpha = animatedAlpha.value
+                    },
                 contentAlignment = if (isUser) Alignment.CenterEnd else Alignment.CenterStart
             ) {
                 Surface(

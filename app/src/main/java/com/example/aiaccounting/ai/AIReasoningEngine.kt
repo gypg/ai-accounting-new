@@ -1,13 +1,12 @@
 package com.example.aiaccounting.ai
 
+import com.example.aiaccounting.data.local.entity.Account
+import com.example.aiaccounting.data.local.entity.AccountType
 import com.example.aiaccounting.data.local.entity.TransactionType
 import com.example.aiaccounting.data.repository.AccountRepository
 import com.example.aiaccounting.data.local.entity.Category
 import com.example.aiaccounting.data.repository.CategoryRepository
 import com.example.aiaccounting.data.repository.TransactionRepository
-import kotlinx.coroutines.flow.first
-import java.text.SimpleDateFormat
-import java.util.*
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -29,8 +28,14 @@ class AIReasoningEngine @Inject constructor(
     private val aiInformationSystem: AIInformationSystem,
     private val identityConfirmationDetector: IdentityConfirmationDetector,
     private val transactionModificationHandler: TransactionModificationHandler,
-    private val aiOperationExecutor: AIOperationExecutor
+    private val aiOperationExecutor: AIOperationExecutor,
+    private val messageParser: AIMessageParser,
+    private val categoryInferrer: AICategoryInferrer,
+    private val keywordMatcher: AIKeywordMatcher
 ) {
+
+    /** 记住上一次成功执行的记账动作，用于上下文连续（"再记一笔同样的"、"换成收入"） */
+    private var lastExecutedTransaction: AIAction.RecordTransaction? = null
 
     /**
      * 用户意图类型
@@ -266,7 +271,12 @@ class AIReasoningEngine @Inject constructor(
      */
     private fun analyzeIntent(message: String): IntentAnalysis {
         val lowerMessage = message.lowercase()
-        
+
+        // 上下文引用：如果有上一笔操作且用户在引用它，视为记账意图
+        if (lastExecutedTransaction != null && detectContextReference(message) != null) {
+            return IntentAnalysis(UserIntent.RECORD_TRANSACTION, 0.90f)
+        }
+
         // 记账意图特征
         val transactionPatterns = listOf(
             "花了", "消费", "支出", "收入", "转账", "买", "卖", "付", "赚",
@@ -286,32 +296,32 @@ class AIReasoningEngine @Inject constructor(
         // 判断意图
         return when {
             // 高置信度记账
-            transactionScore >= 2 || (transactionScore >= 1 && containsAmount(message)) -> {
+            transactionScore >= 2 || (transactionScore >= 1 && messageParser.containsAmount(message)) -> {
                 IntentAnalysis(UserIntent.RECORD_TRANSACTION, 0.85f)
             }
             
             // 高置信度查询
-            queryScore >= 2 && !containsActionKeywords(lowerMessage) -> {
+            queryScore >= 2 && !keywordMatcher.containsActionKeywords(lowerMessage) -> {
                 IntentAnalysis(UserIntent.QUERY_INFORMATION, 0.80f)
             }
             
             // 分析意图
-            containsAnalysisKeywords(lowerMessage) -> {
+            keywordMatcher.containsAnalysisKeywords(lowerMessage) -> {
                 IntentAnalysis(UserIntent.ANALYZE_DATA, 0.75f)
             }
             
             // 账户管理
-            containsAccountManagementKeywords(lowerMessage) -> {
+            keywordMatcher.containsAccountManagementKeywords(lowerMessage) -> {
                 IntentAnalysis(UserIntent.MANAGE_ACCOUNT, 0.70f)
             }
             
             // 分类管理
-            containsCategoryManagementKeywords(lowerMessage) -> {
+            keywordMatcher.containsCategoryManagementKeywords(lowerMessage) -> {
                 IntentAnalysis(UserIntent.MANAGE_CATEGORY, 0.70f)
             }
             
             // 问候或简单对话
-            isGreetingOrSimpleConversation(lowerMessage) -> {
+            keywordMatcher.isGreetingOrSimpleConversation(lowerMessage) -> {
                 IntentAnalysis(UserIntent.GENERAL_CONVERSATION, 0.90f)
             }
             
@@ -330,8 +340,8 @@ class AIReasoningEngine @Inject constructor(
         val actions = mutableListOf<AIAction>()
         
         // 智能推断查询类型
-        val queryType = inferQueryType(message)
-        val dateRange = extractDateRange(message)
+        val queryType = messageParser.inferQueryType(message)
+        val dateRange = messageParser.extractDateRange(message)
         
         // 根据查询类型生成相应动作
         when (queryType) {
@@ -342,7 +352,7 @@ class AIReasoningEngine @Inject constructor(
             }
             
             AIInformationSystem.QueryType.TRANSACTION_LIST -> {
-                val limit = extractLimit(message) ?: 10
+                val limit = messageParser.extractLimit(message) ?: 10
                 actions.add(AIAction.QueryInformation(
                     queryType = AIInformationSystem.QueryType.TRANSACTION_LIST,
                     startDate = dateRange.first,
@@ -422,7 +432,7 @@ class AIReasoningEngine @Inject constructor(
         }
         
         // 推断分析范围
-        val scope = extractAnalysisScope(message)
+        val scope = messageParser.extractAnalysisScope(message)
         
         actions.add(AIAction.AnalyzeData(analysisType, scope))
         
@@ -447,9 +457,22 @@ class AIReasoningEngine @Inject constructor(
     ): List<AIAction> {
         val message = context.userMessage
         val actions = mutableListOf<AIAction>()
-        
+
+        // 上下文连续：检测是否引用上一笔操作
+        val contextRef = detectContextReference(message)
+        if (contextRef != null && lastExecutedTransaction != null) {
+            val last = lastExecutedTransaction!!
+            val merged = applyContextOverrides(last, message, contextRef)
+            val reluctantResponse = generateReluctantResponse(currentButlerId, "记账")
+            if (reluctantResponse != null) {
+                actions.add(AIAction.GenerateResponse(reluctantResponse))
+            }
+            actions.add(merged)
+            return actions
+        }
+
         // 提取金额
-        val amount = extractAmount(message) ?: return listOf(
+        val amount = messageParser.extractAmount(message) ?: return listOf(
             AIAction.RequestClarification("请问这笔交易的金额是多少呢？")
         )
         
@@ -462,16 +485,16 @@ class AIReasoningEngine @Inject constructor(
         }
         
         // 智能推断分类
-        val categoryHint = inferCategory(message, type)
+        val categoryHint = categoryInferrer.inferCategory(message, type)
         
         // 智能推断账户
         val accountHint = inferAccount(message)
         
         // 提取备注
-        val note = extractNote(message) ?: "AI记账"
+        val note = messageParser.extractNote(message) ?: "AI记账"
         
         // 提取日期
-        val date = extractTransactionDate(message)
+        val date = messageParser.extractTransactionDate(message)
         
         // 添加不情愿回复（如果是顾沉或苏浅）
         val reluctantResponse = generateReluctantResponse(currentButlerId, "记账")
@@ -526,7 +549,7 @@ class AIReasoningEngine @Inject constructor(
         val message = context.userMessage
 
         // 解析子分类语义：在X下创建Y / 给X添加子分类Y / X下新建Y
-        val subCategoryInfo = parseSubCategoryIntent(message)
+        val subCategoryInfo = categoryInferrer.parseSubCategoryIntent(message)
 
         if (subCategoryInfo != null) {
             val (parentName, childName) = subCategoryInfo
@@ -554,7 +577,7 @@ class AIReasoningEngine @Inject constructor(
         }
 
         // 解析普通分类创建：创建XX分类
-        val categoryName = parseCategoryName(message)
+        val categoryName = categoryInferrer.parseCategoryName(message)
         if (categoryName != null && (message.contains("创建") || message.contains("添加") || message.contains("新建"))) {
             val type = if (message.contains("收入")) TransactionType.INCOME else TransactionType.EXPENSE
             val op = AIOperation.AddCategory(name = categoryName, type = type)
@@ -574,55 +597,6 @@ class AIReasoningEngine @Inject constructor(
 
     /**
      * 解析子分类创建意图
-     * 支持语义：在餐饮下创建火锅 / 给交通添加子分类打车 / 餐饮下新建奶茶
-     * 返回 Pair(父分类名, 子分类名) 或 null
-     */
-    private fun parseSubCategoryIntent(message: String): Pair<String, String>? {
-        // 模式1: 在X下创建/添加/新建Y
-        val pattern1 = Regex("在[「「]?(.+?)[」」]?下[面]?(?:创建|添加|新建)[「「]?(.+?)[」」]?(?:分类|子分类)?$")
-        pattern1.find(message)?.let {
-            return it.groupValues[1].trim() to it.groupValues[2].trim()
-        }
-
-        // 模式2: 给X添加子分类Y
-        val pattern2 = Regex("给[「「]?(.+?)[」」]?(?:添加|创建|新建)子分类[「「]?(.+?)[」」]?$")
-        pattern2.find(message)?.let {
-            return it.groupValues[1].trim() to it.groupValues[2].trim()
-        }
-
-        // 模式3: X下新建/创建/添加Y
-        val pattern3 = Regex("[「「]?(.+?)[」」]?下(?:创建|添加|新建)[「「]?(.+?)[」」]?(?:分类|子分类)?$")
-        pattern3.find(message)?.let {
-            return it.groupValues[1].trim() to it.groupValues[2].trim()
-        }
-
-        // 模式4: 创建/添加子分类Y到X / 把Y归到X下
-        val pattern4 = Regex("把[「「]?(.+?)[」」]?归[到入][「「]?(.+?)[」」]?下")
-        pattern4.find(message)?.let {
-            return it.groupValues[2].trim() to it.groupValues[1].trim()
-        }
-
-        return null
-    }
-
-    /**
-     * 从消息中提取分类名称
-     */
-    private fun parseCategoryName(message: String): String? {
-        val patterns = listOf(
-            Regex("(?:创建|添加|新建)[「「]?(.+?)[」」]?分类"),
-            Regex("分类[「「]?(.+?)[」」]?$"),
-            Regex("(?:创建|添加|新建)(?:一个)?[「「]?(.+?)[」」]?(?:的)?(?:支出|收入)?分类")
-        )
-        for (pattern in patterns) {
-            pattern.find(message)?.let {
-                val name = it.groupValues[1].trim()
-                if (name.isNotEmpty() && name.length <= 10) return name
-            }
-        }
-        return null
-    }
-
     /**
      * 生成对话动作
      */
@@ -680,9 +654,34 @@ class AIReasoningEngine @Inject constructor(
      * 真正调用AIOperationExecutor执行数据库写入
      */
     private suspend fun executeRecordTransaction(action: AIAction.RecordTransaction): String {
-        // 1. 查找或创建账户
+        // 1. 智能匹配账户（优先用 accountHint，兜底用默认账户）
         var accounts = accountRepository.getAllAccountsList()
-        var account = accounts.firstOrNull { it.isDefault } ?: accounts.firstOrNull()
+        var account: Account? = null
+
+        if (action.accountHint != null) {
+            // 精确名称匹配
+            account = accounts.firstOrNull {
+                !it.isArchived && it.name == action.accountHint
+            }
+            // 模糊名称匹配（账户名包含 hint 或 hint 包含账户名）
+            if (account == null) {
+                account = accounts.firstOrNull {
+                    !it.isArchived && (it.name.contains(action.accountHint) || action.accountHint.contains(it.name))
+                }
+            }
+            // 按 AccountType 匹配
+            if (account == null) {
+                val hintType = mapHintToAccountType(action.accountHint)
+                if (hintType != null) {
+                    account = accounts.firstOrNull { !it.isArchived && it.type == hintType }
+                }
+            }
+        }
+
+        // 兜底：默认账户
+        if (account == null) {
+            account = accounts.firstOrNull { it.isDefault } ?: accounts.firstOrNull { !it.isArchived }
+        }
         
         // 如果没有账户，创建默认账户
         if (account == null) {
@@ -782,12 +781,13 @@ class AIReasoningEngine @Inject constructor(
         
         return when (val result = aiOperationExecutor.executeOperation(operation)) {
             is AIOperationExecutor.AIOperationResult.Success -> {
+                lastExecutedTransaction = action
                 val typeStr = when (action.type) {
                     TransactionType.INCOME -> "收入"
                     TransactionType.EXPENSE -> "支出"
                     TransactionType.TRANSFER -> "转账"
                 }
-                "✅ 已记录${typeStr}：¥${String.format("%.2f", action.amount)} - ${action.note}"
+                "✅ 已记录${typeStr}：¥${String.format("%.2f", action.amount)} - ${action.note}（${account.name} · ${category.name}）"
             }
             is AIOperationExecutor.AIOperationResult.Error -> {
                 "❌ 记账失败：${result.error ?: "未知错误"}"
@@ -823,7 +823,7 @@ class AIReasoningEngine @Inject constructor(
             else -> AIInformationSystem.QueryType.TRANSACTION_SUMMARY
         }
         
-        val (startDate, endDate) = getScopeDateRange(action.scope)
+        val (startDate, endDate) = messageParser.getScopeDateRange(action.scope)
         
         val request = AIInformationSystem.QueryRequest(
             queryType = queryType,
@@ -839,369 +839,93 @@ class AIReasoningEngine @Inject constructor(
 
     private data class IntentAnalysis(val intent: UserIntent, val confidence: Float)
 
-    private fun containsAmount(message: String): Boolean {
-        return Regex("""\d+\.?\d*\s*[元块]?""").containsMatchIn(message)
-    }
-
-    private fun containsActionKeywords(message: String): Boolean {
-        val actionKeywords = listOf("记", "添加", "创建", "新建", "删除", "修改", "更新")
-        return actionKeywords.any { message.contains(it) }
-    }
-
-    private fun containsAnalysisKeywords(message: String): Boolean {
-        val analysisKeywords = listOf("分析", "统计", "趋势", "对比", "比较", "结构", "报告")
-        return analysisKeywords.any { message.contains(it) }
-    }
-
-    private fun containsAccountManagementKeywords(message: String): Boolean {
-        val keywords = listOf("添加账户", "新建账户", "创建账户", "删除账户")
-        return keywords.any { message.contains(it) }
-    }
-
-    private fun containsCategoryManagementKeywords(message: String): Boolean {
-        val keywords = listOf(
-            "添加分类", "新建分类", "创建分类", "删除分类",
-            "添加子分类", "新建子分类", "创建子分类",
-            "子分类", "下面添加", "下面创建", "下新建",
-            "下添加", "下创建", "归到", "归入"
-        )
-        return keywords.any { message.contains(it) }
-    }
-
-    private fun isGreetingOrSimpleConversation(message: String): Boolean {
-        val greetings = listOf("你好", "您好", "hi", "hello", "在吗", "在不在", "有人吗")
-        return greetings.any { message.contains(it) }
-    }
-
-    private fun inferQueryType(message: String): AIInformationSystem.QueryType {
-        return when {
-            message.contains("账户") || message.contains("余额") || message.contains("资产") -> 
-                AIInformationSystem.QueryType.ACCOUNT_INFO
-            message.contains("分类") || message.contains("类别") -> 
-                AIInformationSystem.QueryType.CATEGORY_INFO
-            message.contains("明细") || message.contains("记录") || message.contains("账单") -> 
-                AIInformationSystem.QueryType.TRANSACTION_LIST
-            message.contains("支出分析") || message.contains("消费分析") || message.contains("钱花") -> 
-                AIInformationSystem.QueryType.EXPENSE_ANALYSIS
-            message.contains("收入分析") -> 
-                AIInformationSystem.QueryType.INCOME_ANALYSIS
-            message.contains("趋势") || message.contains("走势") -> 
-                AIInformationSystem.QueryType.TREND_ANALYSIS
-            message.contains("对比") || message.contains("比较") || message.contains("环比") -> 
-                AIInformationSystem.QueryType.COMPARISON_ANALYSIS
-            message.contains("预算") -> 
-                AIInformationSystem.QueryType.BUDGET_STATUS
-            message.contains("收支") || message.contains("汇总") || message.contains("总结") -> 
-                AIInformationSystem.QueryType.TRANSACTION_SUMMARY
-            else -> AIInformationSystem.QueryType.ACCOUNT_INFO
-        }
-    }
-
-    private fun extractDateRange(message: String): Pair<Long?, Long?> {
-        val calendar = Calendar.getInstance()
-        val now = calendar.timeInMillis
-        
-        return when {
-            message.contains("今天") -> {
-                calendar.set(Calendar.HOUR_OF_DAY, 0)
-                calendar.set(Calendar.MINUTE, 0)
-                calendar.set(Calendar.SECOND, 0)
-                Pair(calendar.timeInMillis, now)
-            }
-            message.contains("昨天") -> {
-                calendar.add(Calendar.DAY_OF_MONTH, -1)
-                calendar.set(Calendar.HOUR_OF_DAY, 0)
-                calendar.set(Calendar.MINUTE, 0)
-                calendar.set(Calendar.SECOND, 0)
-                val start = calendar.timeInMillis
-                calendar.add(Calendar.DAY_OF_MONTH, 1)
-                Pair(start, calendar.timeInMillis)
-            }
-            message.contains("本周") || message.contains("这周") -> {
-                calendar.set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
-                calendar.set(Calendar.HOUR_OF_DAY, 0)
-                calendar.set(Calendar.MINUTE, 0)
-                calendar.set(Calendar.SECOND, 0)
-                Pair(calendar.timeInMillis, now)
-            }
-            message.contains("本月") || message.contains("这个月") -> {
-                calendar.set(Calendar.DAY_OF_MONTH, 1)
-                calendar.set(Calendar.HOUR_OF_DAY, 0)
-                calendar.set(Calendar.MINUTE, 0)
-                calendar.set(Calendar.SECOND, 0)
-                Pair(calendar.timeInMillis, now)
-            }
-            message.contains("上月") || message.contains("上个月") -> {
-                calendar.add(Calendar.MONTH, -1)
-                calendar.set(Calendar.DAY_OF_MONTH, 1)
-                calendar.set(Calendar.HOUR_OF_DAY, 0)
-                calendar.set(Calendar.MINUTE, 0)
-                calendar.set(Calendar.SECOND, 0)
-                val start = calendar.timeInMillis
-                calendar.add(Calendar.MONTH, 1)
-                Pair(start, calendar.timeInMillis)
-            }
-            message.contains("最近") || message.contains("近") -> {
-                val days = Regex("""(\d+)""").find(message)?.groupValues?.get(1)?.toIntOrNull() ?: 7
-                calendar.add(Calendar.DAY_OF_MONTH, -days)
-                Pair(calendar.timeInMillis, now)
-            }
-            else -> Pair(null, null)
-        }
-    }
-
-    private fun extractLimit(message: String): Int? {
-        return Regex("""(\d+)""").find(message)?.groupValues?.get(1)?.toIntOrNull()
-    }
-
-    private fun extractAmount(message: String): Double? {
-        val match = Regex("""(\d+\.?\d*)\s*[元块]?""").find(message)
-        return match?.groupValues?.get(1)?.toDoubleOrNull()
-    }
-
-    private fun inferCategory(message: String, type: TransactionType): String? {
-        val lowerMessage = message.lowercase()
-
-        // 先尝试匹配具体子分类（更精确）
-        val subCategoryKeywords = mapOf(
-            "火锅" to listOf("火锅"),
-            "烧烤" to listOf("烧烤", "撸串"),
-            "奶茶" to listOf("奶茶", "茶饮"),
-            "咖啡" to listOf("咖啡", "星巴克", "瑞幸"),
-            "外卖" to listOf("外卖", "美团", "饿了么"),
-            "聚餐" to listOf("聚餐", "聚会", "请客"),
-            "早餐" to listOf("早餐", "早饭", "早点"),
-            "午餐" to listOf("午餐", "午饭", "中饭"),
-            "晚餐" to listOf("晚餐", "晚饭"),
-            "夜宵" to listOf("夜宵", "宵夜"),
-            "零食" to listOf("零食", "小吃", "甜品", "蛋糕"),
-            "水果" to listOf("水果"),
-            "打车" to listOf("打车", "滴滴", "出租车", "网约车"),
-            "地铁" to listOf("地铁"),
-            "公交" to listOf("公交"),
-            "加油" to listOf("加油", "油费"),
-            "停车" to listOf("停车"),
-            "高铁" to listOf("高铁", "火车"),
-            "机票" to listOf("机票", "飞机"),
-            "衣服" to listOf("衣服", "裤子", "裙子", "外套"),
-            "鞋子" to listOf("鞋子", "鞋"),
-            "化妆品" to listOf("化妆品", "口红", "面膜"),
-            "数码" to listOf("手机", "电脑", "耳机", "平板"),
-            "电影" to listOf("电影", "影院"),
-            "游戏" to listOf("游戏", "充值"),
-            "健身" to listOf("健身", "运动", "跑步", "游泳"),
-            "旅游" to listOf("旅游", "旅行", "景点", "门票"),
-            "书籍" to listOf("书", "书籍"),
-            "课程" to listOf("课程", "网课", "培训"),
-            "药品" to listOf("药", "药品", "药店"),
-            "体检" to listOf("体检"),
-            "房租" to listOf("房租", "租金"),
-            "水电" to listOf("水电", "电费", "水费", "燃气"),
-            "物业" to listOf("物业", "物业费")
-        )
-
-        for ((subCategory, keywords) in subCategoryKeywords) {
-            if (keywords.any { lowerMessage.contains(it) }) {
-                return subCategory
-            }
-        }
-
-        // 再匹配父分类（兜底）
-        val categoryKeywords = mapOf(
-            "餐饮" to listOf("吃", "饭", "餐厅", "餐", "食", "菜", "肉", "面", "粉", "饮"),
-            "交通" to listOf("车", "交通", "出行"),
-            "购物" to listOf("买", "淘宝", "京东", "购物", "拼多多"),
-            "娱乐" to listOf("玩", "KTV", "唱歌", "娱乐"),
-            "住房" to listOf("房", "住", "居住"),
-            "医疗" to listOf("医院", "看病", "医疗"),
-            "教育" to listOf("学", "教育"),
-            "通讯" to listOf("话费", "流量", "宽带"),
-            "工资" to listOf("工资", "薪水", "薪资"),
-            "奖金" to listOf("奖金", "奖励", "红包")
-        )
-
-        for ((category, keywords) in categoryKeywords) {
-            if (keywords.any { lowerMessage.contains(it) }) {
-                return category
-            }
-        }
-
-        return null
-    }
-
     private fun inferAccount(message: String): String? {
+        val lower = message.lowercase()
         return when {
-            message.contains("微信") || message.contains("WeChat") -> "微信"
-            message.contains("支付宝") || message.contains("Alipay") -> "支付宝"
-            message.contains("现金") -> "现金"
-            message.contains("银行卡") || message.contains("银行") -> "银行卡"
-            message.contains("信用卡") -> "信用卡"
+            lower.contains("微信") || lower.contains("wechat") || lower.contains("wx") -> "微信"
+            lower.contains("支付宝") || lower.contains("alipay") || lower.contains("花呗") || lower.contains("余额宝") -> "支付宝"
+            lower.contains("现金") || lower.contains("cash") -> "现金"
+            lower.contains("信用卡") || lower.contains("credit") -> "信用卡"
+            lower.contains("储蓄卡") || lower.contains("借记卡") || lower.contains("debit") -> "银行卡"
+            lower.contains("银行卡") || lower.contains("银行") || lower.contains("工行") ||
+                lower.contains("建行") || lower.contains("农行") || lower.contains("中行") ||
+                lower.contains("招行") || lower.contains("招商") || lower.contains("交行") -> "银行卡"
             else -> null
         }
     }
 
-    private fun extractNote(message: String): String? {
-        // 尝试提取有意义的描述
-        val patterns = listOf(
-            Regex("""买了(.+?)[，。]?"""),
-            Regex("""花了.+?买(.+?)[，。]?"""),
-            Regex("""消费(.+?)[，。]?"""),
-            Regex("""用于(.+?)[，。]?""")
-        )
-        
-        for (pattern in patterns) {
-            val match = pattern.find(message)
-            if (match != null) {
-                return match.groupValues[1].trim()
-            }
-        }
-        
-        return null
-    }
-
-    /**
-     * 提取交易日期
-     * 支持：今天、昨天、前天、具体日期（3月7日、3.7、3-7）
-     */
-    private fun extractTransactionDate(message: String): Long {
-        val calendar = Calendar.getInstance()
-        val currentYear = calendar.get(Calendar.YEAR)
-        
-        // 先尝试提取具体日期（如：3月7日、3.7、3-7）
-        val specificDate = extractSpecificDateFromMessage(message, currentYear)
-        if (specificDate != null) {
-            return specificDate
-        }
-        
-        // 处理相对日期
-        when {
-            message.contains("昨天") -> calendar.add(Calendar.DAY_OF_MONTH, -1)
-            message.contains("前天") -> calendar.add(Calendar.DAY_OF_MONTH, -2)
-            message.contains("大前天") -> calendar.add(Calendar.DAY_OF_MONTH, -3)
-            message.contains("上周") -> {
-                calendar.add(Calendar.WEEK_OF_YEAR, -1)
-                calendar.set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
-            }
-            message.contains("上月") -> {
-                calendar.add(Calendar.MONTH, -1)
-                calendar.set(Calendar.DAY_OF_MONTH, 1)
-            }
-        }
-        
-        // 设置为当天的开始时间（00:00:00）
-        calendar.set(Calendar.HOUR_OF_DAY, 0)
-        calendar.set(Calendar.MINUTE, 0)
-        calendar.set(Calendar.SECOND, 0)
-        calendar.set(Calendar.MILLISECOND, 0)
-        
-        return calendar.timeInMillis
-    }
-    
-    /**
-     * 从消息中提取具体日期
-     * 支持格式：3月7日、3.7、3-7、3/7、2026年3月7日
-     */
-    private fun extractSpecificDateFromMessage(message: String, defaultYear: Int): Long? {
-        val patterns = listOf(
-            "(\\d{4})年(\\d{1,2})月(\\d{1,2})[日号]?" to listOf(1, 2, 3),  // 2026年3月7日
-            "(\\d{1,2})月(\\d{1,2})[日号]?" to listOf(-1, 1, 2),           // 3月7日（使用默认年）
-            "(\\d{1,2})\\.(\\d{1,2})" to listOf(-1, 1, 2),                  // 3.7
-            "(\\d{1,2})-(\\d{1,2})" to listOf(-1, 1, 2),                    // 3-7
-            "(\\d{1,2})/(\\d{1,2})" to listOf(-1, 1, 2)                     // 3/7
-        )
-        
-        for ((pattern, groups) in patterns) {
-            val matcher = java.util.regex.Pattern.compile(pattern).matcher(message)
-            if (matcher.find()) {
-                val year = if (groups[0] == -1) defaultYear else matcher.group(groups[0])?.toIntOrNull() ?: defaultYear
-                val month = matcher.group(groups[1])?.toIntOrNull()
-                val day = matcher.group(groups[2])?.toIntOrNull()
-                
-                if (month != null && day != null && month in 1..12 && day in 1..31) {
-                    val calendar = Calendar.getInstance()
-                    calendar.set(year, month - 1, day, 0, 0, 0)
-                    calendar.set(Calendar.MILLISECOND, 0)
-                    return calendar.timeInMillis
-                }
-            }
-        }
-        
-        return null
-    }
-
-    private fun extractAnalysisScope(message: String): AnalysisScope {
+    private fun mapHintToAccountType(hint: String): AccountType? {
+        val lower = hint.lowercase()
         return when {
-            message.contains("今天") -> AnalysisScope.TODAY
-            message.contains("昨天") -> AnalysisScope.YESTERDAY
-            message.contains("本周") || message.contains("这周") -> AnalysisScope.THIS_WEEK
-            message.contains("本月") || message.contains("这个月") -> AnalysisScope.THIS_MONTH
-            message.contains("上月") || message.contains("上个月") -> AnalysisScope.LAST_MONTH
-            message.contains("今年") || message.contains("本年") -> AnalysisScope.THIS_YEAR
-            message.contains("最近7天") || message.contains("近7天") -> AnalysisScope.LAST_7_DAYS
-            message.contains("最近30天") || message.contains("近30天") -> AnalysisScope.LAST_30_DAYS
-            else -> AnalysisScope.THIS_MONTH
+            lower.contains("微信") || lower.contains("wechat") -> AccountType.WECHAT
+            lower.contains("支付宝") || lower.contains("alipay") -> AccountType.ALIPAY
+            lower.contains("现金") || lower.contains("cash") -> AccountType.CASH
+            lower.contains("信用卡") || lower.contains("credit") -> AccountType.CREDIT_CARD
+            lower.contains("借记卡") || lower.contains("储蓄卡") || lower.contains("debit") -> AccountType.DEBIT_CARD
+            lower.contains("银行") || lower.contains("bank") -> AccountType.BANK
+            else -> null
         }
     }
 
-    private fun getScopeDateRange(scope: AnalysisScope): Pair<Long, Long> {
-        val calendar = Calendar.getInstance()
-        val endDate = calendar.timeInMillis
-        
-        val startDate = when (scope) {
-            AnalysisScope.TODAY -> {
-                calendar.set(Calendar.HOUR_OF_DAY, 0)
-                calendar.set(Calendar.MINUTE, 0)
-                calendar.set(Calendar.SECOND, 0)
-                calendar.timeInMillis
-            }
-            AnalysisScope.YESTERDAY -> {
-                calendar.add(Calendar.DAY_OF_MONTH, -1)
-                calendar.set(Calendar.HOUR_OF_DAY, 0)
-                calendar.set(Calendar.MINUTE, 0)
-                calendar.set(Calendar.SECOND, 0)
-                calendar.timeInMillis
-            }
-            AnalysisScope.THIS_WEEK -> {
-                calendar.set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
-                calendar.set(Calendar.HOUR_OF_DAY, 0)
-                calendar.set(Calendar.MINUTE, 0)
-                calendar.set(Calendar.SECOND, 0)
-                calendar.timeInMillis
-            }
-            AnalysisScope.THIS_MONTH -> {
-                calendar.set(Calendar.DAY_OF_MONTH, 1)
-                calendar.set(Calendar.HOUR_OF_DAY, 0)
-                calendar.set(Calendar.MINUTE, 0)
-                calendar.set(Calendar.SECOND, 0)
-                calendar.timeInMillis
-            }
-            AnalysisScope.LAST_MONTH -> {
-                calendar.add(Calendar.MONTH, -1)
-                calendar.set(Calendar.DAY_OF_MONTH, 1)
-                calendar.set(Calendar.HOUR_OF_DAY, 0)
-                calendar.set(Calendar.MINUTE, 0)
-                calendar.set(Calendar.SECOND, 0)
-                calendar.timeInMillis
-            }
-            AnalysisScope.THIS_YEAR -> {
-                calendar.set(Calendar.DAY_OF_YEAR, 1)
-                calendar.set(Calendar.HOUR_OF_DAY, 0)
-                calendar.set(Calendar.MINUTE, 0)
-                calendar.set(Calendar.SECOND, 0)
-                calendar.timeInMillis
-            }
-            AnalysisScope.LAST_7_DAYS -> {
-                calendar.add(Calendar.DAY_OF_MONTH, -7)
-                calendar.timeInMillis
-            }
-            AnalysisScope.LAST_30_DAYS -> {
-                calendar.add(Calendar.DAY_OF_MONTH, -30)
-                calendar.timeInMillis
-            }
-            AnalysisScope.CUSTOM -> calendar.timeInMillis
+    /** 上下文引用类型 */
+    private enum class ContextRefType {
+        REPEAT,         // 再记一笔同样的
+        CHANGE_AMOUNT,  // 金额改成X
+        CHANGE_TYPE,    // 换成收入/支出
+        CHANGE_ACCOUNT, // 换个账户
+        GENERAL_REF     // 泛指"刚才那笔"但带新金额
+    }
+
+    /** 检测用户消息是否引用上一次操作 */
+    private fun detectContextReference(message: String): ContextRefType? {
+        val lower = message.lowercase()
+        return when {
+            lower.contains("再记一笔") || lower.contains("同样的") || lower.contains("再来一笔") ||
+                lower.contains("一样的") || lower.contains("再记") -> ContextRefType.REPEAT
+            (lower.contains("换成收入") || lower.contains("改成收入") ||
+                lower.contains("换成支出") || lower.contains("改成支出")) -> ContextRefType.CHANGE_TYPE
+            (lower.contains("换") || lower.contains("改")) &&
+                (lower.contains("账户") || lower.contains("微信") || lower.contains("支付宝") ||
+                    lower.contains("现金") || lower.contains("银行") || lower.contains("信用卡")) -> ContextRefType.CHANGE_ACCOUNT
+            (lower.contains("改成") || lower.contains("换成") || lower.contains("应该是")) &&
+                messageParser.extractAmount(message) != null -> ContextRefType.CHANGE_AMOUNT
+            (lower.contains("那笔") || lower.contains("上一笔") || lower.contains("刚才")) &&
+                messageParser.extractAmount(message) != null -> ContextRefType.GENERAL_REF
+            else -> null
         }
-        
-        return Pair(startDate, endDate)
+    }
+
+    /** 基于上一次操作和用户指令，生成新的 RecordTransaction */
+    private fun applyContextOverrides(
+        last: AIAction.RecordTransaction,
+        message: String,
+        refType: ContextRefType
+    ): AIAction.RecordTransaction {
+        return when (refType) {
+            ContextRefType.REPEAT -> last.copy(date = System.currentTimeMillis())
+            ContextRefType.CHANGE_AMOUNT -> {
+                val newAmount = messageParser.extractAmount(message) ?: last.amount
+                last.copy(amount = newAmount, date = System.currentTimeMillis())
+            }
+            ContextRefType.CHANGE_TYPE -> {
+                val lower = message.lowercase()
+                val newType = when {
+                    lower.contains("收入") -> TransactionType.INCOME
+                    lower.contains("支出") -> TransactionType.EXPENSE
+                    lower.contains("转账") -> TransactionType.TRANSFER
+                    else -> last.type
+                }
+                last.copy(type = newType, date = System.currentTimeMillis())
+            }
+            ContextRefType.CHANGE_ACCOUNT -> {
+                val newAccountHint = inferAccount(message) ?: last.accountHint
+                last.copy(accountHint = newAccountHint, date = System.currentTimeMillis())
+            }
+            ContextRefType.GENERAL_REF -> {
+                val newAmount = messageParser.extractAmount(message) ?: last.amount
+                last.copy(amount = newAmount, date = System.currentTimeMillis())
+            }
+        }
     }
 
     private fun generateExplanation(intentAnalysis: IntentAnalysis, actions: List<AIAction>): String {
