@@ -723,7 +723,7 @@ private fun ModelSelectorWithSearch(
                             .fillMaxWidth()
                             .heightIn(max = 300.dp)
                     ) {
-                        items(filteredModels) { aiModel ->
+                        items(filteredModels, key = { it.id }) { aiModel ->
                             ModelListItem(
                                 model = aiModel,
                                 isSelected = aiModel.id == selectedModelId,
@@ -1484,7 +1484,7 @@ private fun ModelManageDialog(
                 LazyColumn(
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    items(filteredModels) { model ->
+                    items(filteredModels, key = { it.id }) { model ->
                         CustomModelListItem(
                             model = model,
                             isSelected = model.id == selectedModelId,

@@ -43,6 +43,8 @@ fun OverviewScreen(
     val todayStats by viewModel.todayStats.collectAsState()
     val weekStats by viewModel.weekStats.collectAsState()
 
+    val totalAssets by remember(accounts) { derivedStateOf { accounts.sumOf { it.balance } } }
+
     // 底部菜单状态
     var showAddMenu by remember { mutableStateOf(false) }
 
@@ -86,7 +88,7 @@ fun OverviewScreen(
         ) {
             // 总资产卡片
             TotalAssetsCard(
-                totalAssets = accounts.sumOf { it.balance },
+                totalAssets = totalAssets,
                 onEyeClick = { viewModel.toggleBalanceVisibility() },
                 isVisible = uiState.isBalanceVisible
             )

@@ -54,7 +54,7 @@ import javax.inject.Singleton
         Tag::class,
         TransactionTag::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -98,6 +98,13 @@ abstract class AppDatabase : RoomDatabase() {
                 """)
             }
         }
+
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_categories_parentId` ON `categories` (`parentId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_categories_type` ON `categories` (`type`)")
+            }
+        }
     }
 }
 
@@ -138,7 +145,7 @@ class DatabaseFactory @Inject constructor(
         )
             .openHelperFactory(factory)
             .fallbackToDestructiveMigrationFrom(1, 2, 3)
-            .addMigrations(AppDatabase.MIGRATION_4_5)
+            .addMigrations(AppDatabase.MIGRATION_4_5, AppDatabase.MIGRATION_5_6)
             .addCallback(DatabaseCallback())
             .build()
 

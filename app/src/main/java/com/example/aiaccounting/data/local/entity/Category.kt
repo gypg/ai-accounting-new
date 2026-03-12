@@ -1,12 +1,19 @@
 package com.example.aiaccounting.data.local.entity
 
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 
 /**
  * Category entity for transaction categorization
  */
-@Entity(tableName = "categories")
+@Entity(
+    tableName = "categories",
+    indices = [
+        Index(value = ["parentId"]),
+        Index(value = ["type"])
+    ]
+)
 data class Category(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0,
