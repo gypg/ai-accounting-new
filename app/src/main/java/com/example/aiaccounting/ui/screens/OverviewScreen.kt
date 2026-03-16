@@ -125,8 +125,14 @@ fun OverviewScreen(
                         Spacer(modifier = Modifier.width(12.dp))
                         Column {
                             Text("AI管家", fontWeight = FontWeight.Bold)
+                            val butlerName by viewModel.currentButlerName.collectAsState()
+                            val subtitle = if (butlerName.isBlank()) {
+                                "选择 / 创建自定义管家"
+                            } else {
+                                "当前：$butlerName（点击切换/创建）"
+                            }
                             Text(
-                                "选择 / 创建自定义管家",
+                                subtitle,
                                 fontSize = 12.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )

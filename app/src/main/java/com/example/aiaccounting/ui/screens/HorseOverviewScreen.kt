@@ -117,11 +117,14 @@ fun HorseOverviewScreen(
                         .verticalScroll(rememberScrollState())
                         .padding(horizontal = 16.dp)
                 ) {
+                    val butlerName by viewModel.currentButlerName.collectAsState()
+
                     // 年度收支概览 - 真实数据
                     YearlySummaryCard(
                         totalIncome = monthlyStats.totalIncome,
                         totalExpense = monthlyStats.totalExpense,
-                        balance = monthlyStats.totalIncome - monthlyStats.totalExpense
+                        balance = monthlyStats.totalIncome - monthlyStats.totalExpense,
+                        butlerName = butlerName
                     )
 
                     Spacer(modifier = Modifier.height(16.dp))
@@ -183,7 +186,8 @@ private fun parseColor(colorString: String): Color {
 fun YearlySummaryCard(
     totalIncome: Double,
     totalExpense: Double,
-    balance: Double
+    balance: Double,
+    butlerName: String
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -196,6 +200,14 @@ fun YearlySummaryCard(
         Column(
             modifier = Modifier.padding(20.dp)
         ) {
+            Text(
+                text = if (butlerName.isBlank()) "AI管家" else "AI管家 · $butlerName",
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = HorseTheme2026Colors.TextSecondary,
+                modifier = Modifier.padding(bottom = 12.dp)
+            )
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceEvenly

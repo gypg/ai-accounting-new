@@ -9,18 +9,20 @@ import com.example.aiaccounting.data.local.entity.TransactionType
 import com.example.aiaccounting.data.repository.AccountRepository
 import com.example.aiaccounting.data.repository.CategoryRepository
 import com.example.aiaccounting.data.repository.TransactionRepository
+import com.example.aiaccounting.data.repository.ButlerRepository
 import com.example.aiaccounting.ui.components.charts.MonthlyData
-import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.util.Calendar
+import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 
 @HiltViewModel
 class OverviewViewModel @Inject constructor(
     private val transactionRepository: TransactionRepository,
     private val accountRepository: AccountRepository,
-    private val categoryRepository: CategoryRepository
+    private val categoryRepository: CategoryRepository,
+    private val butlerRepository: ButlerRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(OverviewUiState())
@@ -83,6 +85,13 @@ class OverviewViewModel @Inject constructor(
 
     val weekStats = allStats.map { it.week }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), DayStats())
+
+    val currentButlerName: StateFlow<String> = butlerRepository.currentButlerId
+        .map { id ->
+            val builtIn = com.example.aiaccounting.data.model.ButlerManager.getButlerById(id)
+            builtIn?.name ?: "自定义管家"
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
 
     fun toggleBalanceVisibility() {
         _uiState.update { it.copy(isBalanceVisible = !it.isBalanceVisible) }
