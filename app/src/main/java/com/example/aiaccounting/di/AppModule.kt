@@ -9,6 +9,7 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import okhttp3.OkHttpClient
 import javax.inject.Singleton
 
 /**
@@ -35,8 +36,9 @@ object AppModule {
     @Provides
     @Singleton
     fun provideAIVoiceRecognitionService(
-        aiService: AIService
+        aiService: AIService,
+        @VoiceOkHttpClient client: OkHttpClient
     ): AIVoiceRecognitionService {
-        return AIVoiceRecognitionService(aiService)
+        return AIVoiceRecognitionService(aiService, client)
     }
 }

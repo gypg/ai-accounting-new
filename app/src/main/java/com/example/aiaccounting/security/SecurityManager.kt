@@ -27,6 +27,7 @@ class SecurityManager(private val context: Context) {
         private const val FAILED_ATTEMPTS_KEY = "failed_attempts"
         private const val LOCK_TIME_KEY = "lock_time"
         private const val BIOMETRIC_ENABLED_KEY = "biometric_enabled"
+        private const val LAST_AUTH_TIME_KEY = "last_auth_time"
         private const val MAX_FAILED_ATTEMPTS = 5
         private const val LOCK_DURATION_MS = 30 * 60 * 1000 // 30 minutes
     }
@@ -57,14 +58,35 @@ class SecurityManager(private val context: Context) {
     }
 
     /**
+     * PIN 状态（用于 fail-closed 路由判断）
+     */
+    sealed class PinState {
+        data object Set : PinState()
+        data object NotSet : PinState()
+        data class Error(val cause: Throwable) : PinState()
+    }
+
+    /**
+     * 获取 PIN 设置状态。
+     *
+     * 注意：这个接口用于主流程路由，必须能区分“未设置 PIN”与“安全组件初始化失败”。
+     */
+    fun getPinState(): PinState {
+        return try {
+            if (getEncryptedPrefs().contains(PIN_HASH_KEY)) PinState.Set else PinState.NotSet
+        } catch (e: Exception) {
+            PinState.Error(e)
+        }
+    }
+
+    /**
      * Check if PIN is set
      */
     fun isPinSet(): Boolean {
-        return try {
-            getEncryptedPrefs().contains(PIN_HASH_KEY)
-        } catch (e: Exception) {
-            // 如果初始化失败，返回false
-            false
+        return when (getPinState()) {
+            is PinState.Set -> true
+            is PinState.NotSet -> false
+            is PinState.Error -> false // fail-closed
         }
     }
 
@@ -96,6 +118,7 @@ class SecurityManager(private val context: Context) {
                 .remove(PIN_SALT_KEY)
                 .remove(FAILED_ATTEMPTS_KEY)
                 .remove(LOCK_TIME_KEY)
+                .remove(LAST_AUTH_TIME_KEY)
                 .apply()
             true
         } catch (e: Exception) {
@@ -122,6 +145,7 @@ class SecurityManager(private val context: Context) {
             getEncryptedPrefs().edit()
                 .putInt(FAILED_ATTEMPTS_KEY, 0)
                 .putLong(LOCK_TIME_KEY, 0)
+                .putLong(LAST_AUTH_TIME_KEY, System.currentTimeMillis())
                 .apply()
             return true
         } else {
@@ -138,6 +162,41 @@ class SecurityManager(private val context: Context) {
                     .apply()
             }
             return false
+        }
+    }
+
+    /** 标记当前会话已完成身份验证（用于 Widget/Service 前置校验） */
+    fun markAuthenticatedNow() {
+        getEncryptedPrefs().edit()
+            .putLong(LAST_AUTH_TIME_KEY, System.currentTimeMillis())
+            .apply()
+    }
+
+    /** 统一的“解锁成功”入口：刷新鉴权会话时间窗口。 */
+    fun onAuthenticationSucceeded() {
+        markAuthenticatedNow()
+    }
+
+    /**
+     * 是否在允许的时间窗口内完成过身份验证。
+     *
+     * @param ttlMs 允许的有效期，默认 10 分钟
+     */
+    fun hasValidAuthSession(ttlMs: Long = 10 * 60 * 1000L): Boolean {
+        return try {
+            // PIN 未设置时，不需要会话鉴权
+            when (getPinState()) {
+                is PinState.NotSet -> true
+                is PinState.Error -> false
+                is PinState.Set -> {
+                    if (isLocked()) return false
+                    val lastAuth = getEncryptedPrefs().getLong(LAST_AUTH_TIME_KEY, 0L)
+                    if (lastAuth <= 0L) return false
+                    System.currentTimeMillis() - lastAuth < ttlMs
+                }
+            }
+        } catch (e: Exception) {
+            false
         }
     }
 
@@ -318,13 +377,20 @@ class SecurityManager(private val context: Context) {
     fun getEncryptedString(prefKey: String): String? {
         val encryptedBase64 = getEncryptedPrefs().getString("${prefKey}_data", null) ?: return null
         val ivBase64 = getEncryptedPrefs().getString("${prefKey}_iv", null) ?: return null
-        
+
         val encrypted = android.util.Base64.decode(encryptedBase64, android.util.Base64.DEFAULT)
         val iv = android.util.Base64.decode(ivBase64, android.util.Base64.DEFAULT)
-        
+
         val encryptionKey = getEncryptionKey()
         val decrypted = decrypt(encrypted, iv, encryptionKey)
-        
-        return String(decrypted)
+
+        return String(decrypted, Charsets.UTF_8)
+    }
+
+    fun removeEncryptedString(prefKey: String) {
+        getEncryptedPrefs().edit()
+            .remove("${prefKey}_data")
+            .remove("${prefKey}_iv")
+            .apply()
     }
 }

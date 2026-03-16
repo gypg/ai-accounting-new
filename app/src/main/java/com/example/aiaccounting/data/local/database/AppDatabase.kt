@@ -18,6 +18,7 @@ import com.example.aiaccounting.data.local.dao.ChatSessionDao
 import com.example.aiaccounting.data.local.dao.ChatMessageDao
 import com.example.aiaccounting.data.local.dao.ChatMemoryDao
 import com.example.aiaccounting.data.local.dao.TagDao
+import com.example.aiaccounting.data.local.dao.CustomButlerDao
 import com.example.aiaccounting.data.local.entity.Account
 import com.example.aiaccounting.data.local.entity.Category
 import com.example.aiaccounting.data.local.entity.Transaction
@@ -29,6 +30,7 @@ import com.example.aiaccounting.data.local.entity.ChatMessageEntity
 import com.example.aiaccounting.data.local.entity.ChatMemory
 import com.example.aiaccounting.data.local.entity.Tag
 import com.example.aiaccounting.data.local.entity.TransactionTag
+import com.example.aiaccounting.data.local.entity.CustomButlerEntity
 import com.example.aiaccounting.security.SecurityManager
 import com.example.aiaccounting.data.storage.StorageManager
 import com.example.aiaccounting.data.storage.ExternalSharedPreferences
@@ -52,9 +54,10 @@ import javax.inject.Singleton
         ChatMemory::class,
         com.example.aiaccounting.data.local.entity.AIPermissionLog::class,
         Tag::class,
-        TransactionTag::class
+        TransactionTag::class,
+        com.example.aiaccounting.data.local.entity.CustomButlerEntity::class
     ],
-    version = 6,
+    version = 7,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -71,6 +74,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun chatMemoryDao(): ChatMemoryDao
     abstract fun aiPermissionLogDao(): com.example.aiaccounting.data.local.dao.AIPermissionLogDao
     abstract fun tagDao(): TagDao
+    abstract fun customButlerDao(): CustomButlerDao
 
     companion object {
         const val DATABASE_NAME = "ai_accounting.db"
@@ -105,6 +109,38 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("CREATE INDEX IF NOT EXISTS `index_categories_type` ON `categories` (`type`)")
             }
         }
+
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `custom_butlers` (
+                        `id` TEXT NOT NULL,
+                        `name` TEXT NOT NULL,
+                        `title` TEXT NOT NULL,
+                        `description` TEXT NOT NULL,
+                        `avatarType` TEXT NOT NULL,
+                        `avatarValue` TEXT NOT NULL,
+                        `userCallName` TEXT NOT NULL,
+                        `butlerSelfName` TEXT NOT NULL,
+                        `communicationStyle` INTEGER NOT NULL,
+                        `emotionIntensity` INTEGER NOT NULL,
+                        `professionalism` INTEGER NOT NULL,
+                        `humor` INTEGER NOT NULL,
+                        `proactivity` INTEGER NOT NULL,
+                        `featureFlagsJson` TEXT NOT NULL,
+                        `priorityJson` TEXT NOT NULL,
+                        `systemPrompt` TEXT NOT NULL,
+                        `promptVersion` INTEGER NOT NULL,
+                        `createdAt` INTEGER NOT NULL,
+                        `updatedAt` INTEGER NOT NULL,
+                        `isDeleted` INTEGER NOT NULL,
+                        PRIMARY KEY(`id`)
+                    )
+                    """.trimIndent()
+                )
+            }
+        }
     }
 }
 
@@ -132,10 +168,10 @@ class DatabaseFactory @Inject constructor(
         // Derive database key from PIN
         val salt = getOrCreateSalt()
         val dbKey = securityManager.deriveDatabaseKey(pin, salt)
-        val passphrase = String(dbKey, Charsets.UTF_8)
 
         // Create SQLCipher support factory
-        val factory = SupportFactory(passphrase.toByteArray())
+        // IMPORTANT: derived key bytes are arbitrary; never roundtrip through UTF-8 String (lossy)
+        val factory = SupportFactory(dbKey)
 
         // Build database with internal storage path (more stable)
         database = androidx.room.Room.databaseBuilder(
@@ -145,7 +181,7 @@ class DatabaseFactory @Inject constructor(
         )
             .openHelperFactory(factory)
             .fallbackToDestructiveMigrationFrom(1, 2, 3)
-            .addMigrations(AppDatabase.MIGRATION_4_5, AppDatabase.MIGRATION_5_6)
+            .addMigrations(AppDatabase.MIGRATION_4_5, AppDatabase.MIGRATION_5_6, AppDatabase.MIGRATION_6_7)
             .addCallback(DatabaseCallback())
             .build()
 

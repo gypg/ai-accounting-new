@@ -43,6 +43,10 @@ sealed class Screen(val route: String) {
     object AISettings : Screen("ai_settings")
     object ButlerSettings : Screen("butler_settings")
     object Tags : Screen("tags")
+    object ButlerMarket : Screen("butler_market")
+    object ButlerEditor : Screen("butler_editor/{butlerId}") {
+        fun createRoute(butlerId: String?) = "butler_editor/${butlerId ?: "new"}"
+    }
 }
 
 /**
@@ -230,8 +234,11 @@ fun AppNavigation(
                         onNavigateToProfile = {
                             navController.navigate(Screen.Profile.route)
                         },
-                        onNavigateToAIModelSettings = {
+                        onNavigateToButlerSettings = {
                             navController.navigate(Screen.ButlerSettings.route)
+                        },
+                        onNavigateToButlerMarket = {
+                            navController.navigate(Screen.ButlerMarket.route)
                         },
                         onNavigateToAccounts = {
                             navController.navigate(Screen.Accounts.route)
@@ -276,8 +283,11 @@ fun AppNavigation(
                         onNavigateToProfile = {
                             navController.navigate(Screen.Profile.route)
                         },
-                        onNavigateToAIModelSettings = {
+                        onNavigateToButlerSettings = {
                             navController.navigate(Screen.ButlerSettings.route)
+                        },
+                        onNavigateToButlerMarket = {
+                            navController.navigate(Screen.ButlerMarket.route)
                         },
                         onNavigateToAccounts = {
                             navController.navigate(Screen.Accounts.route)
@@ -450,6 +460,9 @@ fun AppNavigation(
                 ButlerSettingsScreen(
                     onNavigateBack = {
                         navController.popBackStack()
+                    },
+                    onNavigateToMarket = {
+                        navController.navigate(Screen.ButlerMarket.route)
                     }
                 )
             }
@@ -458,6 +471,36 @@ fun AppNavigation(
             composable(Screen.Tags.route) {
                 TagsScreen(
                     onBack = {
+                        navController.popBackStack()
+                    }
+                )
+            }
+
+            // Butler Market
+            composable(Screen.ButlerMarket.route) {
+                ButlerMarketScreen(
+                    onNavigateBack = {
+                        navController.popBackStack()
+                    },
+                    onNavigateToEditor = { butlerId ->
+                        navController.navigate(Screen.ButlerEditor.createRoute(butlerId))
+                    }
+                )
+            }
+
+            // Butler Editor
+            composable(
+                route = Screen.ButlerEditor.route,
+                arguments = listOf(navArgument("butlerId") {
+                    type = NavType.StringType
+                    defaultValue = "new"
+                })
+            ) { backStackEntry ->
+                val rawId = backStackEntry.arguments?.getString("butlerId")
+                val butlerId = if (rawId == "new") null else rawId
+                ButlerEditorScreen(
+                    butlerId = butlerId,
+                    onNavigateBack = {
                         navController.popBackStack()
                     }
                 )

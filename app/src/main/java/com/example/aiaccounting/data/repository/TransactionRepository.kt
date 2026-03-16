@@ -28,6 +28,14 @@ class TransactionRepository @Inject constructor(
         return transactionDao.getAllTransactions()
     }
 
+    suspend fun getRecentTransactionsList(limit: Int): List<Transaction> {
+        return transactionDao.getRecentTransactionsList(limit)
+    }
+
+    suspend fun getTransactionsByDateRangeList(startDate: Long, endDate: Long, limit: Int): List<Transaction> {
+        return transactionDao.getTransactionsByDateRangeList(startDate, endDate, limit)
+    }
+
     /**
      * Get all transactions as list
      */

@@ -2,6 +2,7 @@ package com.example.aiaccounting.data.local.prefs
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.example.aiaccounting.security.SecurityManager
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -11,7 +12,8 @@ import javax.inject.Singleton
  */
 @Singleton
 class AppStateManager @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val securityManager: SecurityManager
 ) {
     companion object {
         private const val PREFS_NAME = "app_state_prefs"
@@ -19,7 +21,8 @@ class AppStateManager @Inject constructor(
         private const val KEY_INITIAL_SETUP_COMPLETED = "initial_setup_completed"
         private const val KEY_AI_MODEL_TYPE = "ai_model_type"
         private const val KEY_CUSTOM_MODEL_URL = "custom_model_url"
-        private const val KEY_CUSTOM_MODEL_API_KEY = "custom_model_api_key"
+        private const val KEY_CUSTOM_MODEL_API_KEY = "custom_model_api_key" // legacy plaintext key (will be migrated)
+        private const val KEY_CUSTOM_MODEL_API_KEY_ENCRYPTED = "custom_model_api_key_encrypted"
         private const val KEY_USER_NAME = "user_name"
         private const val KEY_USER_AVATAR = "user_avatar"
         private const val KEY_CURRENCY = "currency"
@@ -31,9 +34,25 @@ class AppStateManager @Inject constructor(
         const val AI_MODEL_DEFAULT = "default"
         const val AI_MODEL_CUSTOM = "custom"
     }
-
     private val prefs: SharedPreferences by lazy {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    }
+
+    private fun migrateLegacyCustomModelApiKeyIfNeeded() {
+        val legacy = prefs.getString(KEY_CUSTOM_MODEL_API_KEY, "").orEmpty()
+        if (legacy.isBlank()) return
+
+        try {
+            val existing = securityManager.getEncryptedString(KEY_CUSTOM_MODEL_API_KEY_ENCRYPTED).orEmpty()
+            if (existing.isBlank()) {
+                securityManager.storeEncryptedString(KEY_CUSTOM_MODEL_API_KEY_ENCRYPTED, legacy)
+            }
+
+            // only remove legacy after successful check/store
+            prefs.edit().remove(KEY_CUSTOM_MODEL_API_KEY).apply()
+        } catch (_: Exception) {
+            // Keep legacy plaintext so user doesn't lose access; avoid logging secrets
+        }
     }
 
     // ==================== 数据库初始化状态 ====================
@@ -75,11 +94,24 @@ class AppStateManager @Inject constructor(
     }
 
     fun getCustomModelApiKey(): String {
-        return prefs.getString(KEY_CUSTOM_MODEL_API_KEY, "") ?: ""
+        migrateLegacyCustomModelApiKeyIfNeeded()
+        return try {
+            securityManager.getEncryptedString(KEY_CUSTOM_MODEL_API_KEY_ENCRYPTED).orEmpty()
+        } catch (_: Exception) {
+            // fail-closed: do not fall back to plaintext secret
+            ""
+        }
     }
 
     fun setCustomModelApiKey(apiKey: String) {
-        prefs.edit().putString(KEY_CUSTOM_MODEL_API_KEY, apiKey).apply()
+        migrateLegacyCustomModelApiKeyIfNeeded()
+        try {
+            securityManager.storeEncryptedString(KEY_CUSTOM_MODEL_API_KEY_ENCRYPTED, apiKey)
+            // Ensure plaintext is not kept
+            prefs.edit().remove(KEY_CUSTOM_MODEL_API_KEY).apply()
+        } catch (_: Exception) {
+            // fail-closed: do not store plaintext secret
+        }
     }
 
     // ==================== 用户信息 ====================
@@ -148,6 +180,11 @@ class AppStateManager @Inject constructor(
     fun clearAllData() {
         // 清除所有SharedPreferences
         prefs.edit().clear().apply()
+
+        // 清除安全区（PIN + 敏感 key）
+        securityManager.clearPin()
+        securityManager.removeEncryptedString(KEY_CUSTOM_MODEL_API_KEY_ENCRYPTED)
+
         // 清除数据库
         context.deleteDatabase("ai_accounting_db")
     }

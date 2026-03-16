@@ -12,6 +12,7 @@ import com.example.aiaccounting.data.local.dao.ChatMessageDao
 import com.example.aiaccounting.data.local.dao.ChatSessionDao
 import com.example.aiaccounting.data.local.dao.TransactionDao
 import com.example.aiaccounting.data.local.dao.TransactionTemplateDao
+import com.example.aiaccounting.data.local.dao.CustomButlerDao
 import com.example.aiaccounting.data.local.database.AppDatabase
 import com.example.aiaccounting.data.repository.AccountRepository
 import com.example.aiaccounting.data.repository.AIConversationRepository
@@ -55,6 +56,7 @@ object DatabaseModule {
             AppDatabase.DATABASE_NAME
         )
             .openHelperFactory(factory)
+            .addMigrations(AppDatabase.MIGRATION_4_5, AppDatabase.MIGRATION_5_6, AppDatabase.MIGRATION_6_7)
             .fallbackToDestructiveMigration() // For development only
             .build()
     }
@@ -188,6 +190,12 @@ object DatabaseModule {
     @Singleton
     fun provideTagDao(database: AppDatabase): com.example.aiaccounting.data.local.dao.TagDao {
         return database.tagDao()
+    }
+
+    @Provides
+    @Singleton
+    fun provideCustomButlerDao(database: AppDatabase): CustomButlerDao {
+        return database.customButlerDao()
     }
 
     @Provides

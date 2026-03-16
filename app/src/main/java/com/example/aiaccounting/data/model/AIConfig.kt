@@ -17,12 +17,25 @@ data class AIConfig(
         const val KEY_MODEL = "ai_model"
         const val KEY_ENABLED = "ai_enabled"
         const val KEY_USE_BUILTIN = "ai_use_builtin" // 是否使用内置配置
+        const val KEY_GATEWAY_BASE_URL = "ai_gateway_base_url" // 邀请码网关地址
+        const val KEY_INVITE_BOUND = "ai_invite_bound" // 是否通过邀请码绑定（用于隐藏 token / apiUrl 等敏感信息）
+
+        // 邀请码绑定专用存储（避免与用户自定义 API Key 相互覆盖）
+        const val KEY_INVITE_TOKEN = "ai_invite_token"
+        const val KEY_INVITE_CODE = "ai_invite_code"
+        const val KEY_INVITE_API_URL = "ai_invite_api_url"
+        const val KEY_INVITE_MODEL = "ai_invite_model"
+        const val KEY_INVITE_RPM = "ai_invite_rpm"
+
+        // 模型选择模式（用于 Auto/手动选择）
+        const val KEY_MODEL_MODE = "ai_model_mode" // AUTO | FIXED
+        const val KEY_INVITE_MODEL_MODE = "ai_invite_model_mode" // AUTO | FIXED
 
         // 内置默认配置 - 预置的AI服务
         // 红月API - 无需用户手动配置，开箱即用
         val BUILTIN_CONFIG = AIConfig(
             provider = AIProvider.CUSTOM,
-            apiKey = "sk-FtzwT2aujsUgmItI32cOoeOulDl6vslI2a7iapJNDSnE49JM",
+            apiKey = "",
             apiUrl = "https://hongyue.cloud/v1",
             model = "openai/gpt-oss-120b",
             isEnabled = true
@@ -61,8 +74,14 @@ data class AIConfig(
 
         // 获取实际使用的配置（优先使用内置配置）
         fun getEffectiveConfig(userConfig: AIConfig, useBuiltin: Boolean): AIConfig {
-            return if (useBuiltin && BUILTIN_CONFIG.apiKey != "YOUR_API_KEY_HERE") {
-                BUILTIN_CONFIG
+            return if (useBuiltin) {
+                userConfig.copy(
+                    provider = BUILTIN_CONFIG.provider,
+                    apiKey = BUILTIN_CONFIG.apiKey,
+                    apiUrl = BUILTIN_CONFIG.apiUrl,
+                    model = BUILTIN_CONFIG.model,
+                    isEnabled = true
+                )
             } else {
                 userConfig
             }

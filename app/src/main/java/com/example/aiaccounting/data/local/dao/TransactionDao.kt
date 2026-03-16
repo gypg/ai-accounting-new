@@ -14,6 +14,20 @@ interface TransactionDao {
     @Query("SELECT * FROM transactions ORDER BY date DESC, createdAt DESC")
     fun getAllTransactions(): Flow<List<Transaction>>
 
+    @Query("SELECT * FROM transactions ORDER BY date DESC, createdAt DESC LIMIT :limit")
+    suspend fun getRecentTransactionsList(limit: Int): List<Transaction>
+
+    @Query(
+        """
+        SELECT * FROM transactions
+        WHERE date >= :startDate AND date <= :endDate
+        ORDER BY date DESC, createdAt DESC
+        LIMIT :limit
+        """
+    )
+    suspend fun getTransactionsByDateRangeList(startDate: Long, endDate: Long, limit: Int): List<Transaction>
+
+
     @Query("SELECT * FROM transactions WHERE id = :transactionId")
     suspend fun getTransactionById(transactionId: Long): Transaction?
 
