@@ -31,6 +31,7 @@ import com.example.aiaccounting.data.repository.AIUsageStats
 import com.example.aiaccounting.ui.viewmodel.AISettingsViewModel
 import com.example.aiaccounting.ui.viewmodel.InviteBindResult
 import com.example.aiaccounting.ui.viewmodel.TestResult
+import com.example.aiaccounting.utils.ModelIdCategorizer.categorizeModelId
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -559,7 +560,7 @@ private fun InviteModelSelectorCard(
                 id = it.id,
                 displayName = if (it.name.isBlank()) it.id else it.name,
                 description = it.description,
-                category = categorizeModel(it.id)
+                category = categorizeModelId(it.id)
             )
         }
     }
@@ -662,16 +663,44 @@ private fun CategorizedModelSelector(
 
     val selectedModel = models.find { it.id == selectedModelId }
 
+    val preferredCategoryOrder = remember {
+        listOf(
+            "OpenAI",
+            "Claude",
+            "Gemini",
+            "DeepSeek",
+            "通义千问",
+            "Llama",
+            "Mistral",
+            "ChatGLM",
+            "Yi",
+            "其他"
+        )
+    }
+
     val categories = remember(models) {
-        listOf("全部") + models.map { it.category }.distinct().sorted()
+        val raw = models.map { it.category }.distinct()
+        val ordered = preferredCategoryOrder.filter { it in raw }
+        val remaining = (raw - preferredCategoryOrder.toSet()).sorted()
+        listOf("全部") + ordered + remaining
     }
 
     val filteredModels = remember(models, searchQuery, selectedCategory) {
+        val rawQuery = searchQuery.trim()
+        val tokens = rawQuery
+            .lowercase()
+            .replace(Regex("[-_./]"), " ")
+            .split(Regex("\\s+"))
+            .filter { it.isNotBlank() }
+
         models.filter { model ->
-            val matchesSearch = searchQuery.isBlank() ||
-                model.displayName.contains(searchQuery, ignoreCase = true) ||
-                model.id.contains(searchQuery, ignoreCase = true) ||
-                model.description.contains(searchQuery, ignoreCase = true)
+            val searchable = (model.displayName + " " + model.id + " " + model.description)
+                .lowercase()
+                .replace(Regex("[-_./]"), " ")
+
+            val matchesSearch = tokens.isEmpty() || tokens.all { token ->
+                searchable.contains(token)
+            }
             val matchesCategory = selectedCategory == "全部" || model.category == selectedCategory
             matchesSearch && matchesCategory
         }
@@ -931,7 +960,7 @@ private fun APIConfigCard(
                 id = it.id,
                 displayName = if (it.name.isBlank()) it.id else it.name,
                 description = it.description,
-                category = categorizeModel(it.id)
+                category = categorizeModelId(it.id)
             )
         }
     } else {
@@ -1317,7 +1346,7 @@ private fun TestResultCard(
     onDismiss: () -> Unit
 ) {
     val (backgroundColor, textColor, icon, message) = when (result) {
-        is TestResult.Success -> Quadruple(
+        TestResult.Success -> Quadruple(
             MaterialTheme.colorScheme.primaryContainer,
             MaterialTheme.colorScheme.onPrimaryContainer,
             Icons.Default.CheckCircle,
@@ -1806,7 +1835,7 @@ private fun CustomModelManager(
                 name = it.name,
                 group = it.description,
                 isRemote = true,
-                category = categorizeModel(it.id)
+                category = categorizeModelId(it.id)
             )
         }
         remote + customModels
@@ -2067,9 +2096,27 @@ private fun ModelManageDialog(
     var searchQuery by remember { mutableStateOf("") }
     var selectedCategory by remember { mutableStateOf("全部") }
     
+    val preferredCategoryOrder = remember {
+        listOf(
+            "OpenAI",
+            "Claude",
+            "Gemini",
+            "DeepSeek",
+            "通义千问",
+            "Llama",
+            "Mistral",
+            "ChatGLM",
+            "Yi",
+            "其他"
+        )
+    }
+
     // 分类列表
     val categories = remember(models) {
-        listOf("全部") + models.map { it.category }.distinct().sorted()
+        val raw = models.map { it.category }.distinct()
+        val ordered = preferredCategoryOrder.filter { it in raw }
+        val remaining = (raw - preferredCategoryOrder.toSet()).sorted()
+        listOf("全部") + ordered + remaining
     }
     
     // 筛选后的模型
@@ -2400,17 +2447,5 @@ private data class CustomModelInfo(
  * 根据模型ID分类
  */
 private fun categorizeModel(modelId: String): String {
-    val lowerId = modelId.lowercase()
-    return when {
-        lowerId.contains("gpt") || lowerId.contains("openai") -> "OpenAI"
-        lowerId.contains("claude") -> "Claude"
-        lowerId.contains("gemini") || lowerId.contains("google") -> "Gemini"
-        lowerId.contains("llama") || lowerId.contains("meta") -> "Llama"
-        lowerId.contains("qwen") -> "通义千问"
-        lowerId.contains("deepseek") -> "DeepSeek"
-        lowerId.contains("glm") -> "ChatGLM"
-        lowerId.contains("mistral") -> "Mistral"
-        lowerId.contains("yi") -> "Yi"
-        else -> "其他"
-    }
+    return categorizeModelId(modelId)
 }

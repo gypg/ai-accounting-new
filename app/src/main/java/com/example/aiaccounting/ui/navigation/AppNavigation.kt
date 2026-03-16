@@ -173,6 +173,9 @@ fun AppNavigation(
                         onNavigateToAI = {
                             navController.navigate(Screen.AIAssistant.route)
                         },
+                        onNavigateToButlerMarket = {
+                            navController.navigate(Screen.ButlerSettings.route)
+                        },
                         onNavigateToTransactions = {
                             navController.navigate("transactions")
                         },
@@ -187,6 +190,9 @@ fun AppNavigation(
                         },
                         onNavigateToAI = {
                             navController.navigate(Screen.AIAssistant.route)
+                        },
+                        onNavigateToButlerMarket = {
+                            navController.navigate(Screen.ButlerSettings.route)
                         }
                     )
                 }
@@ -355,6 +361,9 @@ fun AppNavigation(
                 AIAssistantScreen(
                     onNavigateBack = {
                         navController.popBackStack()
+                    },
+                    onNavigateToButlerMarket = {
+                        navController.navigate(Screen.ButlerSettings.route)
                     }
                 )
             }

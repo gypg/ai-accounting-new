@@ -65,6 +65,7 @@ import java.util.*
 @Composable
 fun AIAssistantScreen(
     onNavigateBack: () -> Unit,
+    onNavigateToButlerMarket: () -> Unit = {},
     viewModel: AIAssistantViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -208,6 +209,9 @@ fun AIAssistantScreen(
                             }
                         },
                         actions = {
+                            IconButton(onClick = onNavigateToButlerMarket) {
+                                Icon(Icons.Default.SmartToy, contentDescription = "管家市场")
+                            }
                             IconButton(onClick = { scope.launch { drawerState.open() } }) {
                                 Icon(Icons.AutoMirrored.Filled.List, contentDescription = "话题列表")
                             }

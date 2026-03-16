@@ -42,6 +42,7 @@ fun HorseOverviewScreen(
     viewModel: OverviewViewModel = hiltViewModel(),
     onNavigateToAddTransaction: () -> Unit = {},
     onNavigateToAI: () -> Unit = {},
+    onNavigateToButlerMarket: () -> Unit = {},
     onNavigateToTransactions: () -> Unit = {},
     onNavigateToStatistics: () -> Unit = {}
 ) {
@@ -86,6 +87,15 @@ fun HorseOverviewScreen(
                                 tint = HorseTheme2026Colors.TextSecondary
                             )
                         }
+                    }
+                },
+                actions = {
+                    IconButton(onClick = onNavigateToButlerMarket) {
+                        Icon(
+                            imageVector = Icons.Default.SmartToy,
+                            contentDescription = "管家市场",
+                            tint = HorseTheme2026Colors.TextSecondary
+                        )
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
