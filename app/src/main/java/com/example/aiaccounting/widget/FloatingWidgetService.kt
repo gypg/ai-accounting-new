@@ -25,22 +25,42 @@ import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import com.example.aiaccounting.MainActivity
 import com.example.aiaccounting.R
+import com.example.aiaccounting.ai.AIOperation
+import com.example.aiaccounting.ai.AIOperationExecutor
 import com.example.aiaccounting.data.local.entity.TransactionType
+import com.example.aiaccounting.data.repository.AccountRepository
+import com.example.aiaccounting.data.repository.CategoryRepository
+import com.example.aiaccounting.security.SecurityManager
+import com.example.aiaccounting.widget.WidgetUpdateService
+import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import org.json.JSONArray
-import org.json.JSONObject
-import java.time.LocalDateTime
-import java.time.ZoneId
-import java.util.UUID
+import kotlinx.coroutines.launch
+import javax.inject.Inject
 
 /**
  * 悬浮窗服务
  * 在桌面上显示记账对话框，不跳转Activity
  */
+@AndroidEntryPoint
 class FloatingWidgetService : Service() {
+
+    @Inject
+    lateinit var securityManager: SecurityManager
+
+    @Inject
+    lateinit var aiOperationExecutor: AIOperationExecutor
+
+    @Inject
+    lateinit var accountRepository: AccountRepository
+
+    @Inject
+    lateinit var categoryRepository: CategoryRepository
+
+    @Inject
+    lateinit var widgetUpdateService: WidgetUpdateService
 
     private var windowManager: WindowManager? = null
     private var floatingView: View? = null
@@ -79,7 +99,7 @@ class FloatingWidgetService : Service() {
 
     private fun createNotification(): Notification {
         val intent = Intent(this, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
         }
         val pendingIntent = PendingIntent.getActivity(
             this, 0, intent,
@@ -114,10 +134,27 @@ class FloatingWidgetService : Service() {
             return START_NOT_STICKY
         }
 
+        // 必须先完成身份验证，避免小组件/悬浮窗绕过 PIN
+        if (!securityManager.hasValidAuthSession()) {
+            Toast.makeText(this, "请先解锁应用后再记账", Toast.LENGTH_SHORT).show()
+            openAppForAuth(transactionType)
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
         // 显示悬浮窗
         showFloatingWindow(transactionType)
 
         return START_NOT_STICKY
+    }
+
+    private fun openAppForAuth(transactionType: String) {
+        val action = if (transactionType == "expense") "add_expense" else "add_income"
+        val openAppIntent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            putExtra("action", action)
+        }
+        startActivity(openAppIntent)
     }
 
     private fun canDrawOverlays(): Boolean {
@@ -225,55 +262,85 @@ class FloatingWidgetService : Service() {
     }
 
     private fun saveTransaction(amount: Double, note: String, type: TransactionType) {
-        try {
-            // 创建交易记录 JSON
-            val transaction = JSONObject().apply {
-                put("id", UUID.randomUUID().toString())
-                put("accountId", 1L)
-                put("categoryId", if (type == TransactionType.EXPENSE) 1L else 2L)
-                put("type", type.name)
-                put("amount", amount)
-                put("date", LocalDateTime.now().atZone(ZoneId.systemDefault()).toInstant().toEpochMilli())
-                put("note", note)
-                put("timestamp", System.currentTimeMillis())
-            }
-
-            // 保存到 SharedPreferences
-            val prefs = getSharedPreferences("widget_pending_transactions", Context.MODE_PRIVATE)
-            val existingData = prefs.getString("pending", "[]")
-            val jsonArray = JSONArray(existingData)
-            jsonArray.put(transaction)
-
-            prefs.edit().putString("pending", jsonArray.toString()).apply()
-
-            // 同时更新统计数据
-            val statsPrefs = getSharedPreferences("widget_stats", Context.MODE_PRIVATE)
-            val editor = statsPrefs.edit()
-            when (type) {
-                TransactionType.EXPENSE -> {
-                    val currentExpense = statsPrefs.getFloat("month_expense", 0f)
-                    editor.putFloat("month_expense", (currentExpense + amount).toFloat())
+        serviceScope.launch {
+            try {
+                if (!securityManager.hasValidAuthSession()) {
+                    Toast.makeText(this@FloatingWidgetService, "请先解锁应用后再记账", Toast.LENGTH_SHORT).show()
+                    openAppForAuth(if (type == TransactionType.EXPENSE) "expense" else "income")
+                    closeFloatingWindow()
+                    return@launch
                 }
-                TransactionType.INCOME -> {
-                    val currentIncome = statsPrefs.getFloat("month_income", 0f)
-                    editor.putFloat("month_income", (currentIncome + amount).toFloat())
+
+                val accountId = resolveAccountId()
+                if (accountId == null) {
+                    Toast.makeText(this@FloatingWidgetService, "请先在应用内创建账户", Toast.LENGTH_SHORT).show()
+                    closeFloatingWindow()
+                    return@launch
                 }
-                else -> {}
+
+                val categoryId = resolveCategoryId(type)
+                if (categoryId == null) {
+                    Toast.makeText(this@FloatingWidgetService, "请先在应用内创建分类", Toast.LENGTH_SHORT).show()
+                    closeFloatingWindow()
+                    return@launch
+                }
+
+                val operation = AIOperation.AddTransaction(
+                    amount = amount,
+                    type = type,
+                    categoryId = categoryId,
+                    accountId = accountId,
+                    date = System.currentTimeMillis(),
+                    note = note
+                )
+
+                when (val result = aiOperationExecutor.executeOperation(operation)) {
+                    is AIOperationExecutor.AIOperationResult.Success -> {
+                        widgetUpdateService.updateWidgetStats(this@FloatingWidgetService)
+                        Toast.makeText(this@FloatingWidgetService, "记账成功", Toast.LENGTH_SHORT).show()
+                        closeFloatingWindow()
+                    }
+                    is AIOperationExecutor.AIOperationResult.Error -> {
+                        Toast.makeText(this@FloatingWidgetService, "记账失败: ${result.error}", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            } catch (e: Exception) {
+                Toast.makeText(this@FloatingWidgetService, "记账失败: ${e.message}", Toast.LENGTH_SHORT).show()
             }
-            editor.apply()
-
-            // 更新所有小组件
-            updateAllWidgets()
-
-            Toast.makeText(this, "记账成功", Toast.LENGTH_SHORT).show()
-            closeFloatingWindow()
-
-        } catch (e: Exception) {
-            e.printStackTrace()
-            Toast.makeText(this, "记账失败: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
 
+    private suspend fun resolveAccountId(): Long? {
+        val accounts = accountRepository.getAllAccountsList()
+        return accounts.firstOrNull { !it.isArchived && it.isDefault }?.id
+            ?: accounts.firstOrNull { !it.isArchived }?.id
+    }
+
+    private suspend fun resolveCategoryId(type: TransactionType): Long? {
+        val categories = categoryRepository.getAllCategoriesList()
+        val existing = categories.firstOrNull { it.type == type }
+        if (existing != null) return existing.id
+
+        val fallbackName = when (type) {
+            TransactionType.INCOME -> "其他收入"
+            TransactionType.EXPENSE -> "其他支出"
+            TransactionType.TRANSFER -> "转账"
+        }
+
+        return when (val result = aiOperationExecutor.executeOperation(
+            AIOperation.AddCategory(name = fallbackName, type = type)
+        )) {
+            is AIOperationExecutor.AIOperationResult.Success -> {
+                val refreshed = categoryRepository.getAllCategoriesList()
+                refreshed.firstOrNull { it.type == type && it.name == fallbackName }?.id
+                    ?: refreshed.firstOrNull { it.type == type }?.id
+            }
+            is AIOperationExecutor.AIOperationResult.Error -> null
+        }
+    }
+
+
+    @Deprecated("Widget stats should be updated via WidgetUpdateService; kept temporarily for compatibility")
     private fun updateAllWidgets() {
         val appWidgetManager = android.appwidget.AppWidgetManager.getInstance(this)
         val providers = arrayOf(

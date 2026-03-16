@@ -205,21 +205,27 @@ class AccountingWidgetProvider : AppWidgetProvider() {
         when (intent.action) {
             ACTION_ADD_EXPENSE -> {
                 val openAppIntent = Intent(context, MainActivity::class.java).apply {
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                        Intent.FLAG_ACTIVITY_SINGLE_TOP
                     putExtra("action", "add_expense")
                 }
                 context.startActivity(openAppIntent)
             }
             ACTION_ADD_INCOME -> {
                 val openAppIntent = Intent(context, MainActivity::class.java).apply {
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                        Intent.FLAG_ACTIVITY_SINGLE_TOP
                     putExtra("action", "add_income")
                 }
                 context.startActivity(openAppIntent)
             }
             ACTION_AI_CHAT -> {
                 val openAppIntent = Intent(context, MainActivity::class.java).apply {
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                        Intent.FLAG_ACTIVITY_SINGLE_TOP
                     putExtra("action", "ai_chat")
                 }
                 context.startActivity(openAppIntent)
