@@ -1,6 +1,6 @@
 # AI记账 — 产品开发文档
 
-> 版本：v1.8.1 | 文档日期：2026-03-12 | 文档状态：内部评审稿
+> 版本：v1.8.1 | 文档日期：2026-03-13 | 文档状态：内部评审稿
 
 ---
 
@@ -112,7 +112,7 @@ AI记账是一款面向中国大陆个人用户的智能记账 Android 应用。
 | 构建工具 | Gradle (KTS) + KSP | 8.5 / 1.9.20-1.0.14 |
 | 最低 SDK | Android 8.0 (API 26) | — |
 | 目标 SDK | Android 14 (API 34) | — |
-| JDK | Java 17 | — |
+| JDK | Java 17 | 必须（Windows 建议使用独立 JDK17，不要用 Android Studio 自带 JBR21） |
 
 ### 3.3 数据流架构
 
@@ -153,7 +153,7 @@ AIPermissionLog ──→ 审计日志 (全量记录)
 | 操作审计 | AIPermissionLog (全量记录) | AI 操作行为 |
 | 防暴力破解 | 5 次失败锁定 30 分钟 | 登录入口 |
 
-### 3.5 数据库 Schema (v4)
+### 3.5 数据库 Schema (v7)
 
 | 表名 | 字段数 | 索引 | 外键 | 用途 |
 |------|--------|------|------|------|
@@ -169,6 +169,7 @@ AIPermissionLog ──→ 审计日志 (全量记录)
 | ai_permission_logs | 15 | — | — | 权限审计日志 |
 | tags | 5 | — | — | 标签 (待启用) |
 | transaction_tags | 2 | — | — | 交易-标签关联 (待启用) |
+| custom_butlers | 18+ | — | — | 自定义管家市场 |
 
 ---
 
@@ -233,8 +234,11 @@ AIPermissionLog ──→ 审计日志 (全量记录)
     ├── 预算管理
     ├── 数据导入/导出
     ├── 主题切换
-    ├── 管家选择
-    └── 个人中心
+    ├── AI管家（当前角色设置）
+    ├── 管家市场（发现/创建/管理自定义管家）
+    ├── PIN/生物识别
+    ├── 个人中心
+    └── 关于/公告
 
 浮层页面
 ├── AddTransaction (记账)
@@ -271,12 +275,16 @@ AIPermissionLog ──→ 审计日志 (全量记录)
 
 ```
 app/src/main/java/com/example/aiaccounting/
-├── ai/                          # AI 引擎层 (8 文件)
-│   ├── AIOperationExecutor      # 操作执行器
-│   ├── AIReasoningEngine        # 意图推理引擎
+├── ai/                          # AI 引擎层 (12 文件)
+│   ├── AIOperationExecutor      # 操作执行器（真实写库）
+│   ├── AIReasoningEngine        # 意图推理引擎（编排动作/上下文连续）
+│   ├── AIMessageParser          # 消息解析（金额/日期/备注/查询类型等）
+│   ├── AICategoryInferrer       # 分类推断（含子分类语义）
+│   ├── AIKeywordMatcher         # 意图检测辅助（关键词匹配）
+│   ├── AILocalProcessor         # 本地离线处理器（无网络/远程仅文本时兜底执行）
 │   ├── AIInformationSystem      # 信息查询系统
-│   ├── NaturalLanguageParser    # 自然语言解析
-│   ├── QueryIntentParser        # 查询意图解析
+│   ├── NaturalLanguageParser    # 自然语言解析（历史遗留，逐步收敛到 AIMessageParser）
+│   ├── QueryIntentParser        # 查询意图解析（历史遗留，逐步收敛到 AIInformationSystem）
 │   ├── IdentityConfirmationDetector  # 身份确认检测
 │   ├── TransactionModificationHandler # 交易修改处理
 │   └── AIPermissionExecutor     # 权限执行器
@@ -357,6 +365,10 @@ type: feat / fix / refactor / perf / docs / test / chore
 
 **构建命令：**
 ```bash
+# Windows（Git Bash）建议先指定 JDK 17（示例：Microsoft OpenJDK 17）
+export JAVA_HOME="/c/Program Files/Microsoft/jdk-17.0.18.8-hotspot"
+export PATH="$JAVA_HOME/bin:$PATH"
+
 # Debug
 ./gradlew assembleDebug
 
@@ -418,9 +430,25 @@ QA 测试 (Day 12-14)
 | 代码提交 | 编译通过 | 0 error |
 | 代码审查 | 架构规范、命名规范、安全检查 | 至少 1 人 Approve |
 | 集成测试 | 核心流程回归 | 记账/统计/导出 全部通过 |
-| 发布前 | APK 体积、启动时间、内存占用 | 体积 < 50MB，冷启动 < 3s |
+| 发布前 | APK 体积、启动时间、内存占用 | 体积 < 150MB（Debug），Release < 50MB；冷启动 < 3s |
 
 ---
+
+### 6.4 Windows 构建常见问题
+
+#### AAPT2 daemon 启动失败
+在部分 Windows 环境下，可能出现 `AAPT2 daemon startup failed`（常见原因是系统缺少 VC++ 运行库 / 进程创建受限）。
+
+推荐解决步骤：
+1. 先停止 Gradle daemon：
+   - `./gradlew --stop`
+2. 使用 `--no-daemon` 重新构建：
+   - `./gradlew :app:clean :app:assembleDebug --no-daemon`
+3. 如果仍失败，可临时在 PowerShell 会话里清空 AAPT2 binary 环境变量（仅用于排查）：
+   - `$env:ANDROID_AAPT2_BINARY=""; ./gradlew :app:clean :app:assembleDebug --no-daemon`
+
+> 注：长期方案建议安装/修复 Microsoft Visual C++ Redistributable（通用运行库）。
+
 
 ## 七、现状评估与改进方案
 
@@ -430,7 +458,7 @@ QA 测试 (Day 12-14)
 |------|----------|------------|------|
 | 架构分层 | MVVM + Repository + Hilt DI | 4 | 分层清晰，职责明确，少数文件存在跨层调用 |
 | 代码规范 | 命名统一，注释中文为主 | 3.5 | 命名规范一致，但部分文件过大（AISettingsScreen 1740 行） |
-| 数据库管理 | Room + SQLCipher + Migration 模板 | 4 | 加密完整，已建立 Migration 机制，exportSchema 未开启 |
+| 数据库管理 | Room + SQLCipher + Migration 模板 | 4 | 加密完整，已建立 Migration 机制，exportSchema 已开启（v7） |
 | 依赖注入 | Hilt 全覆盖 | 4.5 | 所有 Repository/Service/ViewModel 均通过 Hilt 注入 |
 | 异步处理 | Coroutines + Flow | 4 | 已消除 GlobalScope 和 runBlocking，Flow 合并已优化 |
 | 安全体系 | PIN + 生物识别 + 加密 + 审计 | 4.5 | 多层安全防护，权限审计完整 |
@@ -535,7 +563,7 @@ Material 3 设计系统已正确接入，色彩体系和字体层级完整。主
 
 | 目录 | 文件数 | 说明 |
 |------|--------|------|
-| ai/ | 8 | AI 引擎 |
+| ai/ | 12 | AI 引擎 |
 | data/ | 45+ | 数据层（DAO/Entity/Repository/Service） |
 | di/ | 5 | 依赖注入模块 |
 | security/ | 4 | 安全层 |
@@ -557,11 +585,40 @@ Material 3 设计系统已正确接入，色彩体系和字体层级完整。主
 | 图片资源压缩 | PNG → WebP | 体积减少 97%（3.18MB → 0.07MB） |
 | 数据库迁移保护 | fallbackToDestructiveMigrationFrom(1,2,3) | 保护 v4+ 用户数据 |
 | ViewModel Flow 合并 | 4 个 stateIn → 1 个 allStats | 减少内存开销 |
-| Widget 容错 | 异常时显示默认值 | 避免空白 Widget |
-
+| 本地离线处理器抽离 | AIAssistantViewModel 本地规则迁移至 AILocalProcessor + Hilt 注入 | 降低 god class 复杂度，离线/远程纯文本时可稳定执行写库 |
+| 远程 JSON 兼容性增强 | actions 数组支持 type=query；create_account 支持 accountType 字段 | 避免查询动作丢失、避免账户类型误解析 |
+| AI 查询性能优化 | 交易列表/最近交易改为 SQL LIMIT；分析类查询避免分类 N+1 | 降低全表读取与多次 DB 查询开销 |
+| 安全：组件暴露收敛 | WidgetClickReceiver 改为 exported=false；WidgetQuickAddActivity 保持 exported=false | 降低外部 App 触发敏感行为的风险 |
+| 安全：敏感 key 加密存储 | custom model API key 迁移至 SecurityManager 加密区，移除明文回退 | 避免明文落盘导致泄露 |
+| 数据库加密修复 | SQLCipher SupportFactory 直接使用 PBKDF2 派生字节，避免 UTF-8 String 往返损坏密钥 | 避免降低密钥熵/错误密钥导致无法解密 |
 ---
 
 > 文档维护：每次版本发布后更新功能完成度和优化记录。
 > 下次评审节点：v1.9.0 发布前。
 
+
+
+## Phase 4: 自定义 AI 管家市场系统 (v1.8.1+)
+
+### 1. 核心需求与设计
+- **目标**：赋予用户完全自定义 AI 管家设定的能力（如名字、称号、互动口癖及偏好），以替代系统固化的 5 个内置角色。
+- **支持导入导出**：方便在不同设备备份或社区玩家互相分享有趣的 AI 设定（JSON 格式）。
+
+### 2. Room 持久化支持
+- `AppDatabase` 升级至 **v7** (`MIGRATION_6_7`)。
+- 新增表 **`custom_butlers`** 及其对应的实体 `CustomButlerEntity`。支持软删除（Soft Delete）、头像类型（RESOURCE vs LOCAL_PATH）以及 5 项行为控制滑杆信息：
+  - `communicationStyle` (简短/啰嗦)
+  - `emotionIntensity` (冷淡/热情)
+  - `professionalism` (幽默/专业)
+  - `humor` (严肃/逗趣)
+  - `proactivity` (被动/主动)
+
+### 3. Prompt 生成引擎架构
+- `ButlerPromptEngine`：此纯函数的引擎替代了以前写死的巨大 Markdown 文本。
+- 它负责读取自定义 Entity 上的各个性格值，自动将其映射至自然语义描述。最终将文本严格控制在 Token 限制（最多不超 800 字）下输出。从而以**无侵入**的方式，喂给下层的通义/Kimi模型去执行标准的 JSON 返回规则。
+
+### 4. 头像（相册）保存与交互设计
+- 管家市场同时兼容列表和单项下拉操作。
+- 采用 Jetpack Compose 中的 `PhotoPicker` 获取外部图库图片 URI，然后依靠 Stream 文件读写，以 UUID 唯一标识命名，将头像永久性复制到 App 的内部隐私目录 `Context.filesDir/butler_avatars` 中，彻底解决权限过期引发的崩溃。
+- **跨设备分享（内嵌封包）：** 在通过 `exportToJson` 导出为文件时，图片会被编码成 Base64 内嵌进单层 Json 封包中。导入端解码即可直接恢复，不会因目录不对而丢失头像。
 

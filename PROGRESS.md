@@ -1,3 +1,46 @@
+# Planning Sessions (planning-with-files)
+
+## Session: 2026-03-14
+
+### Phase 1: Requirements & Discovery
+- **Status:** in_progress
+- Actions taken:
+  - Initialized planning-with-files workflow
+  - Created [task_plan.md](task_plan.md) and [findings.md](findings.md)
+  - Detected existing progress.md is a project progress document; appended planning session log instead of overwriting
+  - First-pass codebase grep: located AIService.fetchModels (/v1/models) and InviteGatewayService.bootstrap (/bootstrap)
+  - Confirmed product decisions: Auto retry N=2; invite users pick from fetched model list; advanced users can switch to custom config
+- Files created/modified:
+  - task_plan.md (created)
+  - findings.md (created)
+  - progress.md (appended)
+
+### Phase 2: Architecture & Data Model Design
+- **Status:** complete
+- Actions taken:
+  - Finalized model selection decisions: Auto retry N=2; invite users pick from fetched /v1/models list
+  - Implemented invite model mode persistence and UI entry in AISettings
+
+### Phase 3: Implementation (Model Management)
+- **Status:** complete
+- Actions taken:
+  - Added invite model selection mode and persistence (DataStore)
+  - Updated AISettingsScreen to show InviteModelSelectorCard when invite-bound
+  - Implemented AIService Auto fallback (N=2) using /v1/models candidate pool
+  - Added unit test with MockWebServer for model fallback
+  - Ran ./gradlew testDebugUnitTest (PASS)
+- Files created/modified:
+  - app/src/main/java/com/example/aiaccounting/data/model/AIConfig.kt
+  - app/src/main/java/com/example/aiaccounting/data/repository/AIConfigRepository.kt
+  - app/src/main/java/com/example/aiaccounting/ui/viewmodel/AISettingsViewModel.kt
+  - app/src/main/java/com/example/aiaccounting/ui/screens/AISettingsScreen.kt
+  - app/src/main/java/com/example/aiaccounting/data/service/AIService.kt
+  - app/src/test/java/com/example/aiaccounting/ui/viewmodel/AISettingsInviteBindingTest.kt
+  - app/src/test/java/com/example/aiaccounting/data/service/AIServiceModelFallbackTest.kt
+  - app/build.gradle.kts
+
+---
+
 # AI记账 - 项目进度
 
 ## 总体进度: 100% ✅
