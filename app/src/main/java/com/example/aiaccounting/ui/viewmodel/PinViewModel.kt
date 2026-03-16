@@ -37,7 +37,7 @@ class PinViewModel @Inject constructor(
     }
 
     private fun checkPinStatus() {
-        _isPinSet.value = securityManager.isPinSet()
+        _isPinSet.value = securityManager.getPinState() is SecurityManager.PinState.Set
         _failedAttempts.value = securityManager.getFailedAttempts()
         _isLocked.value = securityManager.isLocked()
         _remainingLockTime.value = securityManager.getRemainingLockTime()
@@ -53,6 +53,7 @@ class PinViewModel @Inject constructor(
                 _isPinSet.value = true
                 _failedAttempts.value = 0
                 _currentPin.value = pin
+                securityManager.onAuthenticationSucceeded()
             }
             onComplete(success)
         }
@@ -67,6 +68,7 @@ class PinViewModel @Inject constructor(
             checkPinStatus()
             if (success) {
                 _currentPin.value = pin
+                securityManager.onAuthenticationSucceeded()
             }
             onComplete(success)
         }

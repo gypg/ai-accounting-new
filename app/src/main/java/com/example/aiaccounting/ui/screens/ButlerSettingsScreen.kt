@@ -4,7 +4,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -24,6 +24,7 @@ import com.example.aiaccounting.ui.viewmodel.AIAssistantViewModel
 @Composable
 fun ButlerSettingsScreen(
     onNavigateBack: () -> Unit,
+    onNavigateToMarket: () -> Unit = {},
     viewModel: AIAssistantViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -44,7 +45,7 @@ fun ButlerSettingsScreen(
                 },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "返回")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                     }
                 }
             )
@@ -138,6 +139,17 @@ fun ButlerSettingsScreen(
                 shape = MaterialTheme.shapes.medium
             ) {
                 Text("切换管家")
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // 管家市场入口
+            OutlinedButton(
+                onClick = onNavigateToMarket,
+                modifier = Modifier.fillMaxWidth(),
+                shape = MaterialTheme.shapes.medium
+            ) {
+                Text("管家市场")
             }
         }
     }

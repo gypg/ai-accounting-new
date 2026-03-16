@@ -39,7 +39,7 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(
                 isBiometricEnabled = securityManager.isBiometricEnabled(),
-                isPinSet = securityManager.isPinSet()
+                isPinSet = securityManager.getPinState() is SecurityManager.PinState.Set
             )
         }
     }
@@ -85,7 +85,7 @@ class SettingsViewModel @Inject constructor(
     fun refreshPinStatus() {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(
-                isPinSet = securityManager.isPinSet()
+                isPinSet = securityManager.getPinState() is SecurityManager.PinState.Set
             )
         }
     }
