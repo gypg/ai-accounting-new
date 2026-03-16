@@ -8,6 +8,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -19,6 +20,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.example.aiaccounting.BuildConfig
 import com.example.aiaccounting.data.local.prefs.AppStateManager
 import com.example.aiaccounting.ui.viewmodel.SettingsViewModel
 
@@ -28,7 +30,8 @@ fun SettingsScreen(
     appStateManager: AppStateManager,
     onNavigateBack: () -> Unit,
     onNavigateToProfile: () -> Unit,
-    onNavigateToAIModelSettings: () -> Unit,
+    onNavigateToButlerSettings: () -> Unit,
+    onNavigateToButlerMarket: () -> Unit,
     onNavigateToAccounts: () -> Unit = {},
     onNavigateToCategories: () -> Unit = {},
     onNavigateToExport: () -> Unit = {},
@@ -59,7 +62,7 @@ fun SettingsScreen(
                 },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "返回")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                     }
                 }
             )
@@ -326,13 +329,23 @@ fun SettingsScreen(
 
             // 管家设置区域
             SettingsSectionTitle("管家")
-            
-            // 管家选择入口
+
+            // 管家角色管理
             SettingsListItem(
                 icon = Icons.Default.SmartToy,
                 title = "AI管家",
                 subtitle = "选择您喜欢的管家角色",
-                onClick = onNavigateToAIModelSettings
+                onClick = onNavigateToButlerSettings
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // 独立市场入口（更显眼，便于直达）
+            SettingsListItem(
+                icon = Icons.Default.Storefront,
+                title = "管家市场",
+                subtitle = "发现、创建和管理自定义管家",
+                onClick = onNavigateToButlerMarket
             )
 
             Spacer(modifier = Modifier.height(24.dp))
@@ -412,7 +425,7 @@ fun SettingsScreen(
                 Column {
                     Text("AI记账是一款智能的个人财务管理应用。")
                     Spacer(modifier = Modifier.height(8.dp))
-                    Text("版本：1.0.0")
+                    Text("版本：${BuildConfig.VERSION_NAME}")
                     Spacer(modifier = Modifier.height(8.dp))
                     Text("功能特点：")
                     Text("• 智能语音识别记账")

@@ -31,7 +31,8 @@ fun HorseSettingsScreen(
     appStateManager: AppStateManager,
     onNavigateBack: () -> Unit,
     onNavigateToProfile: () -> Unit = {},
-    onNavigateToAIModelSettings: () -> Unit = {},
+    onNavigateToButlerSettings: () -> Unit = {},
+    onNavigateToButlerMarket: () -> Unit = {},
     onNavigateToAccounts: () -> Unit = {},
     onNavigateToCategories: () -> Unit = {},
     onNavigateToExport: () -> Unit = {},
@@ -102,7 +103,8 @@ fun HorseSettingsScreen(
                         Triple("Material You动态主题", Icons.Default.ColorLens) {
                             showThemeDialog = true
                         },
-                        Triple("AI管家", Icons.Default.Settings, onNavigateToAIModelSettings)
+                        Triple("AI管家", Icons.Default.Settings, onNavigateToButlerSettings),
+                        Triple("管家市场", Icons.Default.Storefront, onNavigateToButlerMarket)
                     )
 
                     // 第一行
@@ -161,7 +163,7 @@ fun HorseSettingsScreen(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        settingsItems.drop(9).take(2).forEach { (title, icon, onClick) ->
+                        settingsItems.drop(9).take(3).forEach { (title, icon, onClick) ->
                             SettingsGridButton(
                                 icon = icon,
                                 title = title,

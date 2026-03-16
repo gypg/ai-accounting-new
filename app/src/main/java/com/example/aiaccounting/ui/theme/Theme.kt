@@ -16,94 +16,100 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 
-// ==================== 亮色主题 ====================
+// ==================== 亮色主题 - 极简高级 (Exaggerated Minimalism) ====================
 private val LightColorScheme = lightColorScheme(
-    primary = Color(0xFF2196F3),
+    primary = Color(0xFF2563EB), // 信任蓝
     onPrimary = Color.White,
-    primaryContainer = Color(0xFFE3F2FD),
-    onPrimaryContainer = Color(0xFF1565C0),
-    
-    secondary = Color(0xFF4CAF50),
+    primaryContainer = Color(0xFFDBEAFE),
+    onPrimaryContainer = Color(0xFF1E3A8A),
+
+    // 次要色调 - 辅助蓝
+    secondary = Color(0xFF3B82F6),
     onSecondary = Color.White,
-    secondaryContainer = Color(0xFFE8F5E9),
-    onSecondaryContainer = Color(0xFF2E7D32),
-    
-    tertiary = Color(0xFFFF9800),
-    onTertiary = Color.Black,
-    tertiaryContainer = Color(0xFFFFF3E0),
-    onTertiaryContainer = Color(0xFFE65100),
-    
-    background = Color(0xFFF5F5F5),
-    onBackground = Color(0xFF1C1B1F),
-    
+    secondaryContainer = Color(0xFFEFF6FF),
+    onSecondaryContainer = Color(0xFF1D4ED8),
+
+    // 第三色调/CTA - 醒目橙
+    tertiary = Color(0xFFF97316),
+    onTertiary = Color.White,
+    tertiaryContainer = Color(0xFFFFEDD5),
+    onTertiaryContainer = Color(0xFF7C2D12),
+
+    // 背景 - 极简冷白
+    background = Color(0xFFF8FAFC),
+    onBackground = Color(0xFF1E293B),
+
+    // 表面色 - 纯白，形成深度
     surface = Color(0xFFFFFFFF),
-    onSurface = Color(0xFF1C1B1F),
-    surfaceVariant = Color(0xFFE7E0EC),
-    onSurfaceVariant = Color(0xFF49454F),
-    
-    error = Color(0xFFF44336),
+    onSurface = Color(0xFF0F172A),
+    surfaceVariant = Color(0xFFF1F5F9),
+    onSurfaceVariant = Color(0xFF475569),
+
+    // 错误色
+    error = Color(0xFFEF4444),
     onError = Color.White,
-    errorContainer = Color(0xFFFFEBEE),
-    onErrorContainer = Color(0xFFB71C1C),
-    
-    outline = Color(0xFF79747E),
-    outlineVariant = Color(0xFFCAC4D0),
-    
-    inverseSurface = Color(0xFF313033),
-    inverseOnSurface = Color(0xFFF4EFF4),
-    inversePrimary = Color(0xFF6B9FFF),
-    
-    surfaceTint = Color(0xFF2196F3),
+    errorContainer = Color(0xFFFEE2E2),
+    onErrorContainer = Color(0xFF991B1B),
+
+    // 边框色
+    outline = Color(0xFFCBD5E1),
+    outlineVariant = Color(0xFFE2E8F0),
+
+    // 反色
+    inverseSurface = Color(0xFF0F172A),
+    inverseOnSurface = Color(0xFFF8FAFC),
+    inversePrimary = Color(0xFF60A5FA),
+
+    surfaceTint = Color(0xFF2563EB),
     scrim = Color(0xFF000000)
 )
 
-// ==================== 暗黑主题 - 护眼深灰 ====================
-// 参考BeeCount的深色模式，使用深灰色而非纯黑，对眼睛更友好
+// ==================== 暗黑主题 - 护眼深岩 (Premium Dark) ====================
 private val DarkColorScheme = darkColorScheme(
-    // 主色调 - 更亮的蓝色用于暗黑模式
-    primary = Color(0xFF6B9FFF),
-    onPrimary = Color(0xFF00325A),
-    primaryContainer = Color(0xFF004881),
-    onPrimaryContainer = Color(0xFFD1E4FF),
-    
-    // 次要色调 - 绿色
-    secondary = Color(0xFF6BFFB8),
-    onSecondary = Color(0xFF003824),
-    secondaryContainer = Color(0xFF005236),
-    onSecondaryContainer = Color(0xFF89F8C5),
-    
-    // 第三色调 - 橙色
-    tertiary = Color(0xFFFFB86B),
-    onTertiary = Color(0xFF4D2700),
-    tertiaryContainer = Color(0xFF6D3A00),
-    onTertiaryContainer = Color(0xFFFFDCC2),
-    
-    // 背景 - 深灰色，对眼睛更友好
-    background = Color(0xFF1A1A2E),
-    onBackground = Color(0xFFE6E1E5),
-    
-    // 表面色 - 比背景稍亮的深灰色
-    surface = Color(0xFF252542),
-    onSurface = Color(0xFFE6E1E5),
-    surfaceVariant = Color(0xFF2D2D4A),
-    onSurfaceVariant = Color(0xFFCAC4D0),
-    
+    // 主色调 - 亮信任蓝
+    primary = Color(0xFF60A5FA),
+    onPrimary = Color(0xFF0D2847),
+    primaryContainer = Color(0xFF1E3A8A),
+    onPrimaryContainer = Color(0xFFDBEAFE),
+
+    // 次要色调
+    secondary = Color(0xFF93C5FD),
+    onSecondary = Color(0xFF082F49),
+    secondaryContainer = Color(0xFF1D4ED8),
+    onSecondaryContainer = Color(0xFFEFF6FF),
+
+    // 第三色调/CTA - 亮橙
+    tertiary = Color(0xFFFB923C),
+    onTertiary = Color(0xFF431407),
+    tertiaryContainer = Color(0xFF7C2D12),
+    onTertiaryContainer = Color(0xFFFFEDD5),
+
+    // 背景 - 深岩灰
+    background = Color(0xFF0F172A),
+    onBackground = Color(0xFFF8FAFC),
+
+    // 表面色
+    surface = Color(0xFF1E293B),
+    onSurface = Color(0xFFF1F5F9),
+    surfaceVariant = Color(0xFF334155),
+    onSurfaceVariant = Color(0xFFCBD5E1),
+
     // 错误色
-    error = Color(0xFFFFB4AB),
-    onError = Color(0xFF690005),
-    errorContainer = Color(0xFF93000A),
-    onErrorContainer = Color(0xFFFFDAD6),
-    
+    error = Color(0xFFF87171),
+    onError = Color(0xFF450A0A),
+    errorContainer = Color(0xFF991B1B),
+    onErrorContainer = Color(0xFFFEE2E2),
+
     // 边框色
-    outline = Color(0xFF938F99),
-    outlineVariant = Color(0xFF49454F),
-    
+    outline = Color(0xFF475569),
+    outlineVariant = Color(0xFF334155),
+
     // 反色
-    inverseSurface = Color(0xFFE6E1E5),
-    inverseOnSurface = Color(0xFF1C1B1F),
-    inversePrimary = Color(0xFF2196F3),
-    
-    surfaceTint = Color(0xFF6B9FFF),
+    inverseSurface = Color(0xFFF8FAFC),
+    inverseOnSurface = Color(0xFF0F172A),
+    inversePrimary = Color(0xFF2563EB),
+
+    surfaceTint = Color(0xFF60A5FA),
     scrim = Color(0xFF000000)
 )
 

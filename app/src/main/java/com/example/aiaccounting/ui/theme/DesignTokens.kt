@@ -17,23 +17,23 @@ object Spacing {
     val xs: Dp = 8.dp
     val sm: Dp = 12.dp
     val md: Dp = 16.dp
-    val lg: Dp = 20.dp
-    val xl: Dp = 24.dp
-    val xxl: Dp = 32.dp
-    val xxxl: Dp = 48.dp
+    val lg: Dp = 24.dp // 加大留白，Exaggerated Minimalism
+    val xl: Dp = 32.dp
+    val xxl: Dp = 48.dp
+    val xxxl: Dp = 64.dp // 增加更大的间距尺度
 
-    /** 页面内边距 */
-    val screenHorizontal: Dp = 16.dp
-    val screenVertical: Dp = 16.dp
+    /** 页面内边距 - 增加负空间，呼吸感增强 */
+    val screenHorizontal: Dp = 24.dp
+    val screenVertical: Dp = 24.dp
 
     /** 卡片内边距 */
-    val cardPadding: Dp = 16.dp
+    val cardPadding: Dp = 20.dp // 从16提升至20，让内容更松弛
 
     /** 列表项间距 */
-    val listItemGap: Dp = 8.dp
+    val listItemGap: Dp = 12.dp // 从8提升至12
 
     /** 区块间距 */
-    val sectionGap: Dp = 16.dp
+    val sectionGap: Dp = 32.dp // 从16大幅提升至32，区分信息层级
 }
 
 // ==================== 圆角 (Radius) ====================
@@ -41,9 +41,9 @@ object Radius {
     val none: Dp = 0.dp
     val xs: Dp = 4.dp
     val sm: Dp = 8.dp
-    val md: Dp = 12.dp
-    val lg: Dp = 16.dp
-    val xl: Dp = 24.dp
+    val md: Dp = 16.dp // 增大圆角，从12 -> 16
+    val lg: Dp = 24.dp // 从16 -> 24
+    val xl: Dp = 32.dp // 从24 -> 32
     val full: Dp = 999.dp
 }
 
