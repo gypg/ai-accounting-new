@@ -8,6 +8,9 @@ import com.example.aiaccounting.data.model.AIConfig
 import com.example.aiaccounting.data.model.AIProvider
 import com.example.aiaccounting.data.model.ChatMessage
 import com.example.aiaccounting.data.model.MessageRole
+import com.example.aiaccounting.di.AiOkHttpClient
+import com.example.aiaccounting.di.AiTestOkHttpClient
+import com.example.aiaccounting.utils.OpenAiUrlUtils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -21,7 +24,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
-import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -29,24 +31,10 @@ import javax.inject.Singleton
  * AI服务 - 处理大模型API调用
  */
 @Singleton
-class AIService @Inject constructor() {
-
-    // 优化后的客户端 - 增加超时时间和连接池
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(120, TimeUnit.SECONDS)
-        .writeTimeout(30, TimeUnit.SECONDS)
-        .pingInterval(30, TimeUnit.SECONDS)
-        .retryOnConnectionFailure(true)
-        .build()
-    
-    // 用于测试连接的快速客户端
-    private val testClient = OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(15, TimeUnit.SECONDS)
-        .writeTimeout(10, TimeUnit.SECONDS)
-        .retryOnConnectionFailure(true)
-        .build()
+class AIService @Inject constructor(
+    @AiOkHttpClient private val client: OkHttpClient,
+    @AiTestOkHttpClient private val testClient: OkHttpClient
+) {
 
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 
@@ -173,12 +161,7 @@ class AIService @Inject constructor() {
     }
 
     private fun fetchOpenAIModels(config: AIConfig): List<RemoteModel> {
-        val baseUrl = config.apiUrl.trim().removeSuffix("/").removeSuffix("/v1/chat/completions").removeSuffix("/chat/completions")
-        val url = if (baseUrl.endsWith("/v1")) {
-            "$baseUrl/models"
-        } else {
-            "$baseUrl/v1/models"
-        }
+        val url = OpenAiUrlUtils.models(config.apiUrl)
 
         val request = Request.Builder()
             .url(url)
@@ -280,20 +263,33 @@ class AIService @Inject constructor() {
     }
 
     private fun testOpenAIConnection(config: AIConfig, messages: List<ChatMessage>) {
-        val url = buildOpenAIUrl(config.apiUrl)
+        val url = OpenAiUrlUtils.chatCompletions(config.apiUrl)
 
-        // 使用最简单的消息进行测试
+        // Use minimal payload to reduce latency/cost.
         val messagesArray = JSONArray()
-        messagesArray.put(JSONObject().apply {
-            put("role", "user")
-            put("content", "Hi")
-        })
+        val first = messages.firstOrNull { it.role == MessageRole.USER }?.content?.ifBlank { "Hi" } ?: "Hi"
+        messagesArray.put(
+            JSONObject().apply {
+                put("role", "user")
+                put("content", first)
+            }
+        )
+
+        val primaryModel = config.model.trim()
+        val modelToUse = if (primaryModel.isNotBlank()) {
+            primaryModel
+        } else {
+            val ids = fetchRemoteModelIds(config)
+            pickPreferredModel(ids, exclude = emptySet())
+                ?: throw Exception("无法获取可用模型列表，请稍后重试")
+        }
 
         val requestBody = JSONObject().apply {
-            put("model", config.model.ifEmpty { "gpt-3.5-turbo" })
+            put("model", modelToUse)
             put("messages", messagesArray)
-            put("max_tokens", 1) // 测试时只请求1个token，最大化速度
+            put("max_tokens", 1)
             put("temperature", 0)
+            put("stream", false)
         }
 
         val request = Request.Builder()
@@ -303,13 +299,12 @@ class AIService @Inject constructor() {
             .post(requestBody.toString().toRequestBody(jsonMediaType))
             .build()
 
-        // 使用快速客户端进行测试
         testClient.newCall(request).execute().use { response ->
             if (!response.isSuccessful) {
-                val errorBody = response.body?.string() ?: ""
+                val errorBody = response.body?.string().orEmpty()
                 throw Exception("API请求失败(${response.code}): $errorBody")
             }
-            // 验证响应格式
+
             val responseBody = response.body?.string() ?: throw Exception("空响应")
             val json = JSONObject(responseBody)
             if (!json.has("choices")) {
@@ -392,18 +387,6 @@ class AIService @Inject constructor() {
     }
 
     /**
-     * 构建OpenAI兼容的API URL
-     */
-    private fun buildOpenAIUrl(apiUrl: String): String {
-        val baseUrl = apiUrl.trim().removeSuffix("/")
-        return when {
-            baseUrl.endsWith("/v1/chat/completions") -> baseUrl
-            baseUrl.endsWith("/v1") -> "$baseUrl/chat/completions"
-            else -> "$baseUrl/v1/chat/completions"
-        }
-    }
-
-    /**
      * OpenAI API调用（流式版本）
      * 尝试使用流式API，如果不支持则回退到非流式
      */
@@ -411,7 +394,13 @@ class AIService @Inject constructor() {
         messages: List<ChatMessage>,
         config: AIConfig
     ): String {
-        val url = buildOpenAIUrl(config.apiUrl)
+        // Current implementation is non-streaming under the hood. If AUTO is enabled (model is blank),
+        // resolve a model via sendOpenAIChatNonStream directly to avoid an extra failing stream attempt.
+        if (config.model.isBlank()) {
+            return sendOpenAIChatNonStream(messages, config)
+        }
+
+        val url = OpenAiUrlUtils.chatCompletions(config.apiUrl)
 
         val messagesArray = JSONArray()
         messages.forEach { msg ->
@@ -423,7 +412,7 @@ class AIService @Inject constructor() {
 
         // 首先尝试流式请求
         val streamRequestBody = JSONObject().apply {
-            put("model", config.model.ifEmpty { "gpt-3.5-turbo" })
+            put("model", config.model)
             put("messages", messagesArray)
             put("temperature", 0.7)
             put("max_tokens", 2000)
@@ -432,7 +421,7 @@ class AIService @Inject constructor() {
 
         val streamRequest = Request.Builder()
             .url(url)
-            .header("Authorization", "Bearer ${config.apiKey}")
+            .header("Authorization", "Bearer ${config.apiKey.trim()}")
             .header("Content-Type", "application/json")
             .header("Accept", "text/event-stream")
             .post(streamRequestBody.toString().toRequestBody(jsonMediaType))
@@ -484,14 +473,32 @@ class AIService @Inject constructor() {
         }
     }
 
-    /**
-     * OpenAI API调用（非流式版本）
-     */
-    private fun sendOpenAIChatNonStream(
+    private sealed class OpenAIChatFailure(message: String) : Exception(message) {
+        data class ModelUnavailable(val details: String) : OpenAIChatFailure(details)
+        data class Other(val details: String) : OpenAIChatFailure(details)
+    }
+
+    private fun isModelUnavailable(responseCode: Int, responseBody: String?): Boolean {
+        // Strong signals
+        if (responseCode == 404) return true
+
+        val body = responseBody.orEmpty().lowercase()
+        // Common OpenAI/OpenRouter style messages
+        return body.contains("model") && (
+            body.contains("not found") ||
+                body.contains("does not exist") ||
+                body.contains("unknown model") ||
+                body.contains("invalid model") ||
+                body.contains("model_not_found") ||
+                body.contains("no such model")
+            )
+    }
+
+    private fun sendOpenAIChatNonStreamOnce(
         messages: List<ChatMessage>,
         config: AIConfig
     ): String {
-        val url = buildOpenAIUrl(config.apiUrl)
+        val url = OpenAiUrlUtils.chatCompletions(config.apiUrl)
 
         val messagesArray = JSONArray()
         messages.forEach { msg ->
@@ -502,7 +509,9 @@ class AIService @Inject constructor() {
         }
 
         val requestBody = JSONObject().apply {
-            put("model", config.model.ifEmpty { "gpt-3.5-turbo" })
+            // Keep AUTO semantics consistent: when model is blank, this call site should already have
+            // resolved a model (sendOpenAIChatNonStream resolves via /v1/models).
+            put("model", config.model)
             put("messages", messagesArray)
             put("temperature", 0.7)
             put("max_tokens", 2000)
@@ -511,7 +520,132 @@ class AIService @Inject constructor() {
 
         val request = Request.Builder()
             .url(url)
-            .header("Authorization", "Bearer ${config.apiKey}")
+            .header("Authorization", "Bearer ${config.apiKey.trim()}")
+            .header("Content-Type", "application/json")
+            .post(requestBody.toString().toRequestBody(jsonMediaType))
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            val rawBody = response.body?.string()
+
+            if (!response.isSuccessful) {
+                if (isModelUnavailable(response.code, rawBody)) {
+                    throw OpenAIChatFailure.ModelUnavailable("model_unavailable: http=${response.code} body=${rawBody.orEmpty()}")
+                }
+                throw OpenAIChatFailure.Other("API请求失败: ${response.code}")
+            }
+
+            if (rawBody.isNullOrEmpty()) {
+                throw OpenAIChatFailure.Other("空响应")
+            }
+
+            val json = JSONObject(rawBody)
+
+            // 检查是否有错误
+            if (json.has("error")) {
+                val error = json.getJSONObject("error")
+                val message = error.optString("message", "未知错误")
+                if (isModelUnavailable(responseCode = 200, responseBody = rawBody)) {
+                    throw OpenAIChatFailure.ModelUnavailable(message)
+                }
+                throw OpenAIChatFailure.Other(message)
+            }
+
+            val choices = json.getJSONArray("choices")
+            if (choices.length() > 0) {
+                return choices.getJSONObject(0)
+                    .getJSONObject("message")
+                    .getString("content")
+            }
+            throw OpenAIChatFailure.Other("无效的响应格式")
+        }
+    }
+
+    private fun fetchRemoteModelIds(config: AIConfig): List<String> {
+        return fetchOpenAIModels(config).map { it.id }.filter { it.isNotBlank() }
+    }
+
+    private fun pickPreferredModel(remoteModelIds: List<String>, exclude: Set<String>): String? {
+        val recommended = "openai/gpt-oss-120b"
+
+        if (recommended !in exclude && recommended in remoteModelIds) return recommended
+
+        return remoteModelIds.firstOrNull { it !in exclude }
+    }
+
+    private fun sendOpenAIChatNonStream(
+        messages: List<ChatMessage>,
+        config: AIConfig
+    ): String {
+        // Auto fallback: within one request, at most 2 tries with different models.
+        // Candidate pool is strictly from remote /v1/models list (per product decision).
+
+        val primaryModel = config.model.trim()
+
+        val remoteModelIds: List<String>?
+        val firstModel = if (primaryModel.isNotBlank()) {
+            remoteModelIds = null
+            primaryModel
+        } else {
+            val ids = try {
+                fetchRemoteModelIds(config)
+            } catch (e: Exception) {
+                throw OpenAIChatFailure.Other("无法获取可用模型列表，请稍后重试")
+            }
+            remoteModelIds = ids
+            pickPreferredModel(ids, exclude = emptySet())
+                ?: throw OpenAIChatFailure.Other("无法获取可用模型列表，请稍后重试")
+        }
+
+        try {
+            return sendOpenAIChatNonStreamOnce(messages, config.copy(model = firstModel))
+        } catch (e: OpenAIChatFailure.ModelUnavailable) {
+            // Continue to fallback
+        }
+
+        // 2nd attempt (N=2): pick next candidate from /v1/models, excluding first.
+        val idsForFallback = remoteModelIds ?: try {
+            fetchRemoteModelIds(config)
+        } catch (e: Exception) {
+            throw OpenAIChatFailure.Other("无法获取可用模型列表，请稍后重试")
+        }
+
+        val secondModel = pickPreferredModel(idsForFallback, exclude = setOf(firstModel))
+            ?: throw OpenAIChatFailure.ModelUnavailable("model_unavailable: no alternative model")
+
+        return sendOpenAIChatNonStreamOnce(messages, config.copy(model = secondModel))
+    }
+
+    /**
+     * OpenAI API调用（非流式版本）
+     */
+    private fun sendOpenAIChatNonStream_LEGACY(
+        messages: List<ChatMessage>,
+        config: AIConfig
+    ): String {
+        val url = OpenAiUrlUtils.chatCompletions(config.apiUrl)
+
+        val messagesArray = JSONArray()
+        messages.forEach { msg ->
+            messagesArray.put(JSONObject().apply {
+                put("role", msg.role.name.lowercase())
+                put("content", msg.content)
+            })
+        }
+
+        val requestBody = JSONObject().apply {
+            // Keep AUTO semantics consistent: when model is blank, this call site should already have
+            // resolved a model (sendOpenAIChatNonStream resolves via /v1/models).
+            put("model", config.model)
+            put("messages", messagesArray)
+            put("temperature", 0.7)
+            put("max_tokens", 2000)
+            put("stream", false)
+        }
+
+        val request = Request.Builder()
+            .url(url)
+            .header("Authorization", "Bearer ${config.apiKey.trim()}")
             .header("Content-Type", "application/json")
             .post(requestBody.toString().toRequestBody(jsonMediaType))
             .build()
@@ -526,15 +660,15 @@ class AIService @Inject constructor() {
                 if (responseBody.isNullOrEmpty()) {
                     throw Exception("空响应")
                 }
-                
+
                 val json = JSONObject(responseBody)
-                
+
                 // 检查是否有错误
                 if (json.has("error")) {
                     val error = json.getJSONObject("error")
                     throw Exception(error.optString("message", "未知错误"))
                 }
-                
+
                 val choices = json.getJSONArray("choices")
                 if (choices.length() > 0) {
                     return choices.getJSONObject(0)
@@ -816,7 +950,22 @@ suspend fun analyzeImageAndRecord(
         """.trimIndent()
 
         val result = when (config.provider) {
-            AIProvider.QWEN, AIProvider.DEEPSEEK, AIProvider.ZHIPU, AIProvider.BAIDU, AIProvider.CUSTOM -> sendOpenAIImageRequest(base64Image, systemPrompt, config)
+            AIProvider.QWEN, AIProvider.DEEPSEEK, AIProvider.ZHIPU, AIProvider.BAIDU, AIProvider.CUSTOM -> {
+                try {
+                    sendOpenAIImageRequest(base64Image, systemPrompt, config)
+                } catch (e: Exception) {
+                    if (e.message == "UNSUPPORTED_MODEL") {
+                        // Best-effort fallback: try another model from /v1/models.
+                        // NOTE: Keep retry count to 1 to avoid heavy multi-tries on large model pools.
+                        val ids = fetchRemoteModelIds(config)
+                        val fallback = pickPreferredModel(ids, exclude = setOf(config.model.trim()))
+                            ?: throw e
+                        sendOpenAIImageRequest(base64Image, systemPrompt, config.copy(model = fallback))
+                    } else {
+                        throw e
+                    }
+                }
+            }
         }
 
         // 解析结果
@@ -911,7 +1060,7 @@ private fun sendOpenAIImageRequest(
     systemPrompt: String,
     config: AIConfig
 ): String {
-    val url = buildOpenAIUrl(config.apiUrl)
+    val url = OpenAiUrlUtils.chatCompletions(config.apiUrl)
 
     val messagesArray = JSONArray()
     
@@ -940,7 +1089,8 @@ private fun sendOpenAIImageRequest(
     })
 
     val requestBody = JSONObject().apply {
-        put("model", config.model.ifEmpty { "gpt-4-vision-preview" })
+        // Keep AUTO semantics consistent with chat(): if model is blank, AIService will resolve a model based on /v1/models.
+        put("model", config.model)
         put("messages", messagesArray)
         put("temperature", 0.7)
         put("max_tokens", 2000)

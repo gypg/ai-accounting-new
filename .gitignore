@@ -98,3 +98,33 @@ lint/reports/
 # Secrets
 *.env
 secrets.properties
+
+# Invite codes (treat as secrets)
+invites_*.csv
+invites_*.txt
+
+# Local working folders (assets/backup/apks) - keep out of git
+备份文件/
+备份文件 - 副本/
+测试版/
+界面主题风格/
+管家头像选择/
+马年主题ai按键ui/
+马年主题小马/
+
+# Claude Code workspace
+.claude/worktrees/
+.claude/skills/
+
+# Claude local settings (machine/user-specific)
+.claude/settings.json
+.claude/settings.local.json
+
+# Planning artifacts (local)
+task_plan.md
+findings.md
+memory/
+
+# Conversation records / office docs
+对话记录/
+*.docx

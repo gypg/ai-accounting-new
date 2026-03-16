@@ -2,6 +2,7 @@ package com.example.aiaccounting.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -11,6 +12,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -27,6 +29,7 @@ import com.example.aiaccounting.data.model.AIModel
 import com.example.aiaccounting.data.model.AIProvider
 import com.example.aiaccounting.data.repository.AIUsageStats
 import com.example.aiaccounting.ui.viewmodel.AISettingsViewModel
+import com.example.aiaccounting.ui.viewmodel.InviteBindResult
 import com.example.aiaccounting.ui.viewmodel.TestResult
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -36,8 +39,18 @@ fun AISettingsScreen(
     viewModel: AISettingsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val savedGatewayBaseUrl by viewModel.gatewayBaseUrl.collectAsState()
+    val inviteApiBaseUrl by viewModel.inviteApiBaseUrl.collectAsState()
+    val inviteRpm by viewModel.inviteRpm.collectAsState()
+    val inviteCodeMasked by viewModel.inviteCodeMasked.collectAsState()
+    val isInviteBound = uiState.inviteBound
     var showApiKey by remember { mutableStateOf(false) }
     var showResetConfirmDialog by remember { mutableStateOf(false) }
+    var showImportKeyDialog by remember { mutableStateOf(false) }
+    var importApiKeyInput by remember { mutableStateOf("") }
+
+    var inviteCode by remember { mutableStateOf("") }
+    var gatewayBaseUrl by remember(savedGatewayBaseUrl) { mutableStateOf(savedGatewayBaseUrl) }
 
     // 显示保存成功提示
     LaunchedEffect(uiState.saveSuccess) {
@@ -54,13 +67,56 @@ fun AISettingsScreen(
         }
     }
 
+    // 导入 API Key + 应用预设
+    if (showImportKeyDialog) {
+        AlertDialog(
+            onDismissRequest = { showImportKeyDialog = false },
+            title = { Text("导入 API Key") },
+            text = {
+                Column {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = importApiKeyInput,
+                        onValueChange = { importApiKeyInput = it },
+                        label = { Text("API Key") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation()
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val cleaned = importApiKeyInput.trim().replace("\n", "").replace("\r", "").replace(" ", "")
+                        viewModel.applyBuiltinPresetWithApiKey(cleaned)
+                        importApiKeyInput = ""
+                        showImportKeyDialog = false
+                    },
+                    enabled = importApiKeyInput.isNotBlank()
+                ) {
+                    Text("确认")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        showImportKeyDialog = false
+                    }
+                ) {
+                    Text("取消")
+                }
+            }
+        )
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("AI助手设置") },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "返回")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -101,16 +157,74 @@ fun AISettingsScreen(
                     Spacer(modifier = Modifier.height(16.dp))
                 }
 
+                // 邀请码绑定（推荐：给朋友用，不暴露主 Key）
+                if (!uiState.useBuiltinConfig && !isInviteBound) {
+                    InviteCodeBindCard(
+                        inviteCode = inviteCode,
+                        gatewayBaseUrl = gatewayBaseUrl,
+                        isBinding = uiState.isBindingInvite,
+                        bindResult = uiState.inviteBindResult,
+                        onInviteCodeChange = { inviteCode = it },
+                        onGatewayBaseUrlChange = {
+                            gatewayBaseUrl = it
+                            viewModel.setGatewayBaseUrl(it)
+                        },
+                        onBind = {
+                            viewModel.bindInviteCode(
+                                inviteCode = inviteCode,
+                                gatewayBaseUrl = gatewayBaseUrl
+                            )
+                        },
+                        onDismissResult = { viewModel.clearInviteBindResult() }
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+
+                if (!uiState.useBuiltinConfig && isInviteBound) {
+                    InviteBoundStatusCard(
+                        inviteCodeMasked = inviteCodeMasked,
+                        gatewayBaseUrl = savedGatewayBaseUrl,
+                        apiBaseUrl = inviteApiBaseUrl,
+                        rpmText = inviteRpm.takeIf { it > 0 }?.let { "$it rpm" }
+                            ?: (uiState.inviteBindResult as? InviteBindResult.Success)?.let { "${it.rpm} rpm" }.orEmpty(),
+                        onClear = { viewModel.clearInviteBinding() }
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+
+                // 一键预设（允许编辑切换，但减少朋友配置负担）
+                if (!uiState.useBuiltinConfig && !isInviteBound) {
+                    Button(
+                        onClick = { showImportKeyDialog = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = uiState.isNetworkAvailable
+                    ) {
+                        Icon(Icons.Default.AutoFixHigh, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("一键使用默认模型")
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+
                 // 启用AI助手开关
                 EnableAICard(
                     isEnabled = uiState.config.isEnabled,
                     onEnabledChange = { viewModel.updateEnabled(it) }
                 )
 
+                if (!uiState.useBuiltinConfig && isInviteBound) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "已通过邀请码绑定，为避免泄露站点/密钥，已隐藏详细 API 配置。",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
                 Spacer(modifier = Modifier.height(16.dp))
 
                 // AI提供商选择（仅在不使用内置配置时显示）
-                if (!uiState.useBuiltinConfig) {
+                if (!uiState.useBuiltinConfig && !isInviteBound) {
                     ProviderCard(
                         selectedProvider = uiState.config.provider,
                         onProviderSelected = { viewModel.updateProvider(it) }
@@ -118,10 +232,31 @@ fun AISettingsScreen(
                     Spacer(modifier = Modifier.height(16.dp))
                 }
 
-                // API配置（仅在不使用内置配置时显示）
-                if (!uiState.useBuiltinConfig) {
+                if (isInviteBound) {
                     Spacer(modifier = Modifier.height(16.dp))
-                    
+                    InviteModelSelectorCard(
+                        isAuto = uiState.inviteModelMode == com.example.aiaccounting.data.repository.AIConfigRepository.ModelSelectionMode.AUTO,
+                        selectedModelId = uiState.config.model,
+                        remoteModels = uiState.remoteModels,
+                        isFetchingModels = uiState.isFetchingModels,
+                        onToggleAuto = { isAuto ->
+                            val mode = if (isAuto) {
+                                com.example.aiaccounting.data.repository.AIConfigRepository.ModelSelectionMode.AUTO
+                            } else {
+                                com.example.aiaccounting.data.repository.AIConfigRepository.ModelSelectionMode.FIXED
+                            }
+                            viewModel.updateInviteModelMode(mode)
+                        },
+                        onFetchModels = { viewModel.fetchRemoteModels() },
+                        onModelSelected = { viewModel.updateInviteModel(it) },
+                        useBuiltinConfig = uiState.useBuiltinConfig
+                    )
+                }
+
+                // API配置（仅在不使用默认模型且非邀请码绑定时显示）
+                if (!uiState.useBuiltinConfig && !isInviteBound) {
+                    Spacer(modifier = Modifier.height(16.dp))
+
                     APIConfigCard(
                         apiKey = uiState.config.apiKey,
                         apiUrl = uiState.config.apiUrl,
@@ -130,6 +265,15 @@ fun AISettingsScreen(
                         remoteModels = uiState.remoteModels,
                         isFetchingModels = uiState.isFetchingModels,
                         showApiKey = showApiKey,
+                        isAuto = uiState.userModelMode == com.example.aiaccounting.data.repository.AIConfigRepository.ModelSelectionMode.AUTO,
+                        onToggleAuto = { isAuto ->
+                            val mode = if (isAuto) {
+                                com.example.aiaccounting.data.repository.AIConfigRepository.ModelSelectionMode.AUTO
+                            } else {
+                                com.example.aiaccounting.data.repository.AIConfigRepository.ModelSelectionMode.FIXED
+                            }
+                            viewModel.updateUserModelMode(mode)
+                        },
                         onShowApiKeyChange = { showApiKey = it },
                         onApiKeyChange = { viewModel.updateApiKey(it) },
                         onApiUrlChange = { viewModel.updateApiUrl(it) },
@@ -167,8 +311,8 @@ fun AISettingsScreen(
                     }
                 }
 
-                // 保存按钮（仅在不使用内置配置时显示）
-                if (!uiState.useBuiltinConfig) {
+                // 保存按钮（仅在不使用内置配置且非邀请码绑定时显示）
+                if (!uiState.useBuiltinConfig && !isInviteBound) {
                     Spacer(modifier = Modifier.height(16.dp))
 
                     Button(
@@ -397,6 +541,293 @@ private fun EnableAICard(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun InviteModelSelectorCard(
+    isAuto: Boolean,
+    selectedModelId: String,
+    remoteModels: List<com.example.aiaccounting.data.service.RemoteModel>,
+    isFetchingModels: Boolean,
+    onToggleAuto: (Boolean) -> Unit,
+    onFetchModels: () -> Unit,
+    onModelSelected: (String) -> Unit,
+    useBuiltinConfig: Boolean
+) {
+    val modelsToShow = remember(remoteModels) {
+        remoteModels.map {
+            AIModel(
+                id = it.id,
+                displayName = if (it.name.isBlank()) it.id else it.name,
+                description = it.description,
+                category = categorizeModel(it.id)
+            )
+        }
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "模型设置",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Text(
+                        text = if (isAuto) "自动切换可用模型" else "手动选择固定模型",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                Switch(
+                    checked = isAuto,
+                    onCheckedChange = { onToggleAuto(it) }
+                )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            OutlinedButton(
+                onClick = onFetchModels,
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !isFetchingModels
+            ) {
+                if (isFetchingModels) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("获取中...")
+                } else {
+                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("获取模型列表")
+                }
+            }
+
+            if (remoteModels.isNotEmpty()) {
+                Text(
+                    text = "已获取 ${remoteModels.size} 个模型",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+            }
+
+            if (!isAuto) {
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // 邀请码模式也支持分类+搜索，和自定义模式保持一致
+                CategorizedModelSelector(
+                    models = modelsToShow,
+                    selectedModelId = selectedModelId,
+                    onModelSelected = onModelSelected
+                )
+            } else {
+                Spacer(modifier = Modifier.height(12.dp))
+                val modeText = if (useBuiltinConfig) {
+                    "当前偏好：Auto（默认模型已开启，当前对话将优先使用本地AI）"
+                } else {
+                    "当前偏好：Auto（邀请码云端模型优先，推荐 openai/gpt-oss-120b；若不可用将自动切换）"
+                }
+                Text(
+                    text = modeText,
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CategorizedModelSelector(
+    models: List<AIModel>,
+    selectedModelId: String,
+    onModelSelected: (String) -> Unit
+) {
+    var showDialog by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
+    var selectedCategory by remember { mutableStateOf("全部") }
+
+    val selectedModel = models.find { it.id == selectedModelId }
+
+    val categories = remember(models) {
+        listOf("全部") + models.map { it.category }.distinct().sorted()
+    }
+
+    val filteredModels = remember(models, searchQuery, selectedCategory) {
+        models.filter { model ->
+            val matchesSearch = searchQuery.isBlank() ||
+                model.displayName.contains(searchQuery, ignoreCase = true) ||
+                model.id.contains(searchQuery, ignoreCase = true) ||
+                model.description.contains(searchQuery, ignoreCase = true)
+            val matchesCategory = selectedCategory == "全部" || model.category == selectedCategory
+            matchesSearch && matchesCategory
+        }
+    }
+
+    OutlinedCard(
+        onClick = { showDialog = true },
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "选择模型",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = selectedModel?.displayName ?: selectedModelId.ifEmpty { "默认模型" },
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Medium
+                )
+                if (selectedModel != null) {
+                    Text(
+                        text = "${selectedModel.category} · ${selectedModel.description}",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1
+                    )
+                }
+            }
+            Icon(
+                imageVector = Icons.Default.ArrowDropDown,
+                contentDescription = "选择模型"
+            )
+        }
+    }
+
+    if (showDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showDialog = false
+                searchQuery = ""
+                selectedCategory = "全部"
+            },
+            title = {
+                Column {
+                    Text("选择模型")
+                    Text(
+                        text = "共 ${models.size} 个模型",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            },
+            text = {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        label = { Text("搜索模型") },
+                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                        trailingIcon = {
+                            if (searchQuery.isNotEmpty()) {
+                                IconButton(onClick = { searchQuery = "" }) {
+                                    Icon(Icons.Default.Clear, contentDescription = "清除")
+                                }
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        categories.forEach { category ->
+                            FilterChip(
+                                selected = selectedCategory == category,
+                                onClick = { selectedCategory = category },
+                                label = { Text(category) }
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    if (searchQuery.isNotBlank()) {
+                        Text(
+                            text = "找到 ${filteredModels.size} 个结果",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        )
+                    }
+
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 320.dp)
+                    ) {
+                        items(filteredModels, key = { it.id }) { aiModel ->
+                            ModelListItem(
+                                model = aiModel,
+                                isSelected = aiModel.id == selectedModelId,
+                                onClick = {
+                                    onModelSelected(aiModel.id)
+                                    showDialog = false
+                                    searchQuery = ""
+                                    selectedCategory = "全部"
+                                }
+                            )
+                        }
+
+                        if (filteredModels.isEmpty()) {
+                            item {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 32.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "未找到匹配模型",
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = {
+                    showDialog = false
+                    searchQuery = ""
+                    selectedCategory = "全部"
+                }) {
+                    Text("取消")
+                }
+            }
+        )
+    }
+}
+
 @Composable
 private fun ProviderCard(
     selectedProvider: AIProvider,
@@ -485,6 +916,8 @@ private fun APIConfigCard(
     remoteModels: List<com.example.aiaccounting.data.service.RemoteModel>,
     isFetchingModels: Boolean,
     showApiKey: Boolean,
+    isAuto: Boolean,
+    onToggleAuto: (Boolean) -> Unit,
     onShowApiKeyChange: (Boolean) -> Unit,
     onApiKeyChange: (String) -> Unit,
     onApiUrlChange: (String) -> Unit,
@@ -493,12 +926,19 @@ private fun APIConfigCard(
 ) {
     // 使用远程模型列表（如果有）或默认模型列表
     val modelsToShow = if (remoteModels.isNotEmpty()) {
-        remoteModels.map { AIModel(it.id, it.name, it.description) }
+        remoteModels.map {
+            AIModel(
+                id = it.id,
+                displayName = if (it.name.isBlank()) it.id else it.name,
+                description = it.description,
+                category = categorizeModel(it.id)
+            )
+        }
     } else {
         provider.models
     }
-    
-    val selectedModel = modelsToShow.find { it.id == model } ?: modelsToShow.firstOrNull()
+
+    val fixedSelectedModelId = if (isAuto) "" else model
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -546,17 +986,56 @@ private fun APIConfigCard(
 
             Spacer(modifier = Modifier.height(12.dp))
 
+            // 模型模式（普通用户）
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "模型模式",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Text(
+                        text = if (isAuto) "自动切换可用模型" else "固定使用指定模型",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                Switch(
+                    checked = isAuto,
+                    onCheckedChange = onToggleAuto
+                )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            if (isAuto) {
+                Text(
+                    text = "当前偏好：Auto（推荐 openai/gpt-oss-120b；若不可用将自动切换）",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+            } else {
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+
             // 自定义提供商使用新的模型管理方式
             if (provider == AIProvider.CUSTOM) {
-                CustomModelManager(
-                    apiKey = apiKey,
-                    apiUrl = apiUrl,
-                    remoteModels = remoteModels,
-                    isFetchingModels = isFetchingModels,
-                    selectedModelId = model,
-                    onModelSelected = onModelChange,
-                    onFetchModels = onFetchModels
-                )
+                if (!isAuto) {
+                    CustomModelManager(
+                        apiKey = apiKey,
+                        remoteModels = remoteModels,
+                        isFetchingModels = isFetchingModels,
+                        selectedModelId = model,
+                        onModelSelected = onModelChange,
+                        onFetchModels = onFetchModels
+                    )
+                }
             } else {
                 // 获取模型列表按钮
                 OutlinedButton(
@@ -587,14 +1066,16 @@ private fun APIConfigCard(
                     )
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
+                if (!isAuto) {
+                    Spacer(modifier = Modifier.height(12.dp))
 
-                // 模型选择（带搜索功能）
-                ModelSelectorWithSearch(
-                    models = modelsToShow,
-                    selectedModelId = model,
-                    onModelSelected = onModelChange
-                )
+                    // 模型选择（分类 + 搜索）
+                    CategorizedModelSelector(
+                        models = modelsToShow,
+                        selectedModelId = fixedSelectedModelId,
+                        onModelSelected = onModelChange
+                    )
+                }
             }
         }
     }
@@ -883,6 +1364,202 @@ private fun TestResultCard(
 }
 
 @Composable
+private fun InviteCodeBindCard(
+    inviteCode: String,
+    gatewayBaseUrl: String,
+    isBinding: Boolean,
+    bindResult: InviteBindResult?,
+    onInviteCodeChange: (String) -> Unit,
+    onGatewayBaseUrlChange: (String) -> Unit,
+    onBind: () -> Unit,
+    onDismissResult: () -> Unit
+) {
+    var showAdvanced by remember { mutableStateOf(false) }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Link,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column {
+                        Text(
+                            text = "邀请码绑定",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Text(
+                            text = "只输入邀请码，自动配置网关",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                TextButton(onClick = { showAdvanced = !showAdvanced }) {
+                    Text(if (showAdvanced) "收起" else "高级", fontSize = 12.sp)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            OutlinedTextField(
+                value = inviteCode,
+                onValueChange = onInviteCodeChange,
+                label = { Text("邀请码") },
+                placeholder = { Text("inv_xxx") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+
+            if (showAdvanced) {
+                Spacer(modifier = Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = gatewayBaseUrl,
+                    onValueChange = onGatewayBaseUrlChange,
+                    label = { Text("网关地址") },
+                    placeholder = { Text("https://api.gdmon.dpdns.org") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Button(
+                onClick = onBind,
+                modifier = Modifier.fillMaxWidth(),
+                enabled = inviteCode.trim().isNotBlank() && !isBinding
+            ) {
+                if (isBinding) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                }
+
+                Icon(Icons.Default.Verified, contentDescription = null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(if (isBinding) "绑定中..." else "绑定并启用")
+            }
+
+            bindResult?.let { result ->
+                Spacer(modifier = Modifier.height(12.dp))
+
+                val (backgroundColor, textColor, icon, message) = when (result) {
+                    is InviteBindResult.Success -> Quadruple(
+                        MaterialTheme.colorScheme.primaryContainer,
+                        MaterialTheme.colorScheme.onPrimaryContainer,
+                        Icons.Default.CheckCircle,
+                        "绑定成功（${result.rpm} rpm）\n${result.hint}"
+                    )
+                    is InviteBindResult.Error -> Quadruple(
+                        MaterialTheme.colorScheme.errorContainer,
+                        MaterialTheme.colorScheme.onErrorContainer,
+                        Icons.Default.Error,
+                        result.message
+                    )
+                }
+
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = backgroundColor)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = icon,
+                            contentDescription = null,
+                            tint = textColor
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            text = message,
+                            color = textColor,
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(onClick = onDismissResult) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "关闭",
+                                tint = textColor
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun InviteBoundStatusCard(
+    inviteCodeMasked: String,
+    gatewayBaseUrl: String,
+    apiBaseUrl: String,
+    rpmText: String,
+    onClear: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Default.Verified,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "已通过邀请码绑定",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Medium
+                )
+
+                val sub = listOfNotNull(
+                    inviteCodeMasked.takeIf { it.isNotBlank() },
+                    rpmText.takeIf { it.isNotBlank() },
+                    apiBaseUrl.takeIf { it.isNotBlank() },
+                    gatewayBaseUrl.takeIf { it.isNotBlank() }
+                ).joinToString(" · ")
+
+                Text(
+                    text = sub.ifBlank { "已自动启用，可返回 AI 助手页面直接使用" },
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            TextButton(onClick = onClear) {
+                Text("解除绑定", color = MaterialTheme.colorScheme.error)
+            }
+        }
+    }
+}
+
+@Composable
 private fun UsageStatsCard(
     stats: AIUsageStats,
     onResetClick: () -> Unit
@@ -1109,7 +1786,6 @@ private data class Quadruple<A, B, C, D>(
 @Composable
 private fun CustomModelManager(
     apiKey: String,
-    apiUrl: String,
     remoteModels: List<com.example.aiaccounting.data.service.RemoteModel>,
     isFetchingModels: Boolean,
     selectedModelId: String,
@@ -1124,11 +1800,11 @@ private fun CustomModelManager(
     
     // 合并远程获取的模型和手动添加的模型
     val allModels = remember(remoteModels, customModels) {
-        val remote = remoteModels.map { 
+        val remote = remoteModels.map {
             CustomModelInfo(
                 id = it.id,
                 name = it.name,
-                group = it.description ?: "其他",
+                group = it.description,
                 isRemote = true,
                 category = categorizeModel(it.id)
             )
