@@ -32,7 +32,6 @@ fun HorseSettingsScreen(
     onNavigateBack: () -> Unit,
     onNavigateToProfile: () -> Unit = {},
     onNavigateToButlerSettings: () -> Unit = {},
-    onNavigateToButlerMarket: () -> Unit = {},
     onNavigateToAccounts: () -> Unit = {},
     onNavigateToCategories: () -> Unit = {},
     onNavigateToExport: () -> Unit = {},
@@ -103,8 +102,7 @@ fun HorseSettingsScreen(
                         Triple("Material You动态主题", Icons.Default.ColorLens) {
                             showThemeDialog = true
                         },
-                        Triple("AI管家", Icons.Default.Settings, onNavigateToButlerSettings),
-                        Triple("管家市场", Icons.Default.Storefront, onNavigateToButlerMarket)
+                        Triple("AI管家", Icons.Default.Settings, onNavigateToButlerSettings)
                     )
 
                     // 第一行

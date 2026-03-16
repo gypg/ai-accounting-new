@@ -237,9 +237,6 @@ fun AppNavigation(
                         onNavigateToButlerSettings = {
                             navController.navigate(Screen.ButlerSettings.route)
                         },
-                        onNavigateToButlerMarket = {
-                            navController.navigate(Screen.ButlerMarket.route)
-                        },
                         onNavigateToAccounts = {
                             navController.navigate(Screen.Accounts.route)
                         },
@@ -285,9 +282,6 @@ fun AppNavigation(
                         },
                         onNavigateToButlerSettings = {
                             navController.navigate(Screen.ButlerSettings.route)
-                        },
-                        onNavigateToButlerMarket = {
-                            navController.navigate(Screen.ButlerMarket.route)
                         },
                         onNavigateToAccounts = {
                             navController.navigate(Screen.Accounts.route)

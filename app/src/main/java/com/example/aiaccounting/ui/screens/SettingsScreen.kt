@@ -31,7 +31,6 @@ fun SettingsScreen(
     onNavigateBack: () -> Unit,
     onNavigateToProfile: () -> Unit,
     onNavigateToButlerSettings: () -> Unit,
-    onNavigateToButlerMarket: () -> Unit,
     onNavigateToAccounts: () -> Unit = {},
     onNavigateToCategories: () -> Unit = {},
     onNavigateToExport: () -> Unit = {},
@@ -334,18 +333,8 @@ fun SettingsScreen(
             SettingsListItem(
                 icon = Icons.Default.SmartToy,
                 title = "AI管家",
-                subtitle = "选择您喜欢的管家角色",
+                subtitle = "选择或创建自定义管家",
                 onClick = onNavigateToButlerSettings
-            )
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // 独立市场入口（更显眼，便于直达）
-            SettingsListItem(
-                icon = Icons.Default.Storefront,
-                title = "管家市场",
-                subtitle = "发现、创建和管理自定义管家",
-                onClick = onNavigateToButlerMarket
             )
 
             Spacer(modifier = Modifier.height(24.dp))
