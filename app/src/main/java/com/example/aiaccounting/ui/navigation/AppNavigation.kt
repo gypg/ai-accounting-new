@@ -455,14 +455,14 @@ fun AppNavigation(
                 )
             }
             
-            // Butler Settings
+            // Butler Settings (alias to Market for a closed-loop entry experience)
             composable(Screen.ButlerSettings.route) {
-                ButlerSettingsScreen(
+                ButlerMarketScreen(
                     onNavigateBack = {
                         navController.popBackStack()
                     },
-                    onNavigateToMarket = {
-                        navController.navigate(Screen.ButlerMarket.route)
+                    onNavigateToEditor = { butlerId ->
+                        navController.navigate(Screen.ButlerEditor.createRoute(butlerId))
                     }
                 )
             }
