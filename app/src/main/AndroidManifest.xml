@@ -103,7 +103,7 @@
         <!-- 小组件点击广播接收器 -->
         <receiver
             android:name=".widget.WidgetClickReceiver"
-            android:exported="true">
+            android:exported="false">
             <intent-filter>
                 <action android:name="com.example.aiaccounting.widget.ACTION_CLICK_1x1" />
                 <action android:name="com.example.aiaccounting.widget.ACTION_CLICK_2x1" />
@@ -132,7 +132,7 @@
         <!-- 快速记账弹窗 Activity (备用) -->
         <activity
             android:name=".widget.WidgetQuickAddActivity"
-            android:exported="true"
+            android:exported="false"
             android:theme="@style/Theme.Transparent"
             android:excludeFromRecents="true"
             android:launchMode="singleInstance"

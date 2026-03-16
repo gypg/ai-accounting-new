@@ -1,7 +1,9 @@
 package com.example.aiaccounting
 
 import android.Manifest
+import android.content.Intent
 import android.os.Bundle
+import android.os.SystemClock
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -9,6 +11,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.navigation.compose.rememberNavController
 import com.example.aiaccounting.data.local.prefs.AppStateManager
 import com.example.aiaccounting.security.SecurityManager
@@ -27,6 +31,9 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var appStateManager: AppStateManager
 
+    private var pendingWidgetAction by mutableStateOf<String?>(null)
+    private var widgetActionNonce by mutableLongStateOf(0L)
+
     private val storagePermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { isGranted ->
@@ -41,16 +48,16 @@ class MainActivity : ComponentActivity() {
         // 隐藏标题栏
         actionBar?.hide()
 
-        // 获取小组件传来的action
-        val widgetAction = intent.getStringExtra("action")
+        pendingWidgetAction = intent.getStringExtra("action")?.takeIf { it.isNotBlank() }
+        widgetActionNonce = SystemClock.elapsedRealtime()
 
         setContent {
             // 使用remember来监听主题变化
             var themeKey by remember { mutableStateOf(0) }
-            
+
             // 读取当前主题设置
             val themeSetting = remember(themeKey) { appStateManager.getTheme() }
-            
+
             AIAccountingTheme(
                 themeSetting = themeSetting
             ) {
@@ -60,10 +67,22 @@ class MainActivity : ComponentActivity() {
                     themeKey = themeKey,
                     onThemeChanged = { themeKey++ },
                     onRequestStoragePermission = { requestStoragePermission() },
-                    widgetAction = widgetAction
+                    widgetAction = pendingWidgetAction,
+                    widgetActionNonce = widgetActionNonce,
+                    onWidgetActionConsumed = {
+                        pendingWidgetAction = null
+                    }
                 )
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+
+        pendingWidgetAction = intent.getStringExtra("action")?.takeIf { it.isNotBlank() }
+        widgetActionNonce = SystemClock.elapsedRealtime()
     }
 
     private fun requestStoragePermission() {
@@ -95,7 +114,9 @@ fun MainApp(
     themeKey: Int,
     onThemeChanged: () -> Unit,
     onRequestStoragePermission: () -> Unit,
-    widgetAction: String? = null
+    widgetAction: String? = null,
+    widgetActionNonce: Long = 0L,
+    onWidgetActionConsumed: () -> Unit = {}
 ) {
     // 使用remember来强制重新读取状态
     var refreshKey by remember { mutableStateOf(0) }
@@ -103,10 +124,10 @@ fun MainApp(
     // 内存中的登录状态 - 每次启动都是false，需要重新登录
     var isLoggedIn by remember { mutableStateOf(false) }
     
-    // 使用StateFlow异步加载状态，避免阻塞UI
-    val isPinSet by remember(refreshKey) { 
-        mutableStateOf(securityManager.isPinSet())
+    val pinState by remember(refreshKey) {
+        mutableStateOf(securityManager.getPinState())
     }
+    val isPinSet = pinState is SecurityManager.PinState.Set
     val hasInitialSetup by remember(refreshKey) { 
         mutableStateOf(appStateManager.isInitialSetupCompleted())
     }
@@ -131,11 +152,35 @@ fun MainApp(
         return
     }
 
-    // 如果有小组件action且已设置PIN，自动标记为已登录（简化流程）
-    val autoLoginFromWidget = widgetAction != null && isPinSet && hasInitialSetup
-    
+    // Security subsystem init failed: block access (fail-closed)
+    if (pinState is SecurityManager.PinState.Error) {
+        Box(
+            modifier = androidx.compose.ui.Modifier
+                .fillMaxSize()
+                .padding(24.dp),
+            contentAlignment = androidx.compose.ui.Alignment.Center
+        ) {
+            Column(horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
+                Text(
+                    text = "安全组件初始化失败，无法验证身份",
+                    style = MaterialTheme.typography.titleMedium
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = "请尝试重启应用；若仍失败，可在系统设置中清除应用数据后重试。",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                Button(onClick = { refreshKey++ }) {
+                    Text("重试")
+                }
+            }
+        }
+        return
+    }
+
     // 实际登录状态
-    val effectiveIsLoggedIn = isLoggedIn || autoLoginFromWidget
+    val effectiveIsLoggedIn = isLoggedIn
 
     // Determine start destination
     // PIN码现在可选，用户可以选择设置或跳过
@@ -150,21 +195,18 @@ fun MainApp(
     // Global PIN holder for database initialization
     var globalPin by remember { mutableStateOf<String?>(null) }
     
-    // 小组件跳转目标
-    var widgetTargetRoute by remember { mutableStateOf<String?>(null) }
-    
-    // 处理小组件action
-    LaunchedEffect(widgetAction, effectiveIsLoggedIn) {
-        if (effectiveIsLoggedIn && widgetAction != null) {
-            widgetTargetRoute = when (widgetAction) {
+    // 小组件跳转目标（登录后执行）
+    var widgetTargetRoute by remember(widgetAction, widgetActionNonce) {
+        mutableStateOf(
+            when (widgetAction) {
                 "add_expense" -> "add_transaction/expense"
                 "add_income" -> "add_transaction/income"
                 "ai_chat" -> "ai_assistant"
                 else -> null
             }
-        }
+        )
     }
-    
+
     // 当登录成功后，如果有小组件目标，自动跳转
     LaunchedEffect(effectiveIsLoggedIn, widgetTargetRoute) {
         if (effectiveIsLoggedIn && widgetTargetRoute != null) {
@@ -174,6 +216,7 @@ fun MainApp(
                 popUpTo("overview") { inclusive = false }
             }
             widgetTargetRoute = null
+            onWidgetActionConsumed()
         }
     }
 
@@ -187,7 +230,7 @@ fun MainApp(
             refreshKey++
         },
         onLoginSuccess = { pin ->
-            globalPin = pin
+            globalPin = pin.takeIf { it.isNotBlank() }
             isLoggedIn = true
             refreshKey++
         },
