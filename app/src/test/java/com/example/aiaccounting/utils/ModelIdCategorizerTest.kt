@@ -17,6 +17,7 @@ class ModelIdCategorizerTest {
         assertEquals("ChatGLM", ModelIdCategorizer.categorizeModelId("zhipu/glm-4"))
         assertEquals("Yi", ModelIdCategorizer.categorizeModelId("01-ai/yi-34b"))
         assertEquals("其他", ModelIdCategorizer.categorizeModelId("unknownvendor/foo"))
+        assertEquals("ChatGLM", ModelIdCategorizer.categorizeModelId("2api/glm-4.7-think"))
     }
 
     @Test

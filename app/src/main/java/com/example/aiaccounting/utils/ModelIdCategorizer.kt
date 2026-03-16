@@ -15,19 +15,20 @@ object ModelIdCategorizer {
         val lower = trimmed.lowercase()
 
         // Prefer vendor prefix when present: vendor/model
+        // If vendor is not recognized (gateway/aggregator prefix like 2api/openrouter), fall back to keyword matching
+        // on the full id to keep category chips useful.
         val vendor = lower.substringBefore('/', missingDelimiterValue = "")
         if (vendor.isNotBlank() && vendor != lower) {
-            return when (vendor) {
-                "openai" -> "OpenAI"
-                "anthropic" -> "Claude"
-                "google" -> "Gemini"
-                "meta", "meta-llama" -> "Llama"
-                "mistralai" -> "Mistral"
-                "qwen", "alibaba" -> "通义千问"
-                "deepseek" -> "DeepSeek"
-                "zhipu", "zhipuai", "glm" -> "ChatGLM"
-                "01-ai", "yi" -> "Yi"
-                else -> "其他"
+            when (vendor) {
+                "openai" -> return "OpenAI"
+                "anthropic" -> return "Claude"
+                "google" -> return "Gemini"
+                "meta", "meta-llama" -> return "Llama"
+                "mistralai" -> return "Mistral"
+                "qwen", "alibaba" -> return "通义千问"
+                "deepseek" -> return "DeepSeek"
+                "zhipu", "zhipuai", "glm" -> return "ChatGLM"
+                "01-ai", "yi" -> return "Yi"
             }
         }
 
