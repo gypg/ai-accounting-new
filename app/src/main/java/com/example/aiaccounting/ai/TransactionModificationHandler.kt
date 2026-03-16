@@ -260,9 +260,7 @@ class TransactionModificationHandler @Inject constructor(
      * 获取最近的交易记录
      */
     private suspend fun getRecentTransactions(limit: Int): List<Transaction> {
-        return transactionRepository.getAllTransactionsList()
-            .sortedByDescending { it.date }
-            .take(limit)
+        return transactionRepository.getRecentTransactionsList(limit)
     }
 
     /**

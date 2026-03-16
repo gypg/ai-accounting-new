@@ -22,10 +22,10 @@ class AIMessageParser @Inject constructor() {
 
     fun extractNote(message: String): String? {
         val patterns = listOf(
-            Regex("""买了(.+?)[，。]?"""),
-            Regex("""花了.+?买(.+?)[，。]?"""),
-            Regex("""消费(.+?)[，。]?"""),
-            Regex("""用于(.+?)[，。]?""")
+            Regex("""买了(.+?)(?:[，。]|$)"""),
+            Regex("""花了.+?买(.+?)(?:[，。]|$)"""),
+            Regex("""消费(.+?)(?:[，。]|$)"""),
+            Regex("""用于(.+?)(?:[，。]|$)""")
         )
         for (pattern in patterns) {
             val match = pattern.find(message)

@@ -39,10 +39,9 @@ class IdentityConfirmationDetector @Inject constructor() {
         
         // 1. 直接身份询问模式
         val directPatterns = listOf(
-            "你是谁", "你叫什么", "你是什么", "你是哪位", "你是哪个",
+            "你是谁", "你叫什么", "你是哪位", "你是哪个",
             "你的名字", "介绍一下自己", "自我介绍一下",
-            "who are you", "what's your name", "your name",
-            "你是", "你是？", "你是?"
+            "who are you", "what's your name", "your name"
         )
         
         for (pattern in directPatterns) {

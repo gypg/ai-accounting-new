@@ -6,6 +6,8 @@ import android.os.Build
 import android.util.Base64
 import com.example.aiaccounting.data.model.AIConfig
 import com.example.aiaccounting.data.model.AIProvider
+import com.example.aiaccounting.di.VoiceOkHttpClient
+import com.example.aiaccounting.utils.OpenAiUrlUtils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -19,7 +21,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.IOException
-import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -29,14 +30,9 @@ import javax.inject.Singleton
  */
 @Singleton
 class AIVoiceRecognitionService @Inject constructor(
-    private val aiService: AIService
+    private val aiService: AIService,
+    @VoiceOkHttpClient private val client: OkHttpClient
 ) {
-
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)
-        .writeTimeout(30, TimeUnit.SECONDS)
-        .build()
 
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 
@@ -178,12 +174,7 @@ class AIVoiceRecognitionService @Inject constructor(
     private fun tryWhisperAPI(audioFile: File, config: AIConfig): String? {
         return try {
             // 检查是否是OpenAI兼容的API
-            val baseUrl = config.apiUrl.trim().removeSuffix("/").removeSuffix("/v1/chat/completions")
-            val whisperUrl = if (baseUrl.endsWith("/v1")) {
-                "$baseUrl/audio/transcriptions"
-            } else {
-                "$baseUrl/v1/audio/transcriptions"
-            }
+            val whisperUrl = OpenAiUrlUtils.whisperTranscriptions(config.apiUrl)
 
             // 读取音频文件
             val audioBytes = audioFile.readBytes()

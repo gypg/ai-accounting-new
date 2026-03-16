@@ -62,9 +62,10 @@ class AIInformationSystem @Inject constructor(
         val errorMessage: String? = null
     )
 
-    /**
-     * 执行智能查询
-     */
+    private companion object {
+        const val DEFAULT_QUERY_LIMIT = 50
+    }
+
     suspend fun executeQuery(request: QueryRequest): QueryResult {
         return try {
             when (request.queryType) {
@@ -152,20 +153,23 @@ class AIInformationSystem @Inject constructor(
      */
     private suspend fun getTransactionList(request: QueryRequest): QueryResult {
         val transactions = if (request.startDate != null && request.endDate != null) {
-            transactionRepository.getTransactionsByDateRange(
-                request.startDate, 
-                request.endDate
-            ).first()
+            val limit = request.limit ?: DEFAULT_QUERY_LIMIT
+            transactionRepository.getTransactionsByDateRangeList(
+                request.startDate,
+                request.endDate,
+                limit
+            )
         } else {
-            transactionRepository.getAllTransactionsList()
+            val limit = request.limit ?: DEFAULT_QUERY_LIMIT
+            transactionRepository.getRecentTransactionsList(limit)
         }
-        
-        val limitedList = request.limit?.let { transactions.take(it) } ?: transactions
-        
+
+        val limitedList = transactions
+
         val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
-        
-        val summary = "共找到 ${transactions.size} 笔交易记录" + 
-                if (request.limit != null && transactions.size > request.limit) 
+
+        val summary = "共找到 ${transactions.size} 笔交易记录" +
+                if (request.limit != null && transactions.size >= request.limit)
                     "，显示前 ${request.limit} 笔" else ""
         
         val details = buildString {
@@ -248,19 +252,22 @@ class AIInformationSystem @Inject constructor(
      */
     private suspend fun getExpenseAnalysis(request: QueryRequest): QueryResult {
         val (startDate, endDate) = getDateRange(request)
-        
+
         val transactions = transactionRepository.getTransactionsByDateRange(
             startDate, endDate
         ).first()
-        
+
         val expenses = transactions.filter { it.type == TransactionType.EXPENSE }
         val totalExpense = expenses.sumOf { it.amount }
-        
+
+        // 避免 N+1：一次性加载分类映射
+        val categoryMap = categoryRepository.getAllCategoriesList().associateBy { it.id }
+
         // 按分类统计
         val categoryExpenses = expenses.groupBy { it.categoryId }
             .map { (categoryId, trans) ->
-                val category = categoryRepository.getCategoryById(categoryId)
-                Pair(category?.name ?: "未分类", trans.sumOf { it.amount })
+                val categoryName = categoryMap[categoryId]?.name ?: "未分类"
+                Pair(categoryName, trans.sumOf { it.amount })
             }
             .sortedByDescending { it.second }
         
@@ -298,19 +305,22 @@ class AIInformationSystem @Inject constructor(
      */
     private suspend fun getIncomeAnalysis(request: QueryRequest): QueryResult {
         val (startDate, endDate) = getDateRange(request)
-        
+
         val transactions = transactionRepository.getTransactionsByDateRange(
             startDate, endDate
         ).first()
-        
+
         val incomes = transactions.filter { it.type == TransactionType.INCOME }
         val totalIncome = incomes.sumOf { it.amount }
-        
+
+        // 避免 N+1：一次性加载分类映射
+        val categoryMap = categoryRepository.getAllCategoriesList().associateBy { it.id }
+
         // 按分类统计
         val categoryIncomes = incomes.groupBy { it.categoryId }
             .map { (categoryId, trans) ->
-                val category = categoryRepository.getCategoryById(categoryId)
-                Pair(category?.name ?: "未分类", trans.sumOf { it.amount })
+                val categoryName = categoryMap[categoryId]?.name ?: "未分类"
+                Pair(categoryName, trans.sumOf { it.amount })
             }
             .sortedByDescending { it.second }
         
