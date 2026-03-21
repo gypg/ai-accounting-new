@@ -5,10 +5,12 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.aiaccounting.data.local.entity.Account
 import com.example.aiaccounting.data.local.entity.Category
+import com.example.aiaccounting.data.local.entity.Tag
 import com.example.aiaccounting.data.local.entity.Transaction
 import com.example.aiaccounting.data.local.entity.TransactionType
 import com.example.aiaccounting.data.repository.AccountRepository
 import com.example.aiaccounting.data.repository.CategoryRepository
+import com.example.aiaccounting.data.repository.TagRepository
 import com.example.aiaccounting.data.repository.TransactionRepository
 import com.example.aiaccounting.widget.WidgetUpdateService
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -27,6 +29,7 @@ class TransactionViewModel @Inject constructor(
     private val transactionRepository: TransactionRepository,
     private val accountRepository: AccountRepository,
     private val categoryRepository: CategoryRepository,
+    private val tagRepository: TagRepository,
     private val widgetUpdateService: WidgetUpdateService,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
@@ -56,6 +59,13 @@ class TransactionViewModel @Inject constructor(
         )
 
     val categories = categoryRepository.getAllCategories()
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
+
+    val tags = tagRepository.getAllTags()
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
@@ -157,26 +167,32 @@ class TransactionViewModel @Inject constructor(
         accountId: Long,
         categoryId: Long,
         date: java.util.Date,
-        note: String
+        note: String,
+        selectedTags: List<Tag> = emptyList()
     ) {
         viewModelScope.launch {
             try {
                 _uiState.update { it.copy(isLoading = true, error = null) }
-                
+
+                val tagsString = selectedTags.joinToString(",") { it.name }
                 val transaction = Transaction(
                     accountId = accountId,
                     categoryId = categoryId,
                     type = type,
                     amount = amount,
                     date = date.time,
-                    note = note
+                    note = note,
+                    tags = tagsString
                 )
-                
-                transactionRepository.insertTransaction(transaction)
-                
+
+                val transactionId = transactionRepository.insertTransaction(transaction)
+                if (selectedTags.isNotEmpty()) {
+                    tagRepository.setTransactionTags(transactionId, selectedTags.map { it.id })
+                }
+
                 // 更新小组件数据
                 widgetUpdateService.updateWidgetStats(context)
-                
+
                 _uiState.update { it.copy(isLoading = false) }
                 loadMonthSummary() // Update summary
             } catch (e: Exception) {
@@ -192,11 +208,13 @@ class TransactionViewModel @Inject constructor(
         accountId: Long,
         categoryId: Long,
         date: java.util.Date,
-        note: String
+        note: String,
+        selectedTags: List<Tag> = emptyList()
     ) {
         viewModelScope.launch {
             try {
                 _uiState.update { it.copy(isLoading = true, error = null) }
+                val tagsString = selectedTags.joinToString(",") { it.name }
                 val transaction = Transaction(
                     id = transactionId,
                     accountId = accountId,
@@ -204,9 +222,11 @@ class TransactionViewModel @Inject constructor(
                     type = type,
                     amount = amount,
                     date = date.time,
-                    note = note
+                    note = note,
+                    tags = tagsString
                 )
                 transactionRepository.updateTransaction(transaction)
+                tagRepository.setTransactionTags(transactionId, selectedTags.map { it.id })
                 _uiState.update { it.copy(isLoading = false, showEditDialog = false) }
                 loadMonthSummary()
             } catch (e: Exception) {

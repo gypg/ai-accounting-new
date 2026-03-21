@@ -9,6 +9,7 @@ import com.example.aiaccounting.data.local.entity.Transaction
 import com.example.aiaccounting.data.local.entity.TransactionType
 import com.example.aiaccounting.data.repository.AccountRepository
 import com.example.aiaccounting.data.repository.CategoryRepository
+import com.example.aiaccounting.data.repository.TagRepository
 import com.example.aiaccounting.data.repository.TransactionRepository
 import com.example.aiaccounting.widget.WidgetUpdateService
 import io.mockk.MockKAnnotations
@@ -55,6 +56,9 @@ class TransactionViewModelTest {
     @MockK
     private lateinit var widgetUpdateService: WidgetUpdateService
 
+    @MockK
+    private lateinit var tagRepository: TagRepository
+
     private lateinit var viewModel: TransactionViewModel
     private lateinit var context: Context
 
@@ -70,6 +74,7 @@ class TransactionViewModelTest {
         every { transactionRepository.getRecentTransactions(any()) } returns flowOf(emptyList())
         every { accountRepository.getAllAccounts() } returns flowOf(emptyList())
         every { categoryRepository.getAllCategories() } returns flowOf(emptyList())
+        every { tagRepository.getAllTags() } returns flowOf(emptyList())
         coEvery { transactionRepository.getCurrentMonthRange() } returns Pair(0L, 9999999999L)
         coEvery { transactionRepository.getTotalIncome(any(), any()) } returns 1000.0
         coEvery { transactionRepository.getTotalExpense(any(), any()) } returns 500.0
@@ -79,6 +84,7 @@ class TransactionViewModelTest {
             transactionRepository,
             accountRepository,
             categoryRepository,
+            tagRepository,
             widgetUpdateService,
             context
         )

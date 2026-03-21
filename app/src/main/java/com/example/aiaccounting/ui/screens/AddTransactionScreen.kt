@@ -18,8 +18,10 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.aiaccounting.data.local.entity.Account
 import com.example.aiaccounting.data.local.entity.Category
+import com.example.aiaccounting.data.local.entity.Tag
 import com.example.aiaccounting.data.local.entity.TransactionType
 import com.example.aiaccounting.ui.components.FlowRow
+import com.example.aiaccounting.ui.components.TagSelector
 import com.example.aiaccounting.ui.viewmodel.TransactionViewModel
 import com.example.aiaccounting.utils.DateUtils
 import com.example.aiaccounting.utils.NumberUtils
@@ -35,11 +37,13 @@ fun AddTransactionScreen(
     val uiState by viewModel.uiState.collectAsState()
     val accounts by viewModel.accounts.collectAsState()
     val categories by viewModel.categories.collectAsState()
+    val tags by viewModel.tags.collectAsState()
 
     var amount by remember { mutableStateOf("") }
     var selectedType by remember { mutableStateOf(TransactionType.EXPENSE) }
     var selectedAccount by remember { mutableStateOf<Account?>(null) }
     var selectedCategory by remember { mutableStateOf<Category?>(null) }
+    var selectedTags by remember { mutableStateOf<List<Tag>>(emptyList()) }
     var note by remember { mutableStateOf("") }
     var date by remember { mutableStateOf(Date()) }
     var showDatePicker by remember { mutableStateOf(false) }
@@ -108,6 +112,14 @@ fun AddTransactionScreen(
                 onNoteChange = { note = it }
             )
 
+            // 标签选择
+            TagSelector(
+                tags = tags,
+                selectedTags = selectedTags,
+                onTagSelected = { tag -> selectedTags = selectedTags + tag },
+                onTagDeselected = { tag -> selectedTags = selectedTags.filter { it.id != tag.id } }
+            )
+
             Spacer(modifier = Modifier.height(24.dp))
 
             // 保存按钮
@@ -129,7 +141,8 @@ fun AddTransactionScreen(
                             accountId = account.id,
                             categoryId = category.id,
                             date = date,
-                            note = note
+                            note = note,
+                            selectedTags = selectedTags
                         )
                         onSave()
                     }

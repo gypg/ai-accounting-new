@@ -16,8 +16,10 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.aiaccounting.data.local.entity.Account
 import com.example.aiaccounting.data.local.entity.Category
+import com.example.aiaccounting.data.local.entity.Tag
 import com.example.aiaccounting.data.local.entity.Transaction
 import com.example.aiaccounting.data.local.entity.TransactionType
+import com.example.aiaccounting.ui.components.TagSelector
 import com.example.aiaccounting.ui.viewmodel.TransactionViewModel
 import com.example.aiaccounting.utils.NumberUtils
 import java.util.*
@@ -34,7 +36,8 @@ fun EditTransactionScreen(
     val uiState by viewModel.uiState.collectAsState()
     val accounts by viewModel.accounts.collectAsState()
     val categories by viewModel.categories.collectAsState()
-    
+    val tags by viewModel.tags.collectAsState()
+
     var transaction by remember { mutableStateOf<Transaction?>(null) }
 
     // 表单状态
@@ -42,6 +45,7 @@ fun EditTransactionScreen(
     var selectedType by remember { mutableStateOf(TransactionType.EXPENSE) }
     var selectedAccount by remember { mutableStateOf<Account?>(null) }
     var selectedCategory by remember { mutableStateOf<Category?>(null) }
+    var selectedTags by remember { mutableStateOf<List<Tag>>(emptyList()) }
     var note by remember { mutableStateOf("") }
     var date by remember { mutableStateOf(Date()) }
     var showDatePicker by remember { mutableStateOf(false) }
@@ -51,7 +55,7 @@ fun EditTransactionScreen(
     LaunchedEffect(transactionId) {
         transaction = viewModel.getTransactionById(transactionId)
     }
-    
+
     LaunchedEffect(transaction) {
         transaction?.let { trans ->
             amount = trans.amount.toString()
@@ -149,6 +153,14 @@ fun EditTransactionScreen(
                     onNoteChange = { note = it }
                 )
 
+                // 标签选择
+                TagSelector(
+                    tags = tags,
+                    selectedTags = selectedTags,
+                    onTagSelected = { tag -> selectedTags = selectedTags + tag },
+                    onTagDeselected = { tag -> selectedTags = selectedTags.filter { it.id != tag.id } }
+                )
+
                 Spacer(modifier = Modifier.height(24.dp))
 
                 // 保存按钮
@@ -163,7 +175,8 @@ fun EditTransactionScreen(
                                 accountId = selectedAccount!!.id,
                                 categoryId = selectedCategory!!.id,
                                 date = date,
-                                note = note
+                                note = note,
+                                selectedTags = selectedTags
                             )
                             onSave()
                         }

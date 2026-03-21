@@ -37,479 +37,501 @@ import java.util.*
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TransactionListScreen(
-  onNavigateToAddTransaction: () -> Unit,
-  onNavigateToExport: () -> Unit,
-  onNavigateToEditTransaction: (Long) -> Unit = {},
-  viewModel: TransactionListViewModel = hiltViewModel()
+    onNavigateToAddTransaction: () -> Unit,
+    onNavigateToExport: () -> Unit,
+    onNavigateToEditTransaction: (Long) -> Unit = {},
+    viewModel: TransactionListViewModel = hiltViewModel()
 ) {
-  val uiState by viewModel.uiState.collectAsState()
-  val transactions by viewModel.filteredTransactions.collectAsState()
-  val monthlyStats by viewModel.monthlyStats.collectAsState()
-  var showFilterPanel by remember { mutableStateOf(false) }
+    val uiState by viewModel.uiState.collectAsState()
+    val transactions by viewModel.filteredTransactions.collectAsState()
+    val monthlyStats by viewModel.monthlyStats.collectAsState()
+    var showFilterPanel by remember { mutableStateOf(false) }
 
-  val isDreamyTheme = LocalIsDreamyTheme.current
-  
+    val isDreamyTheme = LocalIsDreamyTheme.current
 
-  Scaffold(
-    containerColor = if (isDreamyTheme) Color.Transparent else MaterialTheme.colorScheme.background,
-    topBar = {
-      TopAppBar(
-        title = {
-          Row(
-            verticalAlignment = Alignment.CenterVertically
-          ) {
-            Text(
-              text = "明细",
-              fontSize = 20.sp,
-              fontWeight = FontWeight.Bold,
-              color = MaterialTheme.colorScheme.primary
+
+    Scaffold(
+        containerColor = if (isDreamyTheme) Color.Transparent else MaterialTheme.colorScheme.background,
+        topBar = {
+            TopAppBar(
+                title = {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "明细",
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                },
+                actions = {
+                    IconButton(onClick = { showFilterPanel = !showFilterPanel }) {
+                        Icon(Icons.Default.FilterList, contentDescription = "筛选")
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = if (isDreamyTheme) Color.Transparent else MaterialTheme.colorScheme.surface
+                )
             )
-          }
         },
-        actions = {
-          IconButton(onClick = { showFilterPanel = !showFilterPanel }) {
-            Icon(Icons.Default.FilterList, contentDescription = "筛选")
-          }
-        },
-        colors = TopAppBarDefaults.topAppBarColors(
-          containerColor = if (isDreamyTheme) Color.Transparent else MaterialTheme.colorScheme.surface
-        )
-      )
-    },
-    floatingActionButton = {
-      FloatingActionButton(
-        onClick = onNavigateToAddTransaction,
-        containerColor = MaterialTheme.colorScheme.primary
-      ) {
-        Icon(Icons.Default.Add, contentDescription = "新增")
-      }
-    }
-  ) { padding ->
-    Column(
-      modifier = Modifier
-        .fillMaxSize()
-        .padding(padding)
-    ) {
-      // 月份选择器和统计
-      MonthSelectorCard(
-        year = uiState.selectedYear,
-        month = uiState.selectedMonth,
-        income = monthlyStats.income,
-        expense = monthlyStats.expense,
-        onPrevMonth = { viewModel.prevMonth() },
-        onNextMonth = { viewModel.nextMonth() }
-      )
-
-      // 筛选面板
-      if (showFilterPanel) {
-        FilterPanel(
-          selectedType = uiState.filterType,
-          onTypeSelected = { viewModel.setFilterType(it) },
-          sortBy = uiState.sortBy,
-          onSortByChanged = { viewModel.setSortBy(it) },
-          onExportClick = onNavigateToExport
-        )
-      }
-
-      // 交易列表
-      if (transactions.isEmpty()) {
-        Box(
-          modifier = Modifier
-            .fillMaxSize()
-            .padding(32.dp),
-          contentAlignment = Alignment.Center
+        floatingActionButton = {
+            FloatingActionButton(
+                onClick = onNavigateToAddTransaction,
+                containerColor = MaterialTheme.colorScheme.primary
+            ) {
+                Icon(Icons.Default.Add, contentDescription = "新增")
+            }
+        }
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
         ) {
-          Column(
-            horizontalAlignment = Alignment.CenterHorizontally
-          ) {
-            Icon(
-              imageVector = Icons.Default.Receipt,
-              contentDescription = null,
-              modifier = Modifier.size(64.dp),
-              tint = Color.LightGray
+            // 月份选择器和统计
+            MonthSelectorCard(
+                year = uiState.selectedYear,
+                month = uiState.selectedMonth,
+                income = monthlyStats.income,
+                expense = monthlyStats.expense,
+                onPrevMonth = { viewModel.prevMonth() },
+                onNextMonth = { viewModel.nextMonth() }
             )
-            Spacer(modifier = Modifier.height(16.dp))
-            Text(
-              text = "暂无账单",
-              color = Color.Gray
-            )
-          }
+
+            // 筛选面板
+            if (showFilterPanel) {
+                FilterPanel(
+                    selectedType = uiState.filterType,
+                    onTypeSelected = { viewModel.setFilterType(it) },
+                    sortBy = uiState.sortBy,
+                    onSortByChanged = { viewModel.setSortBy(it) },
+                    onExportClick = onNavigateToExport
+                )
+            }
+
+            // 交易列表
+            if (transactions.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(32.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Receipt,
+                            contentDescription = null,
+                            modifier = Modifier.size(64.dp),
+                            tint = Color.LightGray
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            text = "暂无账单",
+                            color = Color.Gray
+                        )
+                    }
+                }
+            } else {
+                LazyColumn {
+                    items(transactions, key = { it.id }) { transaction ->
+                        TransactionItem(
+                            transaction = transaction,
+                            categoryName = viewModel.getCategoryName(transaction.categoryId),
+                            onClick = { onNavigateToEditTransaction(transaction.id) }
+                        )
+                    }
+                }
+            }
         }
-      } else {
-        LazyColumn {
-          items(transactions, key = { it.id }) { transaction ->
-            TransactionItem(
-              transaction = transaction,
-              categoryName = viewModel.getCategoryName(transaction.categoryId),
-              onClick = { onNavigateToEditTransaction(transaction.id) }
-            )
-          }
-        }
-      }
     }
-  }
 }
 
 @Composable
 fun MonthSelectorCard(
-  year: Int,
-  month: Int,
-  income: Double,
-  expense: Double,
-  onPrevMonth: () -> Unit,
-  onNextMonth: () -> Unit
+    year: Int,
+    month: Int,
+    income: Double,
+    expense: Double,
+    onPrevMonth: () -> Unit,
+    onNextMonth: () -> Unit
 ) {
-  val isDreamyTheme = LocalIsDreamyTheme.current
-  
+    val isDreamyTheme = LocalIsDreamyTheme.current
 
-  if (isDreamyTheme) {
-    GlassCard(
-      modifier = Modifier
-        .fillMaxWidth()
-        .padding(16.dp)
-    ) {
-      Column(
-        modifier = Modifier.padding(16.dp)
-      ) {
-        // 月份选择
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.SpaceBetween,
-          verticalAlignment = Alignment.CenterVertically
+
+    if (isDreamyTheme) {
+        GlassCard(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
         ) {
-          IconButton(onClick = onPrevMonth) {
-            Icon(
-              imageVector = Icons.Default.ChevronLeft,
-              contentDescription = "上个月",
-              tint = MaterialTheme.colorScheme.primary
-            )
-          }
-          Text(
-            text = "${year}年${month}月",
-            fontSize = 18.sp,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onSurface
-          )
-          IconButton(onClick = onNextMonth) {
-            Icon(
-              imageVector = Icons.Default.ChevronRight,
-              contentDescription = "下个月",
-              tint = MaterialTheme.colorScheme.primary
-            )
-          }
-        }
+            Column(
+                modifier = Modifier.padding(16.dp)
+            ) {
+                // 月份选择
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(onClick = onPrevMonth) {
+                        Icon(
+                            imageVector = Icons.Default.ChevronLeft,
+                            contentDescription = "上个月",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    Text(
+                        text = "${year}年${month}月",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    IconButton(onClick = onNextMonth) {
+                        Icon(
+                            imageVector = Icons.Default.ChevronRight,
+                            contentDescription = "下个月",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
 
-        Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(16.dp))
 
-        // 收支统计
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.SpaceEvenly
-        ) {
-          Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(
-              text = "收入",
-              fontSize = 12.sp,
-              color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-            )
-            Text(
-              text = "+${NumberUtils.formatMoney(income)}",
-              fontSize = 16.sp,
-              color = MaterialTheme.colorScheme.onSurface,
-              fontWeight = FontWeight.Bold
-            )
-          }
-          Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(
-              text = "支出",
-              fontSize = 12.sp,
-              color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-            )
-            Text(
-              text = "-${NumberUtils.formatMoney(expense)}",
-              fontSize = 16.sp,
-              color = MaterialTheme.colorScheme.onSurface,
-              fontWeight = FontWeight.Bold
-            )
-          }
-          Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(
-              text = "结余",
-              fontSize = 12.sp,
-              color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-            )
-            Text(
-              text = NumberUtils.formatMoney(income - expense),
-              fontSize = 16.sp,
-              color = MaterialTheme.colorScheme.primary,
-              fontWeight = FontWeight.Bold
-            )
-          }
+                // 收支统计
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = "收入",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                        )
+                        Text(
+                            text = "+${NumberUtils.formatMoney(income)}",
+                            fontSize = 16.sp,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = "支出",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                        )
+                        Text(
+                            text = "-${NumberUtils.formatMoney(expense)}",
+                            fontSize = 16.sp,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = "结余",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                        )
+                        Text(
+                            text = NumberUtils.formatMoney(income - expense),
+                            fontSize = 16.sp,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
         }
-      }
+        return
     }
-    return
-  }
 
-  Card(
-    modifier = Modifier
-      .fillMaxWidth()
-      .padding(16.dp),
-    shape = RoundedCornerShape(12.dp),
-    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary)
-  ) {
-    Column(
-      modifier = Modifier.padding(16.dp)
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary)
     ) {
-      // 月份选择
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-      ) {
-        IconButton(onClick = onPrevMonth) {
-          Icon(
-            imageVector = Icons.Default.ChevronLeft,
-            contentDescription = "上个月",
-            tint = Color.White
-          )
-        }
-        Text(
-          text = "${year}年${month}月",
-          fontSize = 18.sp,
-          fontWeight = FontWeight.Bold,
-          color = Color.White
-        )
-        IconButton(onClick = onNextMonth) {
-          Icon(
-            imageVector = Icons.Default.ChevronRight,
-            contentDescription = "下个月",
-            tint = Color.White
-          )
-        }
-      }
+        Column(
+            modifier = Modifier.padding(16.dp)
+        ) {
+            // 月份选择
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = onPrevMonth) {
+                    Icon(
+                        imageVector = Icons.Default.ChevronLeft,
+                        contentDescription = "上个月",
+                        tint = Color.White
+                    )
+                }
+                Text(
+                    text = "${year}年${month}月",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+                IconButton(onClick = onNextMonth) {
+                    Icon(
+                        imageVector = Icons.Default.ChevronRight,
+                        contentDescription = "下个月",
+                        tint = Color.White
+                    )
+                }
+            }
 
-      Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
-      // 收支统计
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceEvenly
-      ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-          Text(
-            text = "收入",
-            fontSize = 12.sp,
-            color = Color.White.copy(alpha = 0.8f)
-          )
-          Text(
-            text = "+${NumberUtils.formatMoney(income)}",
-            fontSize = 16.sp,
-            color = Color.White,
-            fontWeight = FontWeight.Bold
-          )
+            // 收支统计
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = "收入",
+                        fontSize = 12.sp,
+                        color = Color.White.copy(alpha = 0.8f)
+                    )
+                    Text(
+                        text = "+${NumberUtils.formatMoney(income)}",
+                        fontSize = 16.sp,
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = "支出",
+                        fontSize = 12.sp,
+                        color = Color.White.copy(alpha = 0.8f)
+                    )
+                    Text(
+                        text = "-${NumberUtils.formatMoney(expense)}",
+                        fontSize = 16.sp,
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = "结余",
+                        fontSize = 12.sp,
+                        color = Color.White.copy(alpha = 0.8f)
+                    )
+                    Text(
+                        text = NumberUtils.formatMoney(income - expense),
+                        fontSize = 16.sp,
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
         }
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-          Text(
-            text = "支出",
-            fontSize = 12.sp,
-            color = Color.White.copy(alpha = 0.8f)
-          )
-          Text(
-            text = "-${NumberUtils.formatMoney(expense)}",
-            fontSize = 16.sp,
-            color = Color.White,
-            fontWeight = FontWeight.Bold
-          )
-        }
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-          Text(
-            text = "结余",
-            fontSize = 12.sp,
-            color = Color.White.copy(alpha = 0.8f)
-          )
-          Text(
-            text = NumberUtils.formatMoney(income - expense),
-            fontSize = 16.sp,
-            color = Color.White,
-            fontWeight = FontWeight.Bold
-          )
-        }
-      }
     }
-  }
 }
 
 @Composable
 fun FilterPanel(
-  selectedType: String,
-  onTypeSelected: (String) -> Unit,
-  sortBy: String,
-  onSortByChanged: (String) -> Unit,
-  onExportClick: () -> Unit
+    selectedType: String,
+    onTypeSelected: (String) -> Unit,
+    sortBy: String,
+    onSortByChanged: (String) -> Unit,
+    onExportClick: () -> Unit
 ) {
-  val isDreamyTheme = LocalIsDreamyTheme.current
-  
+    val isDreamyTheme = LocalIsDreamyTheme.current
 
-  val cardModifier = Modifier
-    .fillMaxWidth()
-    .padding(horizontal = 16.dp, vertical = 8.dp)
 
-  val content: @Composable ColumnScope.() -> Unit = {
-    Column(
-      modifier = Modifier.padding(16.dp)
-    ) {
-      // 类型筛选
-      Text(
-        text = "类型",
-        fontSize = 14.sp,
-        fontWeight = FontWeight.Medium
-      )
-      Spacer(modifier = Modifier.height(8.dp))
-      Row(
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-      ) {
-        FilterChip(
-          label = "全部",
-          selected = selectedType == "all",
-          onClick = { onTypeSelected("all") }
-        )
-        FilterChip(
-          label = "收入",
-          selected = selectedType == "income",
-          onClick = { onTypeSelected("income") }
-        )
-        FilterChip(
-          label = "支出",
-          selected = selectedType == "expense",
-          onClick = { onTypeSelected("expense") }
-        )
-      }
+    val cardModifier = Modifier
+        .fillMaxWidth()
+        .padding(horizontal = 16.dp, vertical = 8.dp)
 
-      Spacer(modifier = Modifier.height(16.dp))
+    val content: @Composable ColumnScope.() -> Unit = {
+        Column(
+            modifier = Modifier.padding(16.dp)
+        ) {
+            // 类型筛选
+            Text(
+                text = "类型",
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                FilterChip(
+                    label = "全部",
+                    selected = selectedType == "all",
+                    onClick = { onTypeSelected("all") }
+                )
+                FilterChip(
+                    label = "收入",
+                    selected = selectedType == "income",
+                    onClick = { onTypeSelected("income") }
+                )
+                FilterChip(
+                    label = "支出",
+                    selected = selectedType == "expense",
+                    onClick = { onTypeSelected("expense") }
+                )
+            }
 
-      // 排序
-      Text(
-        text = "排序",
-        fontSize = 14.sp,
-        fontWeight = FontWeight.Medium
-      )
-      Spacer(modifier = Modifier.height(8.dp))
-      Row(
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-      ) {
-        FilterChip(
-          label = "按时间",
-          selected = sortBy == "time",
-          onClick = { onSortByChanged("time") }
-        )
-        FilterChip(
-          label = "按金额",
-          selected = sortBy == "amount",
-          onClick = { onSortByChanged("amount") }
-        )
-      }
+            Spacer(modifier = Modifier.height(16.dp))
 
-      Spacer(modifier = Modifier.height(16.dp))
+            // 排序
+            Text(
+                text = "排序",
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                FilterChip(
+                    label = "按时间",
+                    selected = sortBy == "time",
+                    onClick = { onSortByChanged("time") }
+                )
+                FilterChip(
+                    label = "按金额",
+                    selected = sortBy == "amount",
+                    onClick = { onSortByChanged("amount") }
+                )
+            }
 
-      // 导出按钮
-      OutlinedButton(
-        onClick = onExportClick,
-        modifier = Modifier.fillMaxWidth()
-      ) {
-        Icon(Icons.Default.Download, contentDescription = null)
-        Spacer(modifier = Modifier.width(8.dp))
-        Text("导出报表")
-      }
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // 导出按钮
+            OutlinedButton(
+                onClick = onExportClick,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(Icons.Default.Download, contentDescription = null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("导出报表")
+            }
+        }
     }
-  }
 
-  if (isDreamyTheme) {
-    GlassCard(modifier = cardModifier, content = content)
-  } else {
-    Card(
-      modifier = cardModifier,
-      shape = RoundedCornerShape(12.dp)
-    ) {
-      content()
+    if (isDreamyTheme) {
+        GlassCard(modifier = cardModifier, content = content)
+    } else {
+        Card(
+            modifier = cardModifier,
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            content()
+        }
     }
-  }
 }
 
 @Composable
 fun TransactionItem(
-  transaction: Transaction,
-  categoryName: String,
-  onClick: () -> Unit
+    transaction: Transaction,
+    categoryName: String,
+    onClick: () -> Unit
 ) {
-  Card(
-    modifier = Modifier
-      .fillMaxWidth()
-      .padding(horizontal = 16.dp, vertical = 4.dp)
-      .clickable(onClick = onClick),
-    shape = RoundedCornerShape(8.dp)
-  ) {
-    Row(
-      modifier = Modifier
-        .fillMaxWidth()
-        .padding(16.dp),
-      horizontalArrangement = Arrangement.SpaceBetween,
-      verticalAlignment = Alignment.CenterVertically
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(8.dp)
     ) {
-      // 左侧信息
-      Column {
-        Text(
-          text = transaction.note ?: "无备注",
-          fontSize = 14.sp,
-          fontWeight = FontWeight.Medium,
-          maxLines = 1
-        )
-        Spacer(modifier = Modifier.height(4.dp))
-        Row {
-          Text(
-            text = DateUtils.formatDateShort(transaction.date),
-            fontSize = 12.sp,
-            color = Color.Gray
-          )
-          Spacer(modifier = Modifier.width(8.dp))
-          Text(
-            text = categoryName,
-            fontSize = 12.sp,
-            color = Color.Gray
-          )
-        }
-      }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // 左侧信息
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = transaction.note ?: "无备注",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Row {
+                    Text(
+                        text = DateUtils.formatDateShort(transaction.date),
+                        fontSize = 12.sp,
+                        color = Color.Gray
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = categoryName,
+                        fontSize = 12.sp,
+                        color = Color.Gray
+                    )
+                }
+                // 显示标签
+                if (transaction.tags.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        transaction.tags.split(",").forEach { tag ->
+                            Surface(
+                                shape = RoundedCornerShape(4.dp),
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                                modifier = Modifier.height(20.dp)
+                            ) {
+                                Text(
+                                    text = tag.trim(),
+                                    fontSize = 10.sp,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
 
-      // 金额
-      Text(
-        text = "${if (transaction.type == TransactionType.INCOME) "+" else "-"}${NumberUtils.formatMoney(transaction.amount)}",
-        fontSize = 16.sp,
-        fontWeight = FontWeight.Bold,
-        color = if (transaction.type == TransactionType.INCOME) Color(0xFF4CAF50) else Color(0xFFF44336)
-      )
+            // 金额
+            Text(
+                text = "${if (transaction.type == TransactionType.INCOME) "+" else "-"}${NumberUtils.formatMoney(transaction.amount)}",
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                color = if (transaction.type == TransactionType.INCOME) Color(0xFF4CAF50) else Color(0xFFF44336)
+            )
+        }
     }
-  }
 }
 
 @Composable
 fun FilterChip(
-  label: String,
-  selected: Boolean,
-  onClick: () -> Unit
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit
 ) {
-  Box(
-    modifier = Modifier
-      .clip(RoundedCornerShape(16.dp))
-      .background(
-        if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
-      )
-      .clickable(onClick = onClick)
-      .padding(horizontal = 16.dp, vertical = 8.dp)
-  ) {
-    Text(
-      text = label,
-      fontSize = 14.sp,
-      color = if (selected) Color.White else Color.Black
-    )
-  }
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(16.dp))
+            .background(
+                if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+    ) {
+        Text(
+            text = label,
+            fontSize = 14.sp,
+            color = if (selected) Color.White else Color.Black
+        )
+    }
 }
