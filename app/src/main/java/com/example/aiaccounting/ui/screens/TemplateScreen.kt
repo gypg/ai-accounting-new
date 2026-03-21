@@ -115,8 +115,9 @@ fun TemplateScreen(
                 editingTemplate = null
             },
             onConfirm = { template ->
-                if (editingTemplate != null) {
-                    viewModel.updateTemplate(template.copy(id = editingTemplate!!.id))
+                val currentEditingTemplate = editingTemplate
+                if (currentEditingTemplate != null) {
+                    viewModel.updateTemplate(template.copy(id = currentEditingTemplate.id))
                 } else {
                     viewModel.addTemplate(template)
                 }

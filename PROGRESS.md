@@ -1,4 +1,81 @@
+## Session: 2026-03-20
+
+### 工程与 AI 主链路收敛
+- 修复 `AIInformationSystem.kt` / `AIPermissionManager.kt` 编译阻塞，`compileDebugKotlin` 恢复通过
+- 修复 `AIPermissionExecutor` 人工确认链路伪 `logId` 问题，现透传真实 `auditLogId`
+- 新增回归测试：
+  - `AIPermissionManagerTest.kt`
+  - `AIPermissionExecutorTest.kt`
+  - `TransactionModificationHandlerTest.kt`
+  - `AIOperationExecutorTest.kt`
+- 推进 `TransactionModificationHandler.kt` / `AIOperationExecutor.kt` 用户可见文案资源化
+- 当前建议：继续精扫这两个文件的剩余用户可见硬编码文案，再扩大国际化范围
+
+---
+
 # Planning Sessions (planning-with-files)
+
+## Session: 2026-03-19
+
+### Phase 1: Requirements & Discovery
+- **Status:** complete
+- **Started:** 2026-03-19
+- Actions taken:
+  - Invoked `planning-with-files` skill for `AIAssistantViewModel` 拆分规划
+  - Ran session catchup script for the project
+  - Read planning templates from the skill directory
+  - Read existing `task_plan.md`, `findings.md`, `progress.md`
+  - Reviewed `AIAssistantViewModel.kt` current responsibilities and handoff memory
+- Files created/modified:
+  - task_plan.md (updated for current planning task)
+  - findings.md (updated for current planning task)
+  - progress.md (appended)
+
+### Phase 2: Planning & Structure
+- **Status:** complete
+- Actions taken:
+  - Identified current split anchors already present in the repo: action executor, butler coordinator, config/network coordinator, image handler
+  - Confirmed `AddTransactionScreen` medium item is already resolved in the worktree, so the default next planning target is `AIAssistantViewModel`
+  - Collected architecture recommendations for minimal-risk phased extraction
+  - Verified the current public API surface used by `AIAssistantScreen`
+- Files created/modified:
+  - task_plan.md
+  - findings.md
+  - progress.md
+
+### Phase 3: Validation Strategy
+- **Status:** complete
+- Actions taken:
+  - Defined per-phase verification strategy for action executor, session lifecycle, image path, and top-level orchestration
+  - Recorded regression risks and mitigations with focus on preserving the existing ViewModel public interface
+- Files created/modified:
+  - task_plan.md
+  - findings.md
+  - progress.md
+
+## Test Results
+| Test | Input | Expected | Actual | Status |
+|------|-------|----------|--------|--------|
+| session-catchup | planning-with-files session-catchup script | Catchup context or clean no-op | Script completed with no output | ✓ |
+
+## Error Log
+| Timestamp | Error | Attempt | Resolution |
+|-----------|-------|---------|------------|
+| 2026-03-19 | Final review found action detection missed pretty-printed JSON `type` payloads | 1 | Replaced exact compact-string checks with a whitespace-tolerant regex for supported `type` values |
+| 2026-03-19 | Phase A review found swallowed `CancellationException` and incomplete action detection gate | 1 | Added cancellation rethrow in `AIAssistantActionExecutor` and expanded ViewModel action JSON detection for `query_*` and `create_category` |
+| 2026-03-19 | compileDebugKotlin failed: `ensureBasicCategoriesExist` unresolved after Phase A cleanup | 1 | Restored the shared helper and kept only the fully duplicated JSON/action code removed |
+| 2026-03-19 | worktree agent failed because `.git/config` lock file exists | 1 | Switched to planning and review in current worktree without repeating the same failing path |
+
+## 5-Question Reboot Check
+| Question | Answer |
+|----------|--------|
+| Where am I? | Phase 2: Planning & Structure |
+| Where am I going? | Finish validation strategy, then deliver the split plan for approval |
+| What's the goal? | Produce a file-backed implementation plan for `AIAssistantViewModel` splitting without editing code |
+| What have I learned? | Existing repo already contains several extraction anchors and supports phased coordinator/executor-based slimming |
+| What have I done? | Initialized planning workflow for this task, updated all three planning files, and summarized the current split direction |
+
+---
 
 ## Session: 2026-03-14
 

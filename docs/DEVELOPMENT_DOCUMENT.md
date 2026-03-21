@@ -65,6 +65,30 @@ AI记账是一款面向中国大陆个人用户的智能记账 Android 应用。
 | Widget | 90% | 5 种尺寸 + 悬浮窗 + 图表已完成 |
 | 主题系统 | 80% | Material 3 + 马年主题已完成，主题间过渡动画待优化 |
 
+### 2.3 最近一轮工程收敛（2026-03-21）
+
+**Session 25 构建修复：**
+- 修复 Session 24 国际化工作导致的构建失败，回退 20+ 文件
+- 修复 `LoginScreen.kt` 引用错误（`currentPin` → `authSucceeded`）
+- 删除冲突的 `AISettingsInviteSection.kt` 文件
+- Debug APK 构建成功 (126MB)
+
+**Session 26 测试修复：**
+- 修复 17 个 AISettings 相关测试的 `NoSuchElementException`：补齐 `getGatewayBaseUrl`、`getInviteApiBaseUrl`、`getInviteRpm`、`getInviteCodeMasked` 的 mock
+- 修复 `TransactionRepositoryTest.getMonthRange` 的 `AssertionError`：修正 `getMonthRange` 实现，使 end 成为下月第一毫秒（exclusive upper bound）
+- 单元测试全部通过（133 tests）
+
+**Session 27 API代理网关重构与客户端适配：**
+- 重新部署 Cloudflare Worker 与 KV 命名空间，实现更安全的 API 代理与邀请码分发机制。
+- 客户端默认网关切换至自定义域名 `https://api.gdmon.dpdns.org`，绕过 `workers.dev` 的访问限制。
+- 在 `AIConfigRepository` 与 `AISettingsViewModel` 中实现向后兼容的迁移逻辑，启动时自动拉黑废弃域名 `"workers.dev"`，同时确保自定义域名不被误删。
+- 完成通过邀请码自动请求 `/bootstrap` 接口获取鉴权 Token 及下发 API 地址的产品化交互。
+
+**发布状态评估：**
+- 功能层面：达到 Beta 发布水准
+- 技术层面：编译通过、测试通过，可进入发布流程
+- 建议下一步：进行手动功能测试、准备 v1.8.3 发布
+
 ---
 
 ## 三、技术架构

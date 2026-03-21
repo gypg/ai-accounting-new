@@ -28,6 +28,8 @@ import com.example.aiaccounting.ui.components.charts.PieChart
 import com.example.aiaccounting.ui.components.charts.TrendChart
 import com.example.aiaccounting.ui.components.charts.BarChart
 import com.example.aiaccounting.ui.viewmodel.StatisticsViewModel
+import com.example.aiaccounting.ui.theme.LocalIsDreamyTheme
+import com.example.aiaccounting.ui.components.GlassCard
 import com.example.aiaccounting.utils.NumberUtils
 
 /**
@@ -42,7 +44,10 @@ fun StatisticsScreen(
     val statistics by viewModel.statistics.collectAsState()
     var showDatePickerDialog by remember { mutableStateOf(false) }
 
+    val isDreamyTheme = LocalIsDreamyTheme.current
+
     Scaffold(
+        containerColor = if (isDreamyTheme) Color.Transparent else MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
                 title = {
@@ -58,7 +63,7 @@ fun StatisticsScreen(
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color.White
+                    containerColor = if (isDreamyTheme) Color.Transparent else MaterialTheme.colorScheme.surface
                 )
             )
         }
@@ -72,33 +77,61 @@ fun StatisticsScreen(
             // 显示当前选择的时间范围
             val timeDisplayText = getTimeDisplayText(uiState.timeFilter)
             if (timeDisplayText.isNotEmpty()) {
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                    shape = RoundedCornerShape(8.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer
-                    )
-                ) {
-                    Row(
+                if (isDreamyTheme) {
+                    GlassCard(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 12.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                            .padding(horizontal = 16.dp, vertical = 8.dp)
                     ) {
-                        Text(
-                            text = "统计时间：$timeDisplayText",
-                            fontSize = 14.sp,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "统计时间：$timeDisplayText",
+                                fontSize = 14.sp,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Icon(
+                                imageVector = Icons.Default.CalendarToday,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                } else {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        shape = RoundedCornerShape(8.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer
                         )
-                        Icon(
-                            imageVector = Icons.Default.CalendarToday,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                            modifier = Modifier.size(18.dp)
-                        )
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "统计时间：$timeDisplayText",
+                                fontSize = 14.sp,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                            Icon(
+                                imageVector = Icons.Default.CalendarToday,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -159,45 +192,89 @@ fun StatisticsScreen(
             Spacer(modifier = Modifier.height(16.dp))
 
             // 趋势图表
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Column(
-                    modifier = Modifier.padding(16.dp)
+            if (isDreamyTheme) {
+                GlassCard(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
                 ) {
-                    Text(
-                        text = "收支趋势",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Medium
-                    )
+                    Column(
+                        modifier = Modifier.padding(16.dp)
+                    ) {
+                        Text(
+                            text = "收支趋势",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Medium
+                        )
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                        Spacer(modifier = Modifier.height(12.dp))
 
-                    if (statistics.monthlyTrend.isEmpty()) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(200.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = "暂无趋势数据",
-                                color = Color.Gray
+                        if (statistics.monthlyTrend.isEmpty()) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(200.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "暂无趋势数据",
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                                )
+                            }
+                        } else {
+                            TrendChart(
+                                data = statistics.monthlyTrend,
+                                modifier = Modifier.fillMaxWidth(),
+                                showIncome = true,
+                                showExpense = true,
+                                onDataPointClick = { selectedData ->
+                                    // 点击数据点显示详情
+                                }
                             )
                         }
-                    } else {
-                        TrendChart(
-                            data = statistics.monthlyTrend,
-                            modifier = Modifier.fillMaxWidth(),
-                            showIncome = true,
-                            showExpense = true,
-                            onDataPointClick = { selectedData ->
-                                // 点击数据点显示详情
-                            }
+                    }
+                }
+            } else {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp)
+                    ) {
+                        Text(
+                            text = "收支趋势",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Medium
                         )
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        if (statistics.monthlyTrend.isEmpty()) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(200.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "暂无趋势数据",
+                                    color = Color.Gray
+                                )
+                            }
+                        } else {
+                            TrendChart(
+                                data = statistics.monthlyTrend,
+                                modifier = Modifier.fillMaxWidth(),
+                                showIncome = true,
+                                showExpense = true,
+                                onDataPointClick = { selectedData ->
+                                    // 点击数据点显示详情
+                                }
+                            )
+                        }
                     }
                 }
             }
@@ -205,42 +282,83 @@ fun StatisticsScreen(
             Spacer(modifier = Modifier.height(16.dp))
 
             // 饼图 - 分类占比
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Column(
-                    modifier = Modifier.padding(16.dp)
+            if (isDreamyTheme) {
+                GlassCard(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
                 ) {
-                    Text(
-                        text = if (uiState.selectedTab == "income") "收入分类" else "支出分类",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Medium
-                    )
+                    Column(
+                        modifier = Modifier.padding(16.dp)
+                    ) {
+                        Text(
+                            text = if (uiState.selectedTab == "income") "收入分类" else "支出分类",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Medium
+                        )
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                        Spacer(modifier = Modifier.height(12.dp))
 
-                    if (statistics.categoryStats.isEmpty()) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(200.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = "暂无分类数据",
-                                color = Color.Gray
+                        if (statistics.categoryStats.isEmpty()) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(200.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "暂无分类数据",
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                                )
+                            }
+                        } else {
+                            PieChart(
+                                data = statistics.categoryStats.take(6),
+                                modifier = Modifier.fillMaxWidth(),
+                                showLabels = true,
+                                holeRadius = 0.5f
                             )
                         }
-                    } else {
-                        PieChart(
-                            data = statistics.categoryStats.take(6),
-                            modifier = Modifier.fillMaxWidth(),
-                            showLabels = true,
-                            holeRadius = 0.5f
+                    }
+                }
+            } else {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp)
+                    ) {
+                        Text(
+                            text = if (uiState.selectedTab == "income") "收入分类" else "支出分类",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Medium
                         )
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        if (statistics.categoryStats.isEmpty()) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(200.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "暂无分类数据",
+                                    color = Color.Gray
+                                )
+                            }
+                        } else {
+                            PieChart(
+                                data = statistics.categoryStats.take(6),
+                                modifier = Modifier.fillMaxWidth(),
+                                showLabels = true,
+                                holeRadius = 0.5f
+                            )
+                        }
                     }
                 }
             }
@@ -248,44 +366,88 @@ fun StatisticsScreen(
             Spacer(modifier = Modifier.height(16.dp))
 
             // 分类明细
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Column(
-                    modifier = Modifier.padding(16.dp)
+            if (isDreamyTheme) {
+                GlassCard(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
                 ) {
-                    Text(
-                        text = "分类明细",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Medium
-                    )
+                    Column(
+                        modifier = Modifier.padding(16.dp)
+                    ) {
+                        Text(
+                            text = "分类明细",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Medium
+                        )
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                        Spacer(modifier = Modifier.height(12.dp))
 
-                    if (statistics.categoryStats.isEmpty()) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(100.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = "暂无分类数据",
-                                color = Color.Gray
-                            )
+                        if (statistics.categoryStats.isEmpty()) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(100.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "暂无分类数据",
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                                )
+                            }
+                        } else {
+                            statistics.categoryStats.forEach { categoryStat ->
+                                CategoryStatRow(
+                                    name = categoryStat.name,
+                                    amount = categoryStat.amount,
+                                    percentage = categoryStat.percentage,
+                                    color = categoryStat.color
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                            }
                         }
-                    } else {
-                        statistics.categoryStats.forEach { categoryStat ->
-                            CategoryStatRow(
-                                name = categoryStat.name,
-                                amount = categoryStat.amount,
-                                percentage = categoryStat.percentage,
-                                color = categoryStat.color
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
+                    }
+                }
+            } else {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp)
+                    ) {
+                        Text(
+                            text = "分类明细",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        if (statistics.categoryStats.isEmpty()) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(100.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "暂无分类数据",
+                                    color = Color.Gray
+                                )
+                            }
+                        } else {
+                            statistics.categoryStats.forEach { categoryStat ->
+                                CategoryStatRow(
+                                    name = categoryStat.name,
+                                    amount = categoryStat.amount,
+                                    percentage = categoryStat.percentage,
+                                    color = categoryStat.color
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                            }
                         }
                     }
                 }
@@ -303,6 +465,30 @@ fun StatCard(
     color: Color,
     modifier: Modifier = Modifier
 ) {
+    val isDreamyTheme = LocalIsDreamyTheme.current
+
+    if (isDreamyTheme) {
+        GlassCard(modifier = modifier) {
+            Column(
+                modifier = Modifier.padding(16.dp)
+            ) {
+                Text(
+                    text = title,
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = NumberUtils.formatMoney(amount),
+                    fontSize = 20.sp,
+                    color = color,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+        return
+    }
+
     Card(
         modifier = modifier,
         shape = RoundedCornerShape(12.dp),

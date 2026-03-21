@@ -1570,9 +1570,7 @@ private fun InviteBoundStatusCard(
 
                 val sub = listOfNotNull(
                     inviteCodeMasked.takeIf { it.isNotBlank() },
-                    rpmText.takeIf { it.isNotBlank() },
-                    apiBaseUrl.takeIf { it.isNotBlank() },
-                    gatewayBaseUrl.takeIf { it.isNotBlank() }
+                    rpmText.takeIf { it.isNotBlank() }
                 ).joinToString(" · ")
 
                 Text(

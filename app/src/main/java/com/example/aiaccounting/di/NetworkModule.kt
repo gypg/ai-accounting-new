@@ -5,7 +5,10 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import okhttp3.ConnectionPool
+import okhttp3.Dns
 import okhttp3.OkHttpClient
+import java.net.Inet4Address
+import java.net.InetAddress
 import java.util.concurrent.TimeUnit
 import javax.inject.Singleton
 
@@ -16,11 +19,23 @@ import javax.inject.Singleton
 @InstallIn(SingletonComponent::class)
 object NetworkModule {
 
+    // 解决 Android 模拟器与 Cloudflare 节点间由于系统级 IPv6 黑洞导致的超时问题（优先使用 IPv4）
+    private val ipv4FirstDns = object : Dns {
+        override fun lookup(hostname: String): List<InetAddress> {
+            return try {
+                Dns.SYSTEM.lookup(hostname).sortedBy { if (it is Inet4Address) 0 else 1 }
+            } catch (e: Exception) {
+                Dns.SYSTEM.lookup(hostname)
+            }
+        }
+    }
+
     @Provides
     @Singleton
     @AiOkHttpClient
     fun provideAiOkHttpClient(): OkHttpClient {
         return OkHttpClient.Builder()
+            .dns(ipv4FirstDns)
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(120, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)
@@ -35,6 +50,7 @@ object NetworkModule {
     @AiTestOkHttpClient
     fun provideAiTestOkHttpClient(): OkHttpClient {
         return OkHttpClient.Builder()
+            .dns(ipv4FirstDns)
             .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(15, TimeUnit.SECONDS)
             .writeTimeout(10, TimeUnit.SECONDS)
@@ -47,6 +63,7 @@ object NetworkModule {
     @InviteGatewayOkHttpClient
     fun provideInviteGatewayOkHttpClient(): OkHttpClient {
         return OkHttpClient.Builder()
+            .dns(ipv4FirstDns)
             .connectTimeout(25, TimeUnit.SECONDS)
             .readTimeout(25, TimeUnit.SECONDS)
             .writeTimeout(15, TimeUnit.SECONDS)
@@ -59,6 +76,7 @@ object NetworkModule {
     @VoiceOkHttpClient
     fun provideVoiceOkHttpClient(): OkHttpClient {
         return OkHttpClient.Builder()
+            .dns(ipv4FirstDns)
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(60, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)

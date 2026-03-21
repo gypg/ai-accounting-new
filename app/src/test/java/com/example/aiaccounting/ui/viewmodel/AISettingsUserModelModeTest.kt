@@ -26,75 +26,81 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class AISettingsUserModelModeTest {
 
-    private val testDispatcher = StandardTestDispatcher()
+ private val testDispatcher = StandardTestDispatcher()
 
-    private lateinit var aiConfigRepository: AIConfigRepository
-    private lateinit var aiService: AIService
-    private lateinit var aiUsageRepository: AIUsageRepository
-    private lateinit var networkUtils: NetworkUtils
-    private lateinit var inviteGatewayService: InviteGatewayService
-    private lateinit var deviceIdProvider: DeviceIdProvider
+ private lateinit var aiConfigRepository: AIConfigRepository
+ private lateinit var aiService: AIService
+ private lateinit var aiUsageRepository: AIUsageRepository
+ private lateinit var networkUtils: NetworkUtils
+ private lateinit var inviteGatewayService: InviteGatewayService
+ private lateinit var deviceIdProvider: DeviceIdProvider
 
-    @Before
-    fun setUp() {
-        Dispatchers.setMain(testDispatcher)
+ @Before
+ fun setUp() {
+ Dispatchers.setMain(testDispatcher)
 
-        aiConfigRepository = mockk(relaxed = true)
-        aiService = mockk(relaxed = true)
-        aiUsageRepository = mockk(relaxed = true)
-        networkUtils = mockk(relaxed = true)
-        inviteGatewayService = mockk(relaxed = true)
-        deviceIdProvider = mockk(relaxed = true)
+ aiConfigRepository = mockk(relaxed = true)
+ aiService = mockk(relaxed = true)
+ aiUsageRepository = mockk(relaxed = true)
+ networkUtils = mockk(relaxed = true)
+ inviteGatewayService = mockk(relaxed = true)
+ deviceIdProvider = mockk(relaxed = true)
 
-        every { aiConfigRepository.getUseBuiltin() } returns flowOf(false)
-        every { aiConfigRepository.getAIConfig() } returns flowOf(AIConfig())
-        every { aiConfigRepository.getInviteBound() } returns flowOf(false)
-        every { aiConfigRepository.getModelSelectionMode() } returns flowOf(AIConfigRepository.ModelSelectionMode.AUTO)
-        every { aiConfigRepository.getInviteModelSelectionMode() } returns flowOf(AIConfigRepository.ModelSelectionMode.AUTO)
-        every { aiUsageRepository.getUsageStats() } returns flowOf(AIUsageStats())
-        coEvery { networkUtils.isNetworkAvailable() } returns true
-    }
+ every { aiConfigRepository.getUseBuiltin() } returns flowOf(false)
+ every { aiConfigRepository.getAIConfig() } returns flowOf(AIConfig())
+ every { aiConfigRepository.getInviteBound() } returns flowOf(false)
+ every { aiConfigRepository.getModelSelectionMode() } returns flowOf(AIConfigRepository.ModelSelectionMode.AUTO)
+ every { aiConfigRepository.getInviteModelSelectionMode() } returns flowOf(AIConfigRepository.ModelSelectionMode.AUTO)
+ every { aiUsageRepository.getUsageStats() } returns flowOf(AIUsageStats())
+ coEvery { networkUtils.isNetworkAvailable() } returns true
 
-    @After
-    fun tearDown() {
-        Dispatchers.resetMain()
-    }
+ // Additional flows needed by init block
+ every { aiConfigRepository.getGatewayBaseUrl(any()) } returns flowOf("https://new.gateway.example")
+ every { aiConfigRepository.getInviteApiBaseUrl() } returns flowOf("")
+ every { aiConfigRepository.getInviteRpm() } returns flowOf(0)
+ every { aiConfigRepository.getInviteCodeMasked() } returns flowOf("")
+ }
 
-    @Test
-    fun updateUserModelMode_persistsToRepository() = runTest {
-        val vm = AISettingsViewModel(
-            aiConfigRepository = aiConfigRepository,
-            aiService = aiService,
-            aiUsageRepository = aiUsageRepository,
-            networkUtils = networkUtils,
-            inviteGatewayService = inviteGatewayService,
-            deviceIdProvider = deviceIdProvider
-        )
+ @After
+ fun tearDown() {
+ Dispatchers.resetMain()
+ }
 
-        testDispatcher.scheduler.advanceUntilIdle()
+ @Test
+ fun updateUserModelMode_persistsToRepository() = runTest {
+ val vm = AISettingsViewModel(
+ aiConfigRepository = aiConfigRepository,
+ aiService = aiService,
+ aiUsageRepository = aiUsageRepository,
+ networkUtils = networkUtils,
+ inviteGatewayService = inviteGatewayService,
+ deviceIdProvider = deviceIdProvider
+ )
 
-        vm.updateUserModelMode(AIConfigRepository.ModelSelectionMode.FIXED)
-        testDispatcher.scheduler.advanceUntilIdle()
+ testDispatcher.scheduler.advanceUntilIdle()
 
-        coVerify(exactly = 1) { aiConfigRepository.setModelSelectionMode(AIConfigRepository.ModelSelectionMode.FIXED) }
-    }
+ vm.updateUserModelMode(AIConfigRepository.ModelSelectionMode.FIXED)
+ testDispatcher.scheduler.advanceUntilIdle()
 
-    @Test
-    fun updateModel_whenUserModeAuto_switchesToFixed() = runTest {
-        val vm = AISettingsViewModel(
-            aiConfigRepository = aiConfigRepository,
-            aiService = aiService,
-            aiUsageRepository = aiUsageRepository,
-            networkUtils = networkUtils,
-            inviteGatewayService = inviteGatewayService,
-            deviceIdProvider = deviceIdProvider
-        )
+ coVerify(exactly = 1) { aiConfigRepository.setModelSelectionMode(AIConfigRepository.ModelSelectionMode.FIXED) }
+ }
 
-        testDispatcher.scheduler.advanceUntilIdle()
+ @Test
+ fun updateModel_whenUserModeAuto_switchesToFixed() = runTest {
+ val vm = AISettingsViewModel(
+ aiConfigRepository = aiConfigRepository,
+ aiService = aiService,
+ aiUsageRepository = aiUsageRepository,
+ networkUtils = networkUtils,
+ inviteGatewayService = inviteGatewayService,
+ deviceIdProvider = deviceIdProvider
+ )
 
-        vm.updateModel("openai/gpt-oss-120b")
-        testDispatcher.scheduler.advanceUntilIdle()
+ testDispatcher.scheduler.advanceUntilIdle()
 
-        coVerify(exactly = 1) { aiConfigRepository.setModelSelectionMode(AIConfigRepository.ModelSelectionMode.FIXED) }
-    }
+ vm.updateModel("openai/gpt-oss-120b")
+ testDispatcher.scheduler.advanceUntilIdle()
+
+ coVerify(exactly = 1) { aiConfigRepository.setModelSelectionMode(AIConfigRepository.ModelSelectionMode.FIXED) }
+ }
 }

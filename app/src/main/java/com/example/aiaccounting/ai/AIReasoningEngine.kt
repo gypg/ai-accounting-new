@@ -460,17 +460,17 @@ class AIReasoningEngine @Inject constructor(
 
         // 上下文连续：检测是否引用上一笔操作
         val contextRef = detectContextReference(message)
-        if (contextRef != null && lastExecutedTransaction != null) {
-            val last = lastExecutedTransaction!!
-            val merged = applyContextOverrides(last, message, contextRef)
+        if (contextRef != null) {
+            lastExecutedTransaction?.let { last ->
+                val merged = applyContextOverrides(last, message, contextRef)
             val reluctantResponse = generateReluctantResponse(currentButlerId, "记账")
-            if (reluctantResponse != null) {
-                actions.add(AIAction.GenerateResponse(reluctantResponse))
+                if (reluctantResponse != null) {
+                    actions.add(AIAction.GenerateResponse(reluctantResponse))
+                }
+                actions.add(merged)
+                return actions
             }
-            actions.add(merged)
-            return actions
         }
-
         // 提取金额
         val amount = messageParser.extractAmount(message) ?: return listOf(
             AIAction.RequestClarification("请问这笔交易的金额是多少呢？")

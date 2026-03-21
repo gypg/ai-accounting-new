@@ -84,15 +84,23 @@ fun MonthlyTrendChartEnhanced(
                 Box(modifier = Modifier.weight(1f)) {
                     if (chartType == 0) {
                         MonthlyLineChartWithYAxis(completeData, maxValue, selectedIndex) { index ->
-                            selectedIndex = index
-                            val data = completeData[index]
-                            onDataPointClick(data.month, data.income, data.expense)
+                            if (index < 0) {
+                                selectedIndex = null
+                            } else {
+                                selectedIndex = index
+                                val data = completeData[index]
+                                onDataPointClick(data.month, data.income, data.expense)
+                            }
                         }
                     } else {
                         MonthlyBarChartWithYAxis(completeData, maxValue, selectedIndex) { index ->
-                            selectedIndex = index
-                            val data = completeData[index]
-                            onDataPointClick(data.month, data.income, data.expense)
+                            if (index < 0) {
+                                selectedIndex = null
+                            } else {
+                                selectedIndex = index
+                                val data = completeData[index]
+                                onDataPointClick(data.month, data.income, data.expense)
+                            }
                         }
                     }
                 }
@@ -105,8 +113,11 @@ fun MonthlyTrendChartEnhanced(
             
             // 显示选中的数值
             if (selectedIndex != null) {
-                val selected = completeData[selectedIndex!!]
-                SelectedDataDisplay(selected.month, selected.income, selected.expense)
+                val index = selectedIndex
+                if (index != null) {
+                    val selected = completeData[index]
+                    SelectedDataDisplay(selected.month, selected.income, selected.expense)
+                }
             }
         }
     }
@@ -414,15 +425,23 @@ fun WeeklyTrendChartEnhanced(
                 Box(modifier = Modifier.weight(1f)) {
                     if (chartType == 0) {
                         WeeklyLineChart(days, weekData.dailyData, maxValue, selectedIndex) { index ->
-                            selectedIndex = index
-                            val data = weekData.dailyData[index]
-                            onDataPointClick(days[index], data.income, data.expense)
+                            if (index < 0) {
+                                selectedIndex = null
+                            } else {
+                                selectedIndex = index
+                                val data = weekData.dailyData[index]
+                                onDataPointClick(days[index], data.income, data.expense)
+                            }
                         }
                     } else {
                         WeeklyBarChart(days, weekData.dailyData, maxValue, selectedIndex) { index ->
-                            selectedIndex = index
-                            val data = weekData.dailyData[index]
-                            onDataPointClick(days[index], data.income, data.expense)
+                            if (index < 0) {
+                                selectedIndex = null
+                            } else {
+                                selectedIndex = index
+                                val data = weekData.dailyData[index]
+                                onDataPointClick(days[index], data.income, data.expense)
+                            }
                         }
                     }
                 }
@@ -433,8 +452,11 @@ fun WeeklyTrendChartEnhanced(
             
             // 显示选中的数值
             if (selectedIndex != null) {
-                val selected = weekData.dailyData[selectedIndex!!]
-                SelectedDataDisplay(days[selectedIndex!!], selected.income, selected.expense)
+                val index = selectedIndex
+                if (index != null) {
+                    val selected = weekData.dailyData[index]
+                    SelectedDataDisplay(days[index], selected.income, selected.expense)
+                }
             }
         }
     }

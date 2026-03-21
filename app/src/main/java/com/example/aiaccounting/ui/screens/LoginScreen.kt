@@ -37,7 +37,7 @@ fun LoginScreen(
     var isLoading by remember { mutableStateOf(false) }
     var passwordVisible by remember { mutableStateOf(false) }
     var showForgotPasswordDialog by remember { mutableStateOf(false) }
-    val isAuthenticated by viewModel.currentPin.collectAsState()
+    val isAuthenticated by viewModel.authSucceeded.collectAsState()
 
     // 监听验证结果
     LaunchedEffect(isAuthenticated) {

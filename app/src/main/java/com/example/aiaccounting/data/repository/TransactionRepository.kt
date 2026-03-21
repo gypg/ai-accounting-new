@@ -244,6 +244,7 @@ class TransactionRepository @Inject constructor(
         val start = calendar.timeInMillis
 
         calendar.add(Calendar.MONTH, 1)
+        // Removed: end is exclusive upper bound (first ms of next month)
         val end = calendar.timeInMillis
 
         return Pair(start, end)
@@ -267,6 +268,7 @@ class TransactionRepository @Inject constructor(
         val start = calendar.timeInMillis
 
         calendar.set(year, 11, 31, 23, 59, 59)
+        calendar.set(Calendar.MILLISECOND, 999)
         val end = calendar.timeInMillis
 
         return Pair(start, end)

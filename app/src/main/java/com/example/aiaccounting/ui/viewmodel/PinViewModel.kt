@@ -28,8 +28,8 @@ class PinViewModel @Inject constructor(
     private val _remainingLockTime = MutableStateFlow(0L)
     val remainingLockTime: StateFlow<Long> = _remainingLockTime.asStateFlow()
 
-    private val _currentPin = MutableStateFlow<String?>(null)
-    val currentPin: StateFlow<String?> = _currentPin.asStateFlow()
+    private val _authSucceeded = MutableStateFlow(false)
+    val authSucceeded: StateFlow<Boolean> = _authSucceeded.asStateFlow()
 
     init {
         checkPinStatus()
@@ -52,7 +52,7 @@ class PinViewModel @Inject constructor(
             if (success) {
                 _isPinSet.value = true
                 _failedAttempts.value = 0
-                _currentPin.value = pin
+                _authSucceeded.value = true
                 securityManager.onAuthenticationSucceeded()
             }
             onComplete(success)
@@ -67,7 +67,7 @@ class PinViewModel @Inject constructor(
             val success = securityManager.validatePin(pin)
             checkPinStatus()
             if (success) {
-                _currentPin.value = pin
+                _authSucceeded.value = true
                 securityManager.onAuthenticationSucceeded()
             }
             onComplete(success)
@@ -102,6 +102,13 @@ class PinViewModel @Inject constructor(
                 }
             }
         }
+    }
+
+    /**
+     * Consume one-shot auth success event
+     */
+    fun consumeAuthSucceeded() {
+        _authSucceeded.value = false
     }
 
     /**

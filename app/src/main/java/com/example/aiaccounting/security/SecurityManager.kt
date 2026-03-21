@@ -41,7 +41,7 @@ class SecurityManager(private val context: Context) {
                 .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
                 .build()
         }
-        return masterKey!!
+        return masterKey ?: throw IllegalStateException("MasterKey initialization failed")
     }
 
     private fun getEncryptedPrefs(): SharedPreferences {
@@ -54,7 +54,7 @@ class SecurityManager(private val context: Context) {
                 EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
             )
         }
-        return encryptedPrefs!!
+        return encryptedPrefs ?: throw IllegalStateException("EncryptedSharedPreferences initialization failed")
     }
 
     /**

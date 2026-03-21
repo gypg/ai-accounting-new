@@ -2,6 +2,9 @@ package com.example.aiaccounting.ui.theme
 
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
@@ -84,6 +87,9 @@ object Motion {
     /** 慢速动画 (复杂页面转场、图表绘制) */
     const val durationSlow: Int = 500
 
+    /** 状态提示停留（如“设置已保存”） */
+    const val durationStatusHold: Long = 2000L
+
     /** Material 3 标准缓动曲线 */
     val easeInOut = CubicBezierEasing(0.4f, 0.0f, 0.2f, 1.0f)
     val easeOut = CubicBezierEasing(0.0f, 0.0f, 0.2f, 1.0f)
@@ -117,4 +123,102 @@ object Size {
 
     /** 最小触摸目标 (无障碍) */
     val minTouchTarget: Dp = 48.dp
+}
+
+// ==================== 语义 Token (Semantic) ====================
+object AlphaTokens {
+    /** 选中态容器背景（与 ButlerMarket 选中态对齐） */
+    const val selectedContainer: Float = 0.08f
+
+    /** 选中态描边 alpha（与 ButlerMarket 选中态对齐） */
+    const val selectedBorder: Float = 0.55f
+
+    /** 次级容器（surfaceVariant）弱化背景 */
+    const val surfaceSubtle: Float = 0.50f
+
+    /** 次级文字/标题弱化 */
+    const val textSecondary: Float = 0.85f
+
+    /** 空状态 icon 弱化 */
+    const val iconFaint: Float = 0.70f
+
+    /** 更弱的 icon/tint */
+    const val iconVeryFaint: Float = 0.50f
+}
+
+object StrokeTokens {
+    val selectedBorderWidth: Dp = 2.dp
+    val progressStrokeWidth: Dp = 2.dp
+}
+
+object SurfaceTokens {
+    object Card {
+        val shape = Shapes.card
+        val padding: Dp = Spacing.cardPadding
+        val elevation: Dp = Elevation.card
+        val elevationSelected: Dp = Elevation.md
+
+        @Composable
+        fun containerDefault(): Color =
+            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = AlphaTokens.surfaceSubtle)
+
+        @Composable
+        fun containerSelected(): Color =
+            MaterialTheme.colorScheme.primary.copy(alpha = AlphaTokens.selectedContainer)
+
+        @Composable
+        fun borderColorSelected(): Color =
+            MaterialTheme.colorScheme.primary.copy(alpha = AlphaTokens.selectedBorder)
+    }
+
+    object SelectableRow {
+        val shape = Shapes.input
+        val borderWidthSelected: Dp = StrokeTokens.selectedBorderWidth
+
+        @Composable
+        fun containerDefault(): Color = MaterialTheme.colorScheme.surface
+
+        @Composable
+        fun containerSelected(): Color =
+            MaterialTheme.colorScheme.primary.copy(alpha = AlphaTokens.selectedContainer)
+
+        @Composable
+        fun borderColorSelected(): Color = Card.borderColorSelected()
+    }
+
+    object Panel {
+        @Composable
+        fun subtleContainer(): Color =
+            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = AlphaTokens.surfaceSubtle)
+    }
+}
+
+object DialogTokens {
+    val shape = Shapes.dialog
+    val elevation: Dp = Elevation.dialog
+
+    val modelListMaxHeight: Dp = 320.dp
+    val modelListMaxHeightCompact: Dp = 300.dp
+    val manageDialogMaxHeight: Dp = 500.dp
+
+    val categoryChipGap: Dp = 6.dp
+}
+
+object GlassTokens {
+    const val containerAlpha: Float = 0.42f
+    const val borderAlpha: Float = 0.22f
+    val borderWidth: Dp = 1.dp
+}
+
+object EmptyStateTokens {
+    val iconSize: Dp = Size.iconXl
+    val verticalPadding: Dp = Spacing.sectionGap
+
+    @Composable
+    fun iconTint(): Color =
+        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = AlphaTokens.iconVeryFaint)
+
+    @Composable
+    fun textTint(): Color =
+        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = AlphaTokens.iconFaint)
 }

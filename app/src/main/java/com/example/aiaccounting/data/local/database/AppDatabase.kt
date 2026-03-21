@@ -162,7 +162,7 @@ class DatabaseFactory @Inject constructor(
      */
     fun initializeDatabase(pin: String): AppDatabase {
         if (database != null && currentPin == pin) {
-            return database!!
+            return database ?: throw IllegalStateException("Database cache missing after initialization")
         }
 
         // Derive database key from PIN
@@ -186,7 +186,7 @@ class DatabaseFactory @Inject constructor(
             .build()
 
         currentPin = pin
-        return database!!
+        return database ?: throw IllegalStateException("Database initialization failed")
     }
 
     /**

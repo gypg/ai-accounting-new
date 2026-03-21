@@ -18,6 +18,9 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 private const val DEFAULT_GATEWAY_BASE_URL = "https://api.gdmon.dpdns.org"
+private val LEGACY_GATEWAY_HOST_KEYWORDS = listOf(
+    "workers.dev"
+)
 
 @HiltViewModel
 class AISettingsViewModel @Inject constructor(
@@ -67,6 +70,10 @@ class AISettingsViewModel @Inject constructor(
     init {
         viewModelScope.launch {
             aiConfigRepository.migrateLegacyApiKeyIfNeeded()
+            aiConfigRepository.migrateInviteGatewayConfigIfNeeded(
+                defaultGatewayBaseUrl = DEFAULT_GATEWAY_BASE_URL,
+                legacyGatewayHostKeywords = LEGACY_GATEWAY_HOST_KEYWORDS
+            )
         }
         loadAIConfig()
         loadUsageStats()
@@ -104,35 +111,37 @@ class AISettingsViewModel @Inject constructor(
                     // 防止历史状态把用户困在“内置开启但不可用”
                     aiConfigRepository.setUseBuiltin(false)
 
-                    val effectiveInviteBound = result.inviteBound || _uiState.value.inviteBound
-
-                    _uiState.value = _uiState.value.copy(
-                        useBuiltinConfig = false,
-                        config = result.config,
-                        inviteBound = effectiveInviteBound,
-                        userModelMode = result.userModelMode,
-                        inviteModelMode = result.inviteModelMode,
-                        isLoading = false,
-                        testResult = TestResult.Error("默认配置不可用，请手动配置 API Key")
-                    )
+                    _uiState.update { current ->
+                        val effectiveInviteBound = result.inviteBound || current.inviteBound
+                        current.copy(
+                            useBuiltinConfig = false,
+                            config = result.config,
+                            inviteBound = effectiveInviteBound,
+                            userModelMode = result.userModelMode,
+                            inviteModelMode = result.inviteModelMode,
+                            isLoading = false,
+                            testResult = TestResult.Error("默认配置不可用，请手动配置 API Key")
+                        )
+                    }
                 } else {
-                    val effectiveInviteBound = result.inviteBound || _uiState.value.inviteBound
-
-                    _uiState.value = _uiState.value.copy(
-                        useBuiltinConfig = result.useBuiltin,
-                        config = result.config,
-                        inviteBound = effectiveInviteBound,
-                        userModelMode = result.userModelMode,
-                        inviteModelMode = result.inviteModelMode,
-                        isLoading = false
-                    )
+                    _uiState.update { current ->
+                        val effectiveInviteBound = result.inviteBound || current.inviteBound
+                        current.copy(
+                            useBuiltinConfig = result.useBuiltin,
+                            config = result.config,
+                            inviteBound = effectiveInviteBound,
+                            userModelMode = result.userModelMode,
+                            inviteModelMode = result.inviteModelMode,
+                            isLoading = false
+                        )
+                    }
                 }
             }
         }
 
-        // 进入设置页时自动修正网关地址（避免 workers.dev 在模拟器超时）
+        // 进入设置页时仅在为空或命中旧部署域名时切到新默认网关，避免覆盖用户自定义地址
         viewModelScope.launch {
-            val current = gatewayBaseUrl.value.trim()
+            val current = aiConfigRepository.getGatewayBaseUrl(defaultValue = DEFAULT_GATEWAY_BASE_URL).first().trim()
             if (shouldAutoFixGatewayBaseUrl(current)) {
                 aiConfigRepository.setGatewayBaseUrl(DEFAULT_GATEWAY_BASE_URL)
             }
@@ -142,15 +151,15 @@ class AISettingsViewModel @Inject constructor(
     private fun shouldAutoFixGatewayBaseUrl(value: String): Boolean {
         val trimmed = value.trim()
         if (trimmed.isBlank()) return true
-        return trimmed.contains("workers.dev", ignoreCase = true)
+        return LEGACY_GATEWAY_HOST_KEYWORDS.any { keyword ->
+            trimmed.contains(keyword, ignoreCase = true)
+        }
     }
 
     private fun loadUsageStats() {
         viewModelScope.launch {
             aiUsageRepository.getUsageStats().collect { stats ->
-                _uiState.value = _uiState.value.copy(
-                    usageStats = stats
-                )
+                _uiState.update { it.copy(usageStats = stats) }
             }
         }
     }
@@ -169,29 +178,31 @@ class AISettingsViewModel @Inject constructor(
     fun updateProvider(provider: AIProvider) {
         // Invite-bound config is independent from user config. Updating provider should not clear binding.
         val defaultConfig = AIConfig.defaultFor(provider)
-        _uiState.value = _uiState.value.copy(
-            config = _uiState.value.config.copy(
-                provider = provider,
-                apiUrl = defaultConfig.apiUrl,
-                model = defaultConfig.model
+        _uiState.update {
+            it.copy(
+                config = it.config.copy(
+                    provider = provider,
+                    apiUrl = defaultConfig.apiUrl,
+                    model = defaultConfig.model
+                )
             )
-        )
+        }
     }
 
     fun updateApiKey(apiKey: String) {
         // Invite-bound config is independent from user config. Updating apiKey should not clear binding.
         // 清理API密钥中的换行符和空格
         val cleanedKey = apiKey.trim().replace("\n", "").replace("\r", "").replace(" ", "")
-        _uiState.value = _uiState.value.copy(
-            config = _uiState.value.config.copy(apiKey = cleanedKey)
-        )
+        _uiState.update {
+            it.copy(config = it.config.copy(apiKey = cleanedKey))
+        }
     }
 
     fun updateApiUrl(url: String) {
         // Invite-bound config is independent from user config. Updating apiUrl should not clear binding.
-        _uiState.value = _uiState.value.copy(
-            config = _uiState.value.config.copy(apiUrl = url)
-        )
+        _uiState.update {
+            it.copy(config = it.config.copy(apiUrl = url))
+        }
     }
 
     fun updateModel(model: String) {
@@ -199,13 +210,14 @@ class AISettingsViewModel @Inject constructor(
         val cleaned = model.trim()
 
         // 普通用户：在 AUTO 模式下手动选择模型，切换回 FIXED（但不影响邀请码模式）
-        if (!_uiState.value.inviteBound && _uiState.value.userModelMode == AIConfigRepository.ModelSelectionMode.AUTO && cleaned.isNotBlank()) {
+        val state = _uiState.value
+        if (!state.inviteBound && state.userModelMode == AIConfigRepository.ModelSelectionMode.AUTO && cleaned.isNotBlank()) {
             updateUserModelMode(AIConfigRepository.ModelSelectionMode.FIXED)
         }
 
-        _uiState.value = _uiState.value.copy(
-            config = _uiState.value.config.copy(model = cleaned)
-        )
+        _uiState.update {
+            it.copy(config = it.config.copy(model = cleaned))
+        }
     }
 
     fun updateInviteModel(modelId: String) {
@@ -252,9 +264,9 @@ class AISettingsViewModel @Inject constructor(
     }
 
     fun updateEnabled(enabled: Boolean) {
-        _uiState.value = _uiState.value.copy(
-            config = _uiState.value.config.copy(isEnabled = enabled)
-        )
+        _uiState.update {
+            it.copy(config = it.config.copy(isEnabled = enabled))
+        }
     }
 
     fun saveConfig() {
@@ -264,17 +276,20 @@ class AISettingsViewModel @Inject constructor(
         if (_uiState.value.inviteBound && !_uiState.value.useBuiltinConfig) return
 
         viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isSaving = true)
-            aiConfigRepository.saveAIConfig(_uiState.value.config)
-            _uiState.value = _uiState.value.copy(
-                isSaving = false,
-                saveSuccess = true
-            )
+            _uiState.update { it.copy(isSaving = true) }
+            val config = _uiState.value.config
+            aiConfigRepository.saveAIConfig(config)
+            _uiState.update {
+                it.copy(
+                    isSaving = false,
+                    saveSuccess = true
+                )
+            }
         }
     }
 
     fun clearSaveSuccess() {
-        _uiState.value = _uiState.value.copy(saveSuccess = false)
+        _uiState.update { it.copy(saveSuccess = false) }
     }
 
     /**
@@ -287,20 +302,29 @@ class AISettingsViewModel @Inject constructor(
             aiConfigRepository.setUseBuiltin(useBuiltin)
 
             if (useBuiltin) {
-                _uiState.value = _uiState.value.copy(
-                    useBuiltinConfig = true,
-                    config = _uiState.value.config.copy(
-                        provider = AIConfig.BUILTIN_CONFIG.provider,
-                        apiUrl = AIConfig.BUILTIN_CONFIG.apiUrl,
-                        model = AIConfig.BUILTIN_CONFIG.model,
-                        isEnabled = true
+                _uiState.update {
+                    it.copy(
+                        useBuiltinConfig = true,
+                        config = it.config.copy(
+                            provider = AIConfig.BUILTIN_CONFIG.provider,
+                            apiUrl = AIConfig.BUILTIN_CONFIG.apiUrl,
+                            model = AIConfig.BUILTIN_CONFIG.model,
+                            isEnabled = true
+                        )
                     )
-                )
+                }
             } else {
-                // 关闭默认模型：恢复为用户可编辑态（不清空邀请码绑定/不覆盖持久化 token）
-                _uiState.value = _uiState.value.copy(
-                    useBuiltinConfig = false
-                )
+                // 关闭默认模型：恢复为用户可编辑态（不清空邀请码绑定/不覆盖持久化 token），清理内置的 key/url
+                _uiState.update { current ->
+                    val isBuiltinUrl = current.config.apiUrl == AIConfig.BUILTIN_CONFIG.apiUrl
+                    current.copy(
+                        useBuiltinConfig = false,
+                        config = current.config.copy(
+                            apiKey = if (isBuiltinUrl) "" else current.config.apiKey,
+                            apiUrl = if (isBuiltinUrl) "" else current.config.apiUrl
+                        )
+                    )
+                }
             }
         }
     }
@@ -319,13 +343,15 @@ class AISettingsViewModel @Inject constructor(
                 isEnabled = true
             )
 
-            _uiState.value = _uiState.value.copy(
-                useBuiltinConfig = true,
-                config = nextConfig
-            )
+            _uiState.update {
+                it.copy(
+                    useBuiltinConfig = true,
+                    config = nextConfig
+                )
+            }
 
             aiConfigRepository.saveAIConfig(nextConfig)
-            _uiState.value = _uiState.value.copy(saveSuccess = true)
+            _uiState.update { it.copy(saveSuccess = true) }
         }
     }
 
@@ -335,33 +361,38 @@ class AISettingsViewModel @Inject constructor(
 
     fun testConnection() {
         viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isTesting = true, testResult = null)
+            _uiState.update { it.copy(isTesting = true, testResult = null) }
 
             // 先检查网络
             if (!networkUtils.isNetworkAvailable()) {
-                _uiState.value = _uiState.value.copy(
-                    isTesting = false,
-                    testResult = TestResult.Error("网络不可用，请检查网络连接")
-                )
+                _uiState.update {
+                    it.copy(
+                        isTesting = false,
+                        testResult = TestResult.Error("网络不可用，请检查网络连接")
+                    )
+                }
                 return@launch
             }
 
             // 使用AI服务进行真正的连接测试
-            val errorMessage = aiService.testConnection(_uiState.value.config)
+            val config = _uiState.value.config
+            val errorMessage = aiService.testConnection(config)
 
-            _uiState.value = _uiState.value.copy(
-                isTesting = false,
-                testResult = if (errorMessage == null) {
-                    TestResult.Success
-                } else {
-                    TestResult.Error(errorMessage)
-                }
-            )
+            _uiState.update {
+                it.copy(
+                    isTesting = false,
+                    testResult = if (errorMessage == null) {
+                        TestResult.Success
+                    } else {
+                        TestResult.Error(errorMessage)
+                    }
+                )
+            }
         }
     }
 
     fun clearTestResult() {
-        _uiState.value = _uiState.value.copy(testResult = null)
+        _uiState.update { it.copy(testResult = null) }
     }
 
     /**
@@ -369,29 +400,34 @@ class AISettingsViewModel @Inject constructor(
      */
     fun fetchRemoteModels() {
         viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isFetchingModels = true)
+            _uiState.update { it.copy(isFetchingModels = true) }
 
             // 先检查网络
             if (!networkUtils.isNetworkAvailable()) {
-                _uiState.value = _uiState.value.copy(
-                    isFetchingModels = false,
-                    testResult = TestResult.Error("网络不可用，无法获取模型列表")
-                )
+                _uiState.update {
+                    it.copy(
+                        isFetchingModels = false,
+                        testResult = TestResult.Error("网络不可用，无法获取模型列表")
+                    )
+                }
                 return@launch
             }
 
             // 获取模型列表
-            val models = aiService.fetchModels(_uiState.value.config)
+            val config = _uiState.value.config
+            val models = aiService.fetchModels(config)
 
-            _uiState.value = _uiState.value.copy(
-                isFetchingModels = false,
-                remoteModels = models,
-                testResult = if (models.isEmpty()) {
-                    TestResult.Error("无法获取模型列表，请检查API配置")
-                } else {
-                    null
-                }
-            )
+            _uiState.update {
+                it.copy(
+                    isFetchingModels = false,
+                    remoteModels = models,
+                    testResult = if (models.isEmpty()) {
+                        TestResult.Error("无法获取模型列表，请检查API配置")
+                    } else {
+                        null
+                    }
+                )
+            }
         }
     }
 
@@ -462,7 +498,7 @@ class AISettingsViewModel @Inject constructor(
                             provider = AIProvider.CUSTOM,
                             apiKey = result.token,
                             apiUrl = result.apiBaseUrl,
-                            model = "",
+                            model = "openai/gpt-oss-120b",
                             isEnabled = true
                         )
 

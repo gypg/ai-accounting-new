@@ -54,6 +54,61 @@ class AIConfigRepository @Inject constructor(
         }
     }
 
+    suspend fun migrateInviteGatewayConfigIfNeeded(
+        defaultGatewayBaseUrl: String,
+        legacyGatewayHostKeywords: List<String>
+    ) {
+        try {
+            val preferences = dataStore.data.first()
+            val currentGatewayBaseUrl = preferences[stringPreferencesKey(AIConfig.KEY_GATEWAY_BASE_URL)].orEmpty()
+            val currentInviteApiUrl = preferences[stringPreferencesKey(AIConfig.KEY_INVITE_API_URL)].orEmpty()
+
+            val shouldResetGatewayBaseUrl = shouldResetLegacyUrl(
+                url = currentGatewayBaseUrl,
+                legacyGatewayHostKeywords = legacyGatewayHostKeywords
+            )
+            val shouldClearInviteBinding = shouldResetLegacyUrl(
+                url = currentInviteApiUrl,
+                legacyGatewayHostKeywords = legacyGatewayHostKeywords
+            )
+
+            if (!shouldResetGatewayBaseUrl && !shouldClearInviteBinding) return
+
+            dataStore.edit { prefs ->
+                if (shouldResetGatewayBaseUrl) {
+                    prefs[stringPreferencesKey(AIConfig.KEY_GATEWAY_BASE_URL)] = defaultGatewayBaseUrl
+                }
+
+                if (shouldClearInviteBinding) {
+                    prefs[booleanPreferencesKey(AIConfig.KEY_INVITE_BOUND)] = false
+                    prefs.remove(stringPreferencesKey(AIConfig.KEY_INVITE_API_URL))
+                    prefs.remove(stringPreferencesKey(AIConfig.KEY_INVITE_MODEL))
+                    prefs.remove(stringPreferencesKey(AIConfig.KEY_INVITE_MODEL_MODE))
+                    prefs.remove(intPreferencesKey(AIConfig.KEY_INVITE_RPM))
+                    prefs[booleanPreferencesKey(AIConfig.KEY_ENABLED)] = false
+                }
+            }
+
+            if (shouldClearInviteBinding) {
+                securityManager.removeEncryptedString(AIConfig.KEY_INVITE_TOKEN)
+                securityManager.removeEncryptedString(AIConfig.KEY_INVITE_CODE)
+            }
+        } catch (_: Exception) {
+            // Best-effort migration. Never crash app startup due to migration.
+        }
+    }
+
+    private fun shouldResetLegacyUrl(
+        url: String,
+        legacyGatewayHostKeywords: List<String>
+    ): Boolean {
+        val trimmed = url.trim()
+        if (trimmed.isBlank()) return false
+        return legacyGatewayHostKeywords.any { keyword ->
+            trimmed.contains(keyword, ignoreCase = true)
+        }
+    }
+
     /**
      * 获取AI配置流
      */

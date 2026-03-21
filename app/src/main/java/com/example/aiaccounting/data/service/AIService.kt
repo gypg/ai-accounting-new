@@ -565,12 +565,22 @@ class AIService @Inject constructor(
         return fetchOpenAIModels(config).map { it.id }.filter { it.isNotBlank() }
     }
 
-    private fun pickPreferredModel(remoteModelIds: List<String>, exclude: Set<String>): String? {
+    private fun pickPreferredModel(
+        remoteModelIds: List<String>,
+        exclude: Set<String>,
+        requireImageSupport: Boolean = false
+    ): String? {
+        val candidates = if (requireImageSupport) {
+            remoteModelIds.filter { isImageSupported(AIConfig(model = it)) }
+        } else {
+            remoteModelIds
+        }
+
         val recommended = "openai/gpt-oss-120b"
 
-        if (recommended !in exclude && recommended in remoteModelIds) return recommended
+        if (!requireImageSupport && recommended !in exclude && recommended in candidates) return recommended
 
-        return remoteModelIds.firstOrNull { it !in exclude }
+        return candidates.firstOrNull { it !in exclude }
     }
 
     private fun sendOpenAIChatNonStream(
@@ -881,7 +891,8 @@ private fun parseTransactionResponse(response: String): ParsedTransaction? {
 suspend fun analyzeImageAndRecord(
     imageUri: Uri,
     config: AIConfig,
-    context: Context
+    context: Context,
+    promptContext: String? = null
 ): ImageAnalysisResult = withContext(Dispatchers.IO) {
     if (!config.isEnabled || config.apiKey.isBlank()) {
         return@withContext ImageAnalysisResult(
@@ -902,7 +913,7 @@ suspend fun analyzeImageAndRecord(
 
         // 构建包含图片的消息
         val systemPrompt = """
-你是"小财娘"，一位可爱又贴心的管家婆AI助手 🌸
+${promptContext?.takeIf { it.isNotBlank() } ?: "你是\"小财娘\"，一位可爱又贴心的管家婆AI助手 🌸"}
 
 【你的任务】
 分析用户提供的图片，识别其中的消费信息（如收据、账单、购物小票等），并自动记账。
@@ -955,10 +966,13 @@ suspend fun analyzeImageAndRecord(
                     sendOpenAIImageRequest(base64Image, systemPrompt, config)
                 } catch (e: Exception) {
                     if (e.message == "UNSUPPORTED_MODEL") {
-                        // Best-effort fallback: try another model from /v1/models.
-                        // NOTE: Keep retry count to 1 to avoid heavy multi-tries on large model pools.
+                        // Best-effort fallback: try another vision-capable model from /v1/models.
                         val ids = fetchRemoteModelIds(config)
-                        val fallback = pickPreferredModel(ids, exclude = setOf(config.model.trim()))
+                        val fallback = pickPreferredModel(
+                            ids,
+                            exclude = setOf(config.model.trim()),
+                            requireImageSupport = true
+                        )
                             ?: throw e
                         sendOpenAIImageRequest(base64Image, systemPrompt, config.copy(model = fallback))
                     } else {
@@ -995,7 +1009,7 @@ private fun uriToBase64(uri: Uri, context: Context): String? {
             val imageBytes = outputStream.toByteArray()
             // 压缩图片，限制大小
             val compressedBytes = compressImageIfNeeded(imageBytes)
-            Base64.encodeToString(compressedBytes, Base64.DEFAULT)
+            Base64.encodeToString(compressedBytes, Base64.NO_WRAP)
         }
     } catch (e: Exception) {
         null
@@ -1106,10 +1120,12 @@ private fun sendOpenAIImageRequest(
     client.newCall(request).execute().use { response ->
         if (!response.isSuccessful) {
             val errorBody = response.body?.string() ?: ""
-            // 检查是否是模型不支持图片
-            if (errorBody.contains("does not support images") || 
-                errorBody.contains("image") || 
-                response.code == 400) {
+            val normalizedError = errorBody.lowercase()
+            val isImageUnsupported = normalizedError.contains("does not support images") ||
+                normalizedError.contains("image input is not supported") ||
+                normalizedError.contains("vision is not supported") ||
+                normalizedError.contains("multimodal is not supported")
+            if (isImageUnsupported) {
                 throw Exception("UNSUPPORTED_MODEL")
             }
             throw Exception("API请求失败(${response.code}): $errorBody")
