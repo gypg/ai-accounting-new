@@ -408,313 +408,7 @@ fun AISettingsScreen(
 
 // NetworkStatusCard, BuiltinConfigCard, EnableAICard, InfoCard 已移至 AISettingsCards.kt
 // InviteModelSelectorCard, CategorizedModelSelector, ModelListItem 已移至 AISettingsModelSelector.kt
-
-// 辅助数据类
-
-@Composable
-private fun ProviderCard(
-    selectedProvider: AIProvider,
-    onProviderSelected: (AIProvider) -> Unit
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp)
-        ) {
-            Text(
-                text = "选择AI提供商",
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Medium
-            )
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            AIProvider.values().forEach { provider ->
-                ProviderItem(
-                    provider = provider,
-                    isSelected = selectedProvider == provider,
-                    onClick = { onProviderSelected(provider) }
-                )
-                if (provider != AIProvider.values().last()) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ProviderItem(
-    provider: AIProvider,
-    isSelected: Boolean,
-    onClick: () -> Unit
-) {
-    val backgroundColor = if (isSelected) {
-        MaterialTheme.colorScheme.primaryContainer
-    } else {
-        MaterialTheme.colorScheme.surface
-    }
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .background(backgroundColor)
-            .clickable { onClick() }
-            .padding(12.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Column {
-            Text(
-                text = provider.displayName,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Medium
-            )
-            Text(
-                text = provider.description,
-                fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-
-        if (isSelected) {
-            Icon(
-                imageVector = Icons.Default.Check,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary
-            )
-        }
-    }
-}
-
-@Composable
-private fun APIConfigCard(
-    apiKey: String,
-    apiUrl: String,
-    model: String,
-    provider: AIProvider,
-    remoteModels: List<com.example.aiaccounting.data.service.RemoteModel>,
-    isFetchingModels: Boolean,
-    showApiKey: Boolean,
-    isAuto: Boolean,
-    onToggleAuto: (Boolean) -> Unit,
-    onShowApiKeyChange: (Boolean) -> Unit,
-    onApiKeyChange: (String) -> Unit,
-    onApiUrlChange: (String) -> Unit,
-    onModelChange: (String) -> Unit,
-    onFetchModels: () -> Unit
-) {
-    // 使用远程模型列表（如果有）或默认模型列表
-    val modelsToShow = if (remoteModels.isNotEmpty()) {
-        remoteModels.map {
-            AIModel(
-                id = it.id,
-                displayName = if (it.name.isBlank()) it.id else it.name,
-                description = it.description,
-                category = categorizeModelId(it.id)
-            )
-        }
-    } else {
-        provider.models
-    }
-
-    val fixedSelectedModelId = if (isAuto) "" else model
-
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp)
-        ) {
-            Text(
-                text = "API配置",
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Medium
-            )
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // API密钥
-            OutlinedTextField(
-                value = apiKey,
-                onValueChange = onApiKeyChange,
-                label = { Text("API密钥") },
-                modifier = Modifier.fillMaxWidth(),
-                visualTransformation = if (showApiKey) VisualTransformation.None else PasswordVisualTransformation(),
-                trailingIcon = {
-                    IconButton(onClick = { onShowApiKeyChange(!showApiKey) }) {
-                        Icon(
-                            imageVector = if (showApiKey) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                            contentDescription = if (showApiKey) "隐藏" else "显示"
-                        )
-                    }
-                },
-                singleLine = true
-            )
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // API地址
-            OutlinedTextField(
-                value = apiUrl,
-                onValueChange = onApiUrlChange,
-                label = { Text("API地址") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true
-            )
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // 模型模式（普通用户）
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "模型模式",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                    Text(
-                        text = if (isAuto) "自动切换可用模型" else "固定使用指定模型",
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-
-                Switch(
-                    checked = isAuto,
-                    onCheckedChange = onToggleAuto
-                )
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            if (isAuto) {
-                Text(
-                    text = "当前偏好：Auto（推荐 openai/gpt-oss-120b；若不可用将自动切换）",
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-            } else {
-                Spacer(modifier = Modifier.height(12.dp))
-            }
-
-            // 自定义提供商使用新的模型管理方式
-            if (provider == AIProvider.CUSTOM) {
-                if (!isAuto) {
-                    CustomModelManager(
-                        apiKey = apiKey,
-                        remoteModels = remoteModels,
-                        isFetchingModels = isFetchingModels,
-                        selectedModelId = model,
-                        onModelSelected = onModelChange,
-                        onFetchModels = onFetchModels
-                    )
-                }
-            } else {
-                // 获取模型列表按钮
-                OutlinedButton(
-                    onClick = onFetchModels,
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = !isFetchingModels && apiKey.isNotBlank()
-                ) {
-                    if (isFetchingModels) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(16.dp),
-                            strokeWidth = 2.dp
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                    } else {
-                        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                    }
-                    Text(if (isFetchingModels) "获取中..." else "获取模型列表")
-                }
-
-                // 显示获取到的模型数量
-                if (remoteModels.isNotEmpty()) {
-                    Text(
-                        text = "已获取 ${remoteModels.size} 个模型",
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(top = 4.dp)
-                    )
-                }
-
-                if (!isAuto) {
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    // 模型选择（分类 + 搜索）
-                    CategorizedModelSelector(
-                        models = modelsToShow,
-                        selectedModelId = fixedSelectedModelId,
-                        onModelSelected = onModelChange
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun TestResultCard(
-    result: TestResult,
-    onDismiss: () -> Unit
-) {
-    val (backgroundColor, textColor, icon, message) = when (result) {
-        TestResult.Success -> Quadruple(
-            MaterialTheme.colorScheme.primaryContainer,
-            MaterialTheme.colorScheme.onPrimaryContainer,
-            Icons.Default.CheckCircle,
-            "连接成功！AI助手可以正常使用。"
-        )
-        is TestResult.Error -> Quadruple(
-            MaterialTheme.colorScheme.errorContainer,
-            MaterialTheme.colorScheme.onErrorContainer,
-            Icons.Default.Error,
-            result.message
-        )
-    }
-
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = backgroundColor)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = textColor
-            )
-            Spacer(modifier = Modifier.width(12.dp))
-            Text(
-                text = message,
-                color = textColor,
-                modifier = Modifier.weight(1f)
-            )
-            IconButton(onClick = onDismiss) {
-                Icon(
-                    imageVector = Icons.Default.Close,
-                    contentDescription = "关闭",
-                    tint = textColor
-                )
-            }
-        }
-    }
-}
+// ProviderCard, ProviderItem, APIConfigCard, TestResultCard 已移至 AISettingsProviderAndAPI.kt
 
 @Composable
 private fun InviteCodeBindCard(
@@ -811,48 +505,73 @@ private fun InviteCodeBindCard(
             bindResult?.let { result ->
                 Spacer(modifier = Modifier.height(12.dp))
 
-                val (backgroundColor, textColor, icon, message) = when (result) {
-                    is InviteBindResult.Success -> Quadruple(
-                        MaterialTheme.colorScheme.primaryContainer,
-                        MaterialTheme.colorScheme.onPrimaryContainer,
-                        Icons.Default.CheckCircle,
-                        "绑定成功（${result.rpm} rpm）\n${result.hint}"
-                    )
-                    is InviteBindResult.Error -> Quadruple(
-                        MaterialTheme.colorScheme.errorContainer,
-                        MaterialTheme.colorScheme.onErrorContainer,
-                        Icons.Default.Error,
-                        result.message
-                    )
-                }
-
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = backgroundColor)
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = icon,
-                            contentDescription = null,
-                            tint = textColor
-                        )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Text(
-                            text = message,
-                            color = textColor,
-                            modifier = Modifier.weight(1f)
-                        )
-                        IconButton(onClick = onDismissResult) {
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "关闭",
-                                tint = textColor
+                when (result) {
+                    is InviteBindResult.Success -> {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.primaryContainer
                             )
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(16.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.CheckCircle,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Text(
+                                    text = "绑定成功（${result.rpm} rpm）\n${result.hint}",
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                IconButton(onClick = onDismissResult) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "关闭",
+                                        tint = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    is InviteBindResult.Error -> {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.errorContainer
+                            )
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(16.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Error,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onErrorContainer
+                                )
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Text(
+                                    text = result.message,
+                                    color = MaterialTheme.colorScheme.onErrorContainer,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                IconButton(onClick = onDismissResult) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "关闭",
+                                        tint = MaterialTheme.colorScheme.onErrorContainer
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -1069,16 +788,6 @@ private fun StatDetailRow(
     }
 }
 
-// InfoCard 已移至 AISettingsCards.kt
-
-// 辅助数据类
-private data class Quadruple<A, B, C, D>(
-    val first: A,
-    val second: B,
-    val third: C,
-    val fourth: D
-)
-
 // ==================== 自定义模型管理组件 ====================
 
 /**
@@ -1086,7 +795,7 @@ private data class Quadruple<A, B, C, D>(
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun CustomModelManager(
+internal fun CustomModelManager(
     apiKey: String,
     remoteModels: List<com.example.aiaccounting.data.service.RemoteModel>,
     isFetchingModels: Boolean,
