@@ -6,6 +6,29 @@
 
 ## 版本历史
 
+### v1.8.3 (2026-03-22)
+**版本代号：发布准备**
+
+#### 发布准备
+1. **applicationId 确认**
+   - 确认 applicationId 已是正式包名 `com.moneytalk.ai`
+   - namespace `com.example.aiaccounting` 与代码包名一致
+
+2. **ProGuard 验证**
+   - 验证混淆规则完整性
+   - 解决 R8 内存不足问题（JVM 2GB → 4GB）
+   - Release APK 构建成功
+
+3. **构建优化**
+   - 优化 Gradle 内存配置
+   - 验证所有关键库的混淆规则
+
+#### 技术改进
+- 修复 Release 构建内存溢出问题
+- 完善构建配置文档
+
+---
+
 ### v1.1.0 (2025-03-02)
 **版本代号：智能统计**
 
