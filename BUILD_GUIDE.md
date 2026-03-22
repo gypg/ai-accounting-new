@@ -143,6 +143,14 @@ export KEY_PASSWORD="your_key_password"
 - 保留 `implementation("org.apache.poi:poi-ooxml:5.2.5")`
 - 通过 `dependencyInsight` 确认 `poi` 仍由 `poi-ooxml` 传递引入，release 构建不受影响
 
+模块 6B 当前已完成的保护：
+- 新增 [ExcelExporterTest.kt](app/src/test/java/com/example/aiaccounting/data/exporter/ExcelExporterTest.kt)
+- 覆盖 `exportTransactions` 正常导出、空列表导出、`exportMonthlySummary` 汇总导出三类回归场景
+- 测试通过真实文件写入与重新读取 workbook，确保后续若继续裁剪 POI 依赖时，能第一时间发现 Excel 导出回归
+- 已验证：
+  - `./gradlew :app:testDebugUnitTest --tests com.example.aiaccounting.data.exporter.ExcelExporterTest` ✅
+  - `./gradlew :app:assembleRelease` ✅
+
 当前状态说明：
 - warning **尚未被彻底消除**
 - 当前 release 构建仍依赖 `app/proguard-rules.pro` 中对 POI / AWT / XML schema 的 suppress 规则将其维持为非阻塞项
