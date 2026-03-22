@@ -44,7 +44,7 @@ internal fun InviteModelSelectorCard(
     onFetchModels: () -> Unit,
     onModelSelected: (String) -> Unit,
     useBuiltinConfig: Boolean,
-    onTestConnection: ((String, (TestResult) -> Unit) -> Unit)? = null
+    onTestConnection: ((String, (ModelTestResult) -> Unit) -> Unit)? = null
 ) {
     val modelsToShow = remember(remoteModels) {
         remoteModels.map {
@@ -149,13 +149,13 @@ internal fun CategorizedModelSelector(
     models: List<AIModel>,
     selectedModelId: String,
     onModelSelected: (String) -> Unit,
-    onTestConnection: ((String, (TestResult) -> Unit) -> Unit)? = null
+    onTestConnection: ((String, (ModelTestResult) -> Unit) -> Unit)? = null
 ) {
     var showDialog by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
     var selectedCategory by remember { mutableStateOf("全部") }
     var isTesting by remember { mutableStateOf(false) }
-    var testResult by remember { mutableStateOf<TestResult?>(null) }
+    var testResult by remember { mutableStateOf<ModelTestResult?>(null) }
 
     val selectedModel = models.find { it.id == selectedModelId }
 
@@ -348,8 +348,9 @@ internal fun CategorizedModelSelector(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         if (testResult != null) {
-                            when (val result = testResult) {
-                                is TestResult.Success -> {
+                            val result = testResult ?: return@Row
+                            when (result) {
+                                is ModelTestResult.Success -> {
                                     Icon(
                                         imageVector = Icons.Default.CheckCircle,
                                         contentDescription = "测试成功",
@@ -362,7 +363,7 @@ internal fun CategorizedModelSelector(
                                         color = MaterialTheme.colorScheme.primary
                                     )
                                 }
-                                is TestResult.Error -> {
+                                is ModelTestResult.Error -> {
                                     Icon(
                                         imageVector = Icons.Default.Error,
                                         contentDescription = "测试失败",
@@ -472,7 +473,7 @@ internal fun ModelListItem(
 /**
  * 测试连接结果
  */
-sealed class TestResult {
-    data class Success(val latency: Long) : TestResult()
-    data class Error(val message: String) : TestResult()
+sealed class ModelTestResult {
+    data class Success(val latency: Long) : ModelTestResult()
+    data class Error(val message: String) : ModelTestResult()
 }

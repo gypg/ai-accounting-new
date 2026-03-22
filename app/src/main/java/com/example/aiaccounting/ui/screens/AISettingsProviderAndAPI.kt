@@ -20,7 +20,6 @@ import androidx.compose.ui.unit.sp
 import com.example.aiaccounting.data.model.AIModel
 import com.example.aiaccounting.data.model.AIProvider
 import com.example.aiaccounting.data.service.RemoteModel
-import com.example.aiaccounting.ui.viewmodel.TestResult
 import com.example.aiaccounting.utils.ModelIdCategorizer.categorizeModelId
 
 /**
@@ -128,7 +127,7 @@ internal fun APIConfigCard(
     onApiUrlChange: (String) -> Unit,
     onModelChange: (String) -> Unit,
     onFetchModels: () -> Unit,
-    onTestModelConnection: ((String, (TestResult) -> Unit) -> Unit)? = null
+    onTestModelConnection: ((String, (ModelTestResult) -> Unit) -> Unit)? = null
 ) {
     // 使用远程模型列表（如果有）或默认模型列表
     val modelsToShow = if (remoteModels.isNotEmpty()) {
@@ -290,11 +289,11 @@ internal fun APIConfigCard(
 
 @Composable
 internal fun TestResultCard(
-    result: TestResult,
+    result: com.example.aiaccounting.ui.viewmodel.TestResult,
     onDismiss: () -> Unit
 ) {
     when (result) {
-        TestResult.Success -> {
+        is com.example.aiaccounting.ui.viewmodel.TestResult.Success -> {
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(
@@ -328,7 +327,7 @@ internal fun TestResultCard(
                 }
             }
         }
-        is TestResult.Error -> {
+        is com.example.aiaccounting.ui.viewmodel.TestResult.Error -> {
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(

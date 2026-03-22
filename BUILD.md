@@ -2,45 +2,77 @@
 
 ## 环境要求
 
-- Android Studio Arctic Fox 或更高版本
-- JDK 11 或更高版本
-- Android SDK API 26+
+- Android Studio Hedgehog 或更高版本
+- JDK 17
+- Android SDK 34
+- Gradle Wrapper（使用仓库自带 `./gradlew`）
+
+## 当前构建事实
+
+- `applicationId`: `com.moneytalk.ai`
+- `namespace`: `com.example.aiaccounting`
+- `versionName`: `1.8.3`
+- `versionCode`: `19`
+- `org.gradle.jvmargs`: `-Xmx4096m -Dfile.encoding=UTF-8`
 
 ## 构建步骤
 
 ### 1. 使用 Android Studio（推荐）
 
-```bash
-# 打开项目
-File -> Open -> 选择项目文件夹
+1. 打开项目根目录
+2. 等待 Gradle 同步完成
+3. 使用以下菜单执行构建：
+   - Debug APK：`Build -> Build Bundle(s) / APK(s) -> Build APK(s)`
+   - Release APK：`Build -> Generate Signed Bundle / APK...`
 
-# 等待 Gradle 同步完成
-
-# 构建 APK
-Build -> Build Bundle(s) / APK(s) -> Build APK(s)
-```
-
-APK 输出位置：`app/build/outputs/apk/debug/app-debug.apk`
+常见输出位置：
+- Debug：`app/build/outputs/apk/debug/app-debug.apk`
+- Release：`app/build/outputs/apk/release/app-release-unsigned.apk`
 
 ### 2. 使用命令行
 
 ```bash
-# 清理并构建
-./gradlew clean assembleDebug
+# 清理
+./gradlew clean
 
-# 或构建发布版本
+# 质量检查
+./gradlew lintDebug --continue
+./gradlew testDebugUnitTest --continue
+
+# 构建 Debug
+./gradlew assembleDebug
+
+# 构建 Release
 ./gradlew assembleRelease
 ```
 
 ## GitHub Actions 自动构建
 
-项目已配置 GitHub Actions，推送代码后自动构建 APK。
+项目已配置 GitHub Actions：
 
-构建的 APK 可在 Actions 页面的 Artifacts 中下载。
+1. `Lint Check`
+2. `Unit Tests`
+3. `Build APK`
+4. `release`（tag 为 `v*` 时触发）
 
-## 项目统计
+工作流对应命令：
+- `./gradlew lintDebug --continue`
+- `./gradlew testDebugUnitTest --continue`
+- `./gradlew assembleDebug`
+- `./gradlew assembleRelease`
 
-- **源代码**: ~8,500 行 Kotlin
-- **测试代码**: ~2,000 行
-- **UI 界面**: 8 个主要页面
-- **数据库表**: 5 个实体
+构建产物可在 Actions 页面 artifacts 中下载。
+
+## Release 签名
+
+正式签名依赖环境变量：
+- `KEYSTORE_PASSWORD`
+- `KEY_PASSWORD`
+
+若未提供 `KEYSTORE_PASSWORD`，Release 构建会回退到 debug 签名，仅用于验证构建链路，不应用于正式发布。
+
+## 已知注意事项
+
+- Lint 与 Unit Tests 在执行前都会先进行 Kotlin 编译，因此类型错误会同时阻塞两个 CI job
+- 本地部分 bash 环境可能打印 `uname: command not found`，但当前不影响 lint 与 unit test 执行结果
+- 邀请码绑定成功后，模型字段保存为空字符串，表示 Auto 自动优选模型，这是当前设计行为

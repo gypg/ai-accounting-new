@@ -30,7 +30,6 @@ import com.example.aiaccounting.data.model.AIProvider
 import com.example.aiaccounting.data.repository.AIUsageStats
 import com.example.aiaccounting.ui.viewmodel.AISettingsViewModel
 import com.example.aiaccounting.ui.viewmodel.InviteBindResult
-import com.example.aiaccounting.ui.viewmodel.TestResult
 import com.example.aiaccounting.utils.ModelIdCategorizer.categorizeModelId
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -251,7 +250,7 @@ fun AISettingsScreen(
                         onFetchModels = { viewModel.fetchRemoteModels() },
                         onModelSelected = { viewModel.updateInviteModel(it) },
                         useBuiltinConfig = uiState.useBuiltinConfig,
-                        onTestConnection = { modelId, callback ->
+                        onTestConnection = { modelId: String, callback: (ModelTestResult) -> Unit ->
                             viewModel.testModelConnection(modelId, callback)
                         }
                     )

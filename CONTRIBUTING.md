@@ -1,89 +1,100 @@
 # 贡献指南
 
-感谢您对本项目的关注！我们欢迎各种形式的贡献。
+感谢你参与 AI记账 项目。
 
-## 如何贡献
+## 开发环境
 
-### 报告问题
-
-如果您发现了bug或有功能建议，请通过 [GitHub Issues](https://github.com/yourusername/ai-accounting/issues) 提交。
-
-提交问题时，请包含以下信息：
-- 问题描述
-- 复现步骤
-- 期望行为
-- 实际行为
-- 设备信息（Android版本、设备型号等）
-- 截图（如有）
-
-### 提交代码
-
-1. Fork 本仓库
-2. 创建您的特性分支 (`git checkout -b feature/AmazingFeature`)
-3. 提交您的更改 (`git commit -m 'Add some AmazingFeature'`)
-4. 推送到分支 (`git push origin feature/AmazingFeature`)
-5. 打开一个 Pull Request
-
-### 代码规范
-
-- 使用 Kotlin 编码规范
-- 遵循现有的代码风格
-- 添加适当的注释
-- 确保代码通过 lint 检查
-- 编写单元测试（如适用）
-
-### 提交信息规范
-
-提交信息应该清晰描述更改内容：
-
-```
-类型: 简短描述
-
-详细描述（可选）
-```
-
-类型包括：
-- `feat`: 新功能
-- `fix`: 修复bug
-- `docs`: 文档更新
-- `style`: 代码格式（不影响功能）
-- `refactor`: 代码重构
-- `test`: 测试相关
-- `chore`: 构建过程或辅助工具的变动
-
-## 开发环境设置
-
-### 要求
-
-- Android Studio Hedgehog (2023.1.1) 或更高版本
+### 前置要求
+- Android Studio Hedgehog 或更高版本
 - JDK 17
 - Android SDK 34
+- 可用的 Gradle 环境
 
-### 构建
-
+### 克隆与初始化
 ```bash
-./gradlew assembleDebug
+git clone <your-repo-url>
+cd new-year-fresh
+./gradlew tasks
 ```
 
-### 运行测试
+## 开发工作流
 
-```bash
-./gradlew test
+1. 从 `main` 拉出工作分支
+2. 完成开发后先本地执行 Lint 和单元测试
+3. 确认关键功能手测通过后再提交 PR
+4. 推送后观察 GitHub Actions 是否通过
+
+## 常用命令
+
+<!-- AUTO-GENERATED: GRADLE_COMMANDS_START -->
+| Command | Description |
+|---------|-------------|
+| `./gradlew tasks` | 查看项目可用任务 |
+| `./gradlew assembleDebug` | 构建 Debug APK |
+| `./gradlew assembleRelease` | 构建 Release APK |
+| `./gradlew lintDebug --continue` | 运行与 CI 一致的 Android Lint 检查 |
+| `./gradlew testDebugUnitTest --continue` | 运行与 CI 一致的 Debug 单元测试 |
+| `./gradlew clean` | 清理构建产物 |
+<!-- AUTO-GENERATED: GRADLE_COMMANDS_END -->
+
+## 测试要求
+
+- 提交前至少运行：
+  - `./gradlew lintDebug --continue`
+  - `./gradlew testDebugUnitTest --continue`
+- 涉及 AI 设置、邀请码绑定、模型切换时，需补充对应单元测试
+- 涉及发布流程时，需额外验证 `assembleRelease`
+
+## 代码与提交规范
+
+### 代码要求
+- 使用 Kotlin 编码规范
+- 保持数据不可变更新风格
+- 修改用户输入、配置、网络请求相关逻辑时，补齐错误处理
+- 不要把密钥、密码或令牌写入源码
+
+### 提交信息
+使用 Conventional Commit 风格：
+
+```text
+<type>: <description>
 ```
 
-### 运行Lint检查
+常用类型：
+- `feat`：新功能
+- `fix`：缺陷修复
+- `docs`：文档更新
+- `refactor`：重构
+- `test`：测试变更
+- `chore`：构建或工具调整
 
-```bash
-./gradlew lint
-```
+## Pull Request 检查清单
 
-## 行为准则
+提交 PR 前请确认：
+- [ ] 已基于当前 `main` 合并或 rebase
+- [ ] 本地 `lintDebug` 通过
+- [ ] 本地 `testDebugUnitTest` 通过
+- [ ] 文档已同步更新
+- [ ] 未提交 keystore、密码、token 等敏感信息
+- [ ] 变更说明清晰，便于回溯
 
-- 尊重所有参与者
-- 接受建设性批评
-- 关注对社区最有利的事情
-- 展现同理心
+## CI 说明
 
-## 许可证
+当前 GitHub Actions 主流程：
+1. `Lint Check` → `./gradlew lintDebug --continue`
+2. `Unit Tests` → `./gradlew testDebugUnitTest --continue`
+3. `Build APK` → `./gradlew assembleDebug` 与 `./gradlew assembleRelease`
+4. Tag 触发时自动创建 GitHub Release
 
-通过贡献您的代码，您同意将其授权为 MIT 许可证。
+## 安全与密钥
+
+Release 签名依赖以下环境变量：
+
+<!-- AUTO-GENERATED: ENV_START -->
+| Variable | Required | Description | Example |
+|----------|----------|-------------|---------|
+| `KEYSTORE_PASSWORD` | Release 构建时必需 | Release keystore 密码；为空时会回退到 debug 签名 | `your_keystore_password` |
+| `KEY_PASSWORD` | Release 构建时必需 | `aiaccounting` key alias 的密码 | `your_key_password` |
+<!-- AUTO-GENERATED: ENV_END -->
+
+请始终通过环境变量注入，不要硬编码到 `app/build.gradle.kts` 或任何源码文件中。

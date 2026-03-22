@@ -154,7 +154,7 @@ class AISettingsInviteBindingTest {
  inviteCode = "inv_ok",
  token = "tok_xxx",
  apiBaseUrl = "https://api.gdmon.dpdns.org/v1",
- model = "openai/gpt-oss-120b",
+ model = "",
  rpm = 60
  )
  }

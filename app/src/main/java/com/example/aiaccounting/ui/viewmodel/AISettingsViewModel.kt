@@ -394,11 +394,11 @@ class AISettingsViewModel @Inject constructor(
     /**
      * 测试指定模型的连接
      */
-    fun testModelConnection(modelId: String, onResult: (com.example.aiaccounting.ui.screens.TestResult) -> Unit) {
+    fun testModelConnection(modelId: String, onResult: (com.example.aiaccounting.ui.screens.ModelTestResult) -> Unit) {
         viewModelScope.launch {
             // 先检查网络
             if (!networkUtils.isNetworkAvailable()) {
-                onResult(com.example.aiaccounting.ui.screens.TestResult.Error("网络不可用，请检查网络连接"))
+                onResult(com.example.aiaccounting.ui.screens.ModelTestResult.Error("网络不可用，请检查网络连接"))
                 return@launch
             }
 
@@ -408,9 +408,9 @@ class AISettingsViewModel @Inject constructor(
             val latency = System.currentTimeMillis() - startTime
 
             if (errorMessage == null) {
-                onResult(com.example.aiaccounting.ui.screens.TestResult.Success(latency))
+                onResult(com.example.aiaccounting.ui.screens.ModelTestResult.Success(latency))
             } else {
-                onResult(com.example.aiaccounting.ui.screens.TestResult.Error(errorMessage))
+                onResult(com.example.aiaccounting.ui.screens.ModelTestResult.Error(errorMessage))
             }
         }
     }

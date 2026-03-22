@@ -7,25 +7,39 @@
 ## 版本历史
 
 ### v1.8.3 (2026-03-22)
-**版本代号：发布准备**
+**版本代号：发布准备与 AI 设置收口**
 
 #### 发布准备
 1. **applicationId 确认**
-   - 确认 applicationId 已是正式包名 `com.moneytalk.ai`
-   - namespace `com.example.aiaccounting` 与代码包名一致
+   - 确认 applicationId 为正式包名 `com.moneytalk.ai`
+   - namespace `com.example.aiaccounting` 与代码包结构保持一致
 
-2. **ProGuard 验证**
-   - 验证混淆规则完整性
-   - 解决 R8 内存不足问题（JVM 2GB → 4GB）
-   - Release APK 构建成功
+2. **ProGuard 与 Release 构建验证**
+   - 验证混淆规则与资源压缩配置
+   - Release 构建链路通过
+   - Release 签名改为环境变量驱动，未注入密钥时回退 debug 签名以便 CI 验证
 
-3. **构建优化**
-   - 优化 Gradle 内存配置
-   - 验证所有关键库的混淆规则
+3. **GitHub Actions 发布链路确认**
+   - `lintDebug --continue`
+   - `testDebugUnitTest --continue`
+   - `assembleDebug` / `assembleRelease`
+   - tag `v*` 自动触发 GitHub Release
 
-#### 技术改进
-- 修复 Release 构建内存溢出问题
-- 完善构建配置文档
+#### AI 设置相关更新
+- 模型选择界面新增“测试连接”按钮
+- 邀请码绑定流程支持 Auto 自动优选模型
+- 绑定后不再写死默认模型 `openai/gpt-oss-120b`
+- 模型配置持久化为空字符串时表示 Auto 模式
+- 默认邀请码网关基址为 `https://api.gdmon.dpdns.org`
+- 自动迁移并替换历史 `workers.dev` 域名配置
+
+#### 稳定性修复
+- 修复 AI Settings 拆分后 `TestResult` 命名冲突导致的 Kotlin 编译失败
+- 将模型测试结果类型独立为 `ModelTestResult`
+- 更新邀请码绑定相关单元测试，使其与 Auto 自动优选行为一致
+- 本地验证通过：
+  - `./gradlew lintDebug --continue`
+  - `./gradlew testDebugUnitTest --continue`
 
 ---
 
@@ -84,4 +98,3 @@
 5. **数据安全**
    - 数据库加密
    - 支持指纹/密码保护
-
