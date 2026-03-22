@@ -59,9 +59,12 @@
 -keep class net.sqlcipher.database.** { *; }
 
 # Keep Apache POI
--keep class org.apache.poi.** { *; }
+-keep class org.apache.poi.ss.** { *; }
+-keep class org.apache.poi.xssf.** { *; }
+-keep class org.apache.poi.openxml4j.** { *; }
 -dontwarn org.apache.poi.**
 -dontwarn org.apache.xmlbeans.**
+-dontwarn org.openxmlformats.schemas.**
 -dontwarn org.apache.logging.log4j.**
 -dontwarn com.graphbuilder.curve.**
 -dontwarn aQute.bnd.annotation.spi.**

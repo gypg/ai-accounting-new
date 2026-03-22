@@ -68,7 +68,8 @@
 - 本地 bash 环境可能出现 `uname: command not found` 日志，但当前不影响 lint / 单测通过
 - `Build Release APK` 仍可能出现 Apache POI 相关的 R8 warning：`SVGUserAgent.getViewbox()` 在 Android / R8 静态分析下被视为 unreachable；当前不阻塞构建与 artifact 上传
 - 该 warning 已确认来自 `org.apache.poi:poi-ooxml:5.2.5` jar 内的 `org.apache.poi.xslf.draw.SVGUserAgent` 路径，而当前 app 仅使用 `XSSFWorkbook` 基础 `.xlsx` 导出能力，因此本模块将其归类为 **POI 附带未使用渲染路径的静态分析噪音**，不是已确认的导出功能故障
-- 下一模块优先处理方向：缩减 POI 依赖面；若无效，再考虑更小范围的 R8 规则调整
+- 模块 2 已将 POI keep 范围收敛到当前 Excel 导出主路径，并补充 `-dontwarn org.openxmlformats.schemas.**` 以恢复 release 构建；当前 warning 仍存在，但已确认继续保持非阻塞
+- 后续若继续处理，优先方向应是缩减 POI 依赖面，而不是继续扩大 suppress 规则
 
 ## 四、回滚思路
 

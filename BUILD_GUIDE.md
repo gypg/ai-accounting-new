@@ -133,7 +133,12 @@ export KEY_PASSWORD="your_key_password"
 
 这说明当前 warning 更接近 **POI 附带的未使用 PPT/SVG 渲染路径被 R8 静态分析到**，而不是当前 Excel 导出功能直接调用了有问题的 API。
 
-后续处理顺序：
-1. 优先尝试缩减 POI 依赖面
-2. 若 warning 仍存在，再做更小范围的 R8 / ProGuard 规则处理
-3. 仅在前两步无效时，才考虑替换导出实现
+模块 2 当前已完成的收敛：
+- 将 `-keep class org.apache.poi.** { *; }` 缩小为仅保留当前 Excel 导出主路径需要的 `org.apache.poi.ss.**`、`org.apache.poi.xssf.**`、`org.apache.poi.openxml4j.**`
+- 新增 `-dontwarn org.openxmlformats.schemas.**`，避免 R8 因 XML schema 生成类缺失而中断 release 构建
+- 重新执行 `assembleRelease` 后，release 构建保持成功，且当前 `ExcelExporter` 使用范围下未出现新增构建阻塞
+
+当前状态说明：
+- warning **尚未被彻底消除**
+- 当前 release 构建仍依赖 `app/proguard-rules.pro` 中对 POI / AWT / XML schema 的 suppress 规则将其维持为非阻塞项
+- 在当前实现范围内这是可接受状态；后续若继续推进，下一步应优先尝试真正缩减 POI 依赖，而不是继续扩大 suppress 范围
