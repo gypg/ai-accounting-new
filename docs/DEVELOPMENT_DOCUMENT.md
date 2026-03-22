@@ -87,6 +87,8 @@ AI记账是一款面向中国大陆个人用户的智能记账 Android 应用。
 | 3 | Build APK | `./gradlew assembleDebug` + `./gradlew assembleRelease` |
 | 4 | release | tag 满足 `v*` 时自动创建 GitHub Release |
 
+> 当前 release artifact 归档逻辑已修复：workflow 会优先探测 `app-release.apk`，并兼容 `app-release-unsigned.apk`，不再依赖单一固定文件名。
+
 ### 3.2 Release 环境变量
 
 | 变量 | 作用 | 备注 |
