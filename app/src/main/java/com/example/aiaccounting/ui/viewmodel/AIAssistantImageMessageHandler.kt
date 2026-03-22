@@ -6,9 +6,9 @@ import com.example.aiaccounting.data.model.AIConfig
 import com.example.aiaccounting.data.model.Butler
 import com.example.aiaccounting.data.model.ChatMessage
 import com.example.aiaccounting.data.model.MessageRole
+import com.example.aiaccounting.data.repository.AIUsageRepository
 import com.example.aiaccounting.data.service.AIService
 import com.example.aiaccounting.data.service.ImageProcessingService
-import com.example.aiaccounting.data.repository.AIUsageRepository
 import kotlinx.coroutines.withTimeoutOrNull
 
 internal sealed class ImagePromptResult {
@@ -94,17 +94,15 @@ internal class AIAssistantImageMessageHandler(
             }
         }.trim()
 
-        val replies = imageUris.map { imageUri ->
+        val replies = imageUris.mapNotNull { imageUri ->
             val analysisResult = aiService.analyzeImageAndRecord(
                 imageUri = imageUri,
                 config = config,
                 context = context,
                 promptContext = promptContext
             )
-            analysisResult.message.ifBlank {
-                "😥 没有在图片里识别到有效内容，请尝试更清晰的图片。"
-            }
-        }.filter { it.isNotBlank() }
+            analysisResult.message.takeIf { it.isNotBlank() }
+        }
 
         if (replies.isEmpty()) {
             return ImageMessageProcessingResult.Error("😥 没有在图片里识别到有效内容，请尝试更清晰的图片。")
@@ -142,8 +140,16 @@ internal class AIAssistantImageMessageHandler(
             return ImagePromptResult.Error("😥 没有在图片里识别到文字或标签，可能图片过模糊或无法读取。请尝试更清晰的账单照片再试一次。")
         }
 
+        val acceptedResults = analysisResults.filter {
+            it.confidence == ImageProcessingService.OcrConfidence.HIGH ||
+                it.confidence == ImageProcessingService.OcrConfidence.MEDIUM
+        }
+        if (acceptedResults.isEmpty()) {
+            return ImagePromptResult.Error("😥 这次图片识别置信度过低，暂时不会发送到云端 AI。请尽量保持图片清晰、端正、完整后再试一次。")
+        }
+
         return ImagePromptResult.Success(
-            imageProcessingService.generateCompactPrompt(analysisResults, message)
+            imageProcessingService.generateCompactPrompt(acceptedResults, message)
         )
     }
 

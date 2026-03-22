@@ -56,20 +56,25 @@ AI记账是一款面向中国大陆个人用户的智能记账 Android 应用。
   - 页面级连接测试结果 `TestResult`
   - 模型选择弹窗测试结果 `ModelTestResult`
 
-### 2.3 最近一次 CI 修复结论
+### 2.4 AI 助手图片识别模块最新状态
 
-最近一次与“模型测试连接按钮”相关的 CI 失败，根因不是业务逻辑错误，而是：
+#### 模块 1：OCR 质量增强
+- 本地图片 OCR 已增加轻量预处理：缩放、灰度化、对比度增强
+- OCR 结果已增加启发式质量评分，按 `HIGH / MEDIUM / LOW / NONE` 分级
+- 本地会提取账单关键信号：金额、时间、支付方式、商户
+- 非原生多模态模型下，仅 **中高置信度** 图片结果会继续发送到云端 AI
+- 低置信度图片会在本地直接提示用户重拍，避免把噪声 OCR 发送到云端导致误判
 
-- AI Settings 拆分后出现两个同名 `TestResult`
-- Screen 层与 ViewModel 层的类型引用不一致
-- Kotlin 编译阶段即失败，连带导致 Lint 与 Unit Tests 失败
+#### 当前实现边界
+- 当前仍基于 ML Kit 中文 OCR + 图像标签能力
+- 暂未引入重型 OCR 引擎替换，也未引入 OpenCV
+- 当前置信度为本地启发式质量分，不是 OCR 引擎原生置信度
 
-最终修复方式：
-- 将模型选择弹窗的结果类型独立为 `ModelTestResult`
-- 对齐所有回调签名与 `when` 分支
-- 更新过期单测，使其匹配 Auto 自动优选模型的新行为
-- 本地重新验证：
-  - `./gradlew lintDebug --continue` ✅
+#### 本模块验证结果
+- 新增 `ReceiptTextHeuristicsTest`，覆盖金额/日期/支付方式/商户提取、质量评分、关键行筛选
+- 新增 `AIAssistantImageMessageHandlerTest`，覆盖低置信度拦截、仅高置信度结果进入提示词、配置错误短路
+- 本地验证：
+  - `./gradlew testDebugUnitTest --tests com.example.aiaccounting.data.service.image.ReceiptTextHeuristicsTest --tests com.example.aiaccounting.ui.viewmodel.AIAssistantImageMessageHandlerTest` ✅
   - `./gradlew testDebugUnitTest --continue` ✅
 
 ---

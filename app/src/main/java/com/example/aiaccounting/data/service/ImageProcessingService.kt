@@ -2,6 +2,8 @@ package com.example.aiaccounting.data.service
 
 import android.content.Context
 import android.net.Uri
+import com.example.aiaccounting.data.service.image.OcrPreprocessingUtils
+import com.example.aiaccounting.data.service.image.ReceiptTextHeuristics
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.label.ImageLabeling
 import com.google.mlkit.vision.label.defaults.ImageLabelerOptions
@@ -21,13 +23,35 @@ import javax.inject.Singleton
 @Singleton
 class ImageProcessingService @Inject constructor() {
 
+    enum class OcrConfidence {
+        NONE,
+        LOW,
+        MEDIUM,
+        HIGH
+    }
+
+    data class ReceiptSignals(
+        val amounts: List<String> = emptyList(),
+        val dates: List<String> = emptyList(),
+        val paymentMethods: List<String> = emptyList(),
+        val merchants: List<String> = emptyList()
+    ) {
+        val hasStrongReceiptSignals: Boolean
+            get() = amounts.isNotEmpty() || paymentMethods.isNotEmpty() || merchants.isNotEmpty()
+    }
+
     /**
      * 图片处理结果 - 精简版
      */
     data class ImageAnalysisResult(
-        val text: String,           // OCR提取的文字（精简后）
-        val labels: List<String>,   // 图像标签/描述
-        val hasContent: Boolean     // 是否有识别到内容
+        val rawText: String,
+        val text: String,
+        val keyLines: List<String>,
+        val labels: List<String>,
+        val receiptSignals: ReceiptSignals,
+        val qualityScore: Int,
+        val confidence: OcrConfidence,
+        val hasContent: Boolean
     )
 
     /**
@@ -39,35 +63,38 @@ class ImageProcessingService @Inject constructor() {
                 // 并行执行OCR和标签识别
                 val textDeferred = async { extractTextFromImage(uri, context) }
                 val labelsDeferred = async { extractLabelsFromImage(uri, context) }
-                
-                val text = textDeferred.await()
-                val labels = labelsDeferred.await()
-                
-                // 精简文本内容（只保留前500字符，避免过长）
-                val trimmedText = if (text.length > 500) {
-                    text.substring(0, 500) + "..."
-                } else {
-                    text
-                }
-                
+
+                val rawText = textDeferred.await()
+                val labels = labelsDeferred.await().take(5)
+                val keyLines = ReceiptTextHeuristics.extractKeyLines(rawText)
+                val signals = ReceiptTextHeuristics.extractReceiptSignals(rawText)
+                val compactText = trimTextForPrompt(keyLines, rawText)
+                val qualityScore = ReceiptTextHeuristics.calculateQualityScore(
+                    rawText = rawText,
+                    keyLines = keyLines,
+                    labels = labels,
+                    signals = signals
+                )
+                val confidence = ReceiptTextHeuristics.toConfidence(qualityScore)
+                val hasContent = rawText.isNotBlank() || labels.isNotEmpty()
+
                 ImageAnalysisResult(
-                    text = trimmedText,
-                    labels = labels.take(5), // 最多保留5个标签
-                    hasContent = text.isNotBlank() || labels.isNotEmpty()
+                    rawText = rawText,
+                    text = compactText,
+                    keyLines = keyLines,
+                    labels = labels,
+                    receiptSignals = signals,
+                    qualityScore = qualityScore,
+                    confidence = confidence,
+                    hasContent = hasContent
                 )
             }
         } catch (e: TimeoutCancellationException) {
-            ImageAnalysisResult(
-                text = "",
-                labels = emptyList(),
-                hasContent = false
-            )
+            emptyResult()
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
-            ImageAnalysisResult(
-                text = "",
-                labels = emptyList(),
-                hasContent = false
-            )
+            emptyResult()
         }
     }
 
@@ -75,7 +102,7 @@ class ImageProcessingService @Inject constructor() {
      * 并行分析多张图片
      */
     suspend fun analyzeMultipleImages(
-        uris: List<Uri>, 
+        uris: List<Uri>,
         context: Context,
         timeoutMs: Long = 8000
     ): List<ImageAnalysisResult> = withContext(Dispatchers.IO) {
@@ -88,14 +115,11 @@ class ImageProcessingService @Inject constructor() {
                 deferredResults.awaitAll()
             }
         } catch (e: TimeoutCancellationException) {
-            // 超时返回空结果
-            uris.map { 
-                ImageAnalysisResult("", emptyList(), false)
-            }
+            uris.map { emptyResult() }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
-            uris.map { 
-                ImageAnalysisResult("", emptyList(), false)
-            }
+            uris.map { emptyResult() }
         }
     }
 
@@ -104,13 +128,14 @@ class ImageProcessingService @Inject constructor() {
      */
     private suspend fun extractTextFromImage(uri: Uri, context: Context): String {
         return try {
-            val image = InputImage.fromFilePath(context, uri)
+            val preprocessedBytes = OcrPreprocessingUtils.preprocessImage(context, uri)
+            val image = preprocessedBytes?.let { InputImage.fromByteArray(it, 0, it.size, 0, android.graphics.ImageFormat.JPEG) }
+                ?: InputImage.fromFilePath(context, uri)
             val recognizer = TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build())
-            
+
             val result = suspendCancellableCoroutine { continuation ->
                 recognizer.process(image)
                     .addOnSuccessListener { visionText ->
-                        // 快速提取文字，不过度处理
                         val text = visionText.text.trim()
                         recognizer.close()
                         continuation.resume(text)
@@ -137,11 +162,10 @@ class ImageProcessingService @Inject constructor() {
                     .setConfidenceThreshold(0.6f) // 提高阈值，减少标签数量
                     .build()
             )
-            
+
             val result = suspendCancellableCoroutine<List<String>> { continuation ->
                 labeler.process(image)
                     .addOnSuccessListener { labels ->
-                        // 只取前3个最可能的标签
                         val labelList = labels
                             .sortedByDescending { it.confidence }
                             .take(3)
@@ -170,42 +194,87 @@ class ImageProcessingService @Inject constructor() {
         return buildString {
             appendLine("你是小财娘，活泼可爱的管家婆AI助手！")
             appendLine()
-            
+
             if (userMessage.isNotBlank()) {
                 appendLine("用户说：$userMessage")
                 appendLine()
             }
-            
+
             appendLine("用户发了${results.size}张图片，内容如下：")
             appendLine()
-            
+
             results.forEachIndexed { index, result ->
                 appendLine("【图${index + 1}】")
-                
+                appendLine("识别置信度：${describeConfidence(result.confidence)}（${result.qualityScore}分）")
+
                 if (result.labels.isNotEmpty()) {
                     appendLine("类型：${result.labels.joinToString(", ")}")
                 }
-                
-                if (result.text.isNotBlank()) {
-                    // 进一步精简，只保留关键行
-                    val keyLines = result.text.lines()
-                        .filter { it.length > 2 } // 过滤太短的行
-                        .take(10) // 最多10行
-                        .joinToString(" | ")
-                    
-                    if (keyLines.isNotBlank()) {
-                        appendLine("文字：$keyLines")
-                    }
+
+                if (result.receiptSignals.merchants.isNotEmpty()) {
+                    appendLine("商户：${result.receiptSignals.merchants.joinToString(", ")}")
                 }
-                
+                if (result.receiptSignals.amounts.isNotEmpty()) {
+                    appendLine("金额候选：${result.receiptSignals.amounts.joinToString(", ")}")
+                }
+                if (result.receiptSignals.paymentMethods.isNotEmpty()) {
+                    appendLine("支付方式：${result.receiptSignals.paymentMethods.joinToString(", ")}")
+                }
+                if (result.receiptSignals.dates.isNotEmpty()) {
+                    appendLine("时间候选：${result.receiptSignals.dates.joinToString(", ")}")
+                }
+
+                if (result.keyLines.isNotEmpty()) {
+                    appendLine("关键文字：${result.keyLines.joinToString(" | ")}")
+                } else if (result.text.isNotBlank()) {
+                    appendLine("文字：${result.text}")
+                }
+
                 if (!result.hasContent) {
                     appendLine("（未识别到内容）")
                 }
-                
+
+                if (result.confidence == OcrConfidence.LOW || result.confidence == OcrConfidence.NONE) {
+                    appendLine("注意：该图片识别结果不稳定，请谨慎推断，不要臆造缺失字段。")
+                }
+
                 appendLine()
             }
-            
-            appendLine("请分析以上内容，用活泼可爱的语气回复，如果是账单请提取金额、类型、类别、备注。")
+
+            appendLine("请优先依据高置信度图片内容进行分析；如果字段不完整，请明确说明不确定项。如果是账单，请提取金额、类型、类别、备注。")
         }
+    }
+
+    private fun trimTextForPrompt(keyLines: List<String>, rawText: String): String {
+        val preferredText = keyLines.joinToString("\n").trim()
+        val baseText = if (preferredText.isNotBlank()) preferredText else rawText.trim()
+        if (baseText.isBlank()) return ""
+        return if (baseText.length > 500) {
+            baseText.take(500) + "..."
+        } else {
+            baseText
+        }
+    }
+
+    private fun describeConfidence(confidence: OcrConfidence): String {
+        return when (confidence) {
+            OcrConfidence.HIGH -> "高"
+            OcrConfidence.MEDIUM -> "中"
+            OcrConfidence.LOW -> "低"
+            OcrConfidence.NONE -> "无"
+        }
+    }
+
+    private fun emptyResult(): ImageAnalysisResult {
+        return ImageAnalysisResult(
+            rawText = "",
+            text = "",
+            keyLines = emptyList(),
+            labels = emptyList(),
+            receiptSignals = ReceiptSignals(),
+            qualityScore = 0,
+            confidence = OcrConfidence.NONE,
+            hasContent = false
+        )
     }
 }
