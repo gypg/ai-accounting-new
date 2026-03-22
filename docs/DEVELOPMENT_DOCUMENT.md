@@ -142,6 +142,8 @@ AI记账是一款面向中国大陆个人用户的智能记账 Android 应用。
 ### 5.2 当前注意事项
 - 本地某些 bash 环境运行 Gradle 时可能打印 `uname: command not found`，但当前不影响本地 lint / unit test 结果
 - `Build Release APK` 阶段仍可能出现 Apache POI 相关 R8 warning：`SVGUserAgent.getViewbox()` 在静态分析时被视为 unreachable；当前不影响 release 构建成功与 release artifact 上传
+- 该 warning 已完成模块 1 归因：当前 app 仅使用 [ExcelExporter.kt](../app/src/main/java/com/example/aiaccounting/data/exporter/ExcelExporter.kt) 中的 `XSSFWorkbook` 基础导出能力，但 `org.apache.poi:poi-ooxml:5.2.5` jar 自带了 `org.apache.poi.xslf.draw.SVGUserAgent` 等 PPT/SVG 渲染类，R8 在 release 混淆时会扫描到该未使用路径并对 `getViewbox()` 给出 unreachable warning
+- Release 依赖树当前确认的 POI 相关链路为：`poi` / `poi-ooxml` / `poi-ooxml-lite` / `xmlbeans`；下一模块将优先尝试缩减依赖面，而不是直接扩大 `dontwarn`
 - 旧文档中仍有部分历史路径、旧版本号、v1.0.0/v1.8.1 叙述，需要以后继续收敛
 
 ### 5.3 建议后续手工复核的文档

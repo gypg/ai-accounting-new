@@ -117,5 +117,23 @@ export KEY_PASSWORD="your_key_password"
 ### 6.3 邀请码绑定后的模型值不是固定模型 ID
 这是当前设计：邀请码绑定成功后保存空字符串，表示 **Auto 自动优选模型**，不是缺陷。
 
-### 6.4 模型测试按钮相关改动导致 CI 挂掉
-最近一次问题根因是 AI Settings 拆分后出现两个不同的 `TestResult` 类型。当前已通过重命名 `ModelTestResult` 并重新验证修复。
+### 6.5 Release 构建中的 Apache POI / R8 warning
+当前已确认 warning 的来源不是业务侧 Excel 导出逻辑本身，而是 `org.apache.poi:poi-ooxml:5.2.5` jar 内自带的 `org.apache.poi.xslf.draw.SVGUserAgent` 等 PPT/SVG 渲染类。
+
+已完成的归因结论：
+- App 当前仅在 [ExcelExporter.kt](app/src/main/java/com/example/aiaccounting/data/exporter/ExcelExporter.kt) 中使用 `XSSFWorkbook`、样式、合并单元格等基础 `.xlsx` 写入能力
+- Release 依赖树显示当前 POI 相关主依赖为：
+  - `org.apache.poi:poi:5.2.5`
+  - `org.apache.poi:poi-ooxml:5.2.5`
+  - `org.apache.poi:poi-ooxml-lite:5.2.5`
+  - `org.apache.xmlbeans:xmlbeans:5.2.0`
+- `poi-ooxml-5.2.5.jar` 内实际包含 `org/apache/poi/xslf/draw/SVGUserAgent.class`
+- `assembleRelease` 时 R8 会对该类中的 `getViewbox()` 做类型检查，并输出：
+  - `The method java.awt.geom.Rectangle2D org.apache.poi.xslf.draw.SVGUserAgent.getViewbox() does not type check and will be assumed to be unreachable.`
+
+这说明当前 warning 更接近 **POI 附带的未使用 PPT/SVG 渲染路径被 R8 静态分析到**，而不是当前 Excel 导出功能直接调用了有问题的 API。
+
+后续处理顺序：
+1. 优先尝试缩减 POI 依赖面
+2. 若 warning 仍存在，再做更小范围的 R8 / ProGuard 规则处理
+3. 仅在前两步无效时，才考虑替换导出实现
