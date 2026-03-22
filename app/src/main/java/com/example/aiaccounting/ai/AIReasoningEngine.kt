@@ -463,7 +463,7 @@ class AIReasoningEngine @Inject constructor(
         if (contextRef != null) {
             lastExecutedTransaction?.let { last ->
                 val merged = applyContextOverrides(last, message, contextRef)
-            val reluctantResponse = generateReluctantResponse(currentButlerId, "记账")
+                val reluctantResponse = generateReluctantResponse(currentButlerId, "记账")
                 if (reluctantResponse != null) {
                     actions.add(AIAction.GenerateResponse(reluctantResponse))
                 }

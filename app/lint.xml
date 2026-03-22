@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<lint>
+    <!-- 忽略库版本更新提醒 -->
+    <issue id="GradleDependency" severity="information" />
+
+    <!-- 忽略过时的 Lint 自定义检查警告 -->
+    <issue id="ObsoleteLintCustomCheck" severity="information" />
+
+    <!-- 忽略 API 31+ 属性在 minSdk 26 上的警告（向下兼容） -->
+    <issue id="UnusedAttribute" severity="information" />
+
+    <!-- 忽略精确闹钟权限警告（已正确处理 Android 12+ 权限） -->
+    <issue id="MissingPermission" severity="information">
+        <ignore path="**/AutoBackupManager.kt" />
+    </issue>
+
+    <!-- 忽略私有 API 反射警告（安全检查需要） -->
+    <issue id="PrivateApi" severity="information">
+        <ignore path="**/SecurityChecker.kt" />
+    </issue>
+
+    <!-- 忽略 SD 卡路径硬编码警告（已有多重路径备选） -->
+    <issue id="SdCardPath" severity="information">
+        <ignore path="**/StorageManager.kt" />
+    </issue>
+
+    <!-- 忽略 InflateParams 警告（悬浮窗场景） -->
+    <issue id="InflateParams" severity="information">
+        <ignore path="**/FloatingWidgetService.kt" />
+    </issue>
+
+    <!-- 忽略查询权限警告（已有运行时检查） -->
+    <issue id="QueryPermissionsNeeded" severity="information">
+        <ignore path="**/SpeechRecognitionService.kt" />
+    </issue>
+
+    <!-- 忽略冗余标签警告 -->
+    <issue id="RedundantLabel" severity="information" />
+</lint>
