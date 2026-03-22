@@ -123,9 +123,9 @@ export KEY_PASSWORD="your_key_password"
 已完成的归因结论：
 - App 当前仅在 [ExcelExporter.kt](app/src/main/java/com/example/aiaccounting/data/exporter/ExcelExporter.kt) 中使用 `XSSFWorkbook`、样式、合并单元格等基础 `.xlsx` 写入能力
 - Release 依赖树显示当前 POI 相关主依赖为：
-  - `org.apache.poi:poi:5.2.5`
   - `org.apache.poi:poi-ooxml:5.2.5`
   - `org.apache.poi:poi-ooxml-lite:5.2.5`
+  - `org.apache.poi:poi:5.2.5`（由 `poi-ooxml` 传递引入）
   - `org.apache.xmlbeans:xmlbeans:5.2.0`
 - `poi-ooxml-5.2.5.jar` 内实际包含 `org/apache/poi/xslf/draw/SVGUserAgent.class`
 - `assembleRelease` 时 R8 会对该类中的 `getViewbox()` 做类型检查，并输出：
@@ -137,6 +137,11 @@ export KEY_PASSWORD="your_key_password"
 - 将 `-keep class org.apache.poi.** { *; }` 缩小为仅保留当前 Excel 导出主路径需要的 `org.apache.poi.ss.**`、`org.apache.poi.xssf.**`、`org.apache.poi.openxml4j.**`
 - 新增 `-dontwarn org.openxmlformats.schemas.**`，避免 R8 因 XML schema 生成类缺失而中断 release 构建
 - 重新执行 `assembleRelease` 后，release 构建保持成功，且当前 `ExcelExporter` 使用范围下未出现新增构建阻塞
+
+模块 6A 当前已完成的收敛：
+- 删除 direct dependency `implementation("org.apache.poi:poi:5.2.5")`
+- 保留 `implementation("org.apache.poi:poi-ooxml:5.2.5")`
+- 通过 `dependencyInsight` 确认 `poi` 仍由 `poi-ooxml` 传递引入，release 构建不受影响
 
 当前状态说明：
 - warning **尚未被彻底消除**
