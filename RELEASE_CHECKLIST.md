@@ -66,6 +66,7 @@
 
 - 历史文档中存在旧版本号、旧路径、旧发布示例，现已开始收敛，但发布前仍建议人工复核所有面向外部的说明
 - 本地 bash 环境可能出现 `uname: command not found` 日志，但当前不影响 lint / 单测通过
+- `Build Release APK` 仍可能出现 Apache POI 相关的 R8 warning：`SVGUserAgent.getViewbox()` 在 Android / R8 静态分析下被视为 unreachable；当前不阻塞构建与 artifact 上传，如后续出现 Excel 导出异常再单独处理
 
 ## 四、回滚思路
 

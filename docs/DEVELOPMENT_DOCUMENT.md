@@ -141,6 +141,7 @@ AI记账是一款面向中国大陆个人用户的智能记账 Android 应用。
 
 ### 5.2 当前注意事项
 - 本地某些 bash 环境运行 Gradle 时可能打印 `uname: command not found`，但当前不影响本地 lint / unit test 结果
+- `Build Release APK` 阶段仍可能出现 Apache POI 相关 R8 warning：`SVGUserAgent.getViewbox()` 在静态分析时被视为 unreachable；当前不影响 release 构建成功与 release artifact 上传
 - 旧文档中仍有部分历史路径、旧版本号、v1.0.0/v1.8.1 叙述，需要以后继续收敛
 
 ### 5.3 建议后续手工复核的文档
