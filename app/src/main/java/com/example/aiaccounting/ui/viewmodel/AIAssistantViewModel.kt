@@ -384,7 +384,7 @@ class AIAssistantViewModel @Inject constructor(
             } else {
                 // 如果远程AI只返回纯文本，尝试使用本地AI推理引擎处理记账请求
                 val lowerMessage = message.lowercase()
-                val isTransactionRequest = containsAny(lowerMessage, listOf("记", "花了", "收入", "支出", "消费", "买", "卖", "转账", "付", "赚", "工资", "奖金", "红包", "退款", "报销"))
+                val isTransactionRequest = commandHandler.containsAny(lowerMessage, listOf("记", "花了", "收入", "支出", "消费", "买", "卖", "转账", "付", "赚", "工资", "奖金", "红包", "退款", "报销"))
                 
                 if (isTransactionRequest) {
                     if (BuildConfig.DEBUG) {
@@ -437,66 +437,6 @@ class AIAssistantViewModel @Inject constructor(
             isNetworkAvailable = _uiState.value.isNetworkAvailable,
             isAIConfigured = currentAIConfig.isEnabled && currentAIConfig.apiKey.isNotBlank()
         )
-    }
-
-    // 委托给 commandHandler 的方法
-    private suspend fun handleTransactionCommand(message: String, lowerMessage: String): String {
-        return commandHandler.handleTransactionCommand(message, lowerMessage) {
-            ensureBasicCategoriesExist()
-        }
-    }
-
-    private suspend fun handleLocalQueryCommand(lowerMessage: String): String {
-        return commandHandler.handleLocalQueryCommand(lowerMessage)
-    }
-
-    private suspend fun handleAccountCommand(message: String, lowerMessage: String): String {
-        return commandHandler.handleAccountCommand(message, lowerMessage)
-    }
-
-    private suspend fun handleCategoryCommand(message: String, lowerMessage: String): String {
-        return commandHandler.handleCategoryCommand(message, lowerMessage)
-    }
-
-    private fun handleBudgetCommand(lowerMessage: String): String {
-        return commandHandler.handleBudgetCommand(lowerMessage)
-    }
-
-    private suspend fun handleExportCommand(): String {
-        return commandHandler.handleExportCommand()
-    }
-
-    private fun handleGeneralConversation(message: String): String {
-        return commandHandler.handleGeneralConversation(
-            message = message,
-            aiConfig = currentAIConfig,
-            isNetworkAvailable = _uiState.value.isNetworkAvailable
-        )
-    }
-
-    // 辅助方法委托给 commandHandler
-    private fun containsAny(text: String, keywords: List<String>): Boolean {
-        return commandHandler.containsAny(text, keywords)
-    }
-
-    private fun extractAmount(text: String): Double? {
-        return commandHandler.extractAmount(text)
-    }
-
-    private fun extractNumber(text: String): Int? {
-        return commandHandler.extractNumber(text)
-    }
-
-    private fun extractAccountName(text: String): String? {
-        return commandHandler.extractAccountName(text)
-    }
-
-    private fun extractAccountType(text: String): com.example.aiaccounting.data.local.entity.AccountType {
-        return commandHandler.extractAccountType(text)
-    }
-
-    private fun extractCategoryName(text: String): String? {
-        return commandHandler.extractCategoryName(text)
     }
 
     /**
