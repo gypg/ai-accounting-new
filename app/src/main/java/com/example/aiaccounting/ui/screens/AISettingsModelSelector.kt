@@ -129,7 +129,7 @@ internal fun InviteModelSelectorCard(
                 val modeText = if (useBuiltinConfig) {
                     "当前偏好：Auto（默认模型已开启，当前对话将优先使用本地AI）"
                 } else {
-                    "当前偏好：Auto（邀请码云端模型优先，推荐 openai/gpt-oss-120b；若不可用将自动切换）"
+                    "当前偏好：Auto（自动选择第一个可用模型，无需手动指定）"
                 }
                 Text(
                     text = modeText,

@@ -220,7 +220,7 @@ internal fun APIConfigCard(
 
             if (isAuto) {
                 Text(
-                    text = "当前偏好：Auto（推荐 openai/gpt-oss-120b；若不可用将自动切换）",
+                    text = "当前偏好：Auto（自动选择第一个可用模型，无需手动指定）",
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

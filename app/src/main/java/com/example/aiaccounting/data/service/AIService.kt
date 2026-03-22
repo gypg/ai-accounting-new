@@ -576,10 +576,10 @@ class AIService @Inject constructor(
             remoteModelIds
         }
 
-        val recommended = "openai/gpt-oss-120b"
-
-        if (!requireImageSupport && recommended !in exclude && recommended in candidates) return recommended
-
+        // 移除硬编码的 gptoss120b，改为自动选择第一个可用模型
+        // 优先选择规则：
+        // 1. 排除已失败的模型
+        // 2. 返回第一个可用的模型
         return candidates.firstOrNull { it !in exclude }
     }
 

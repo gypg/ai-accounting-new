@@ -490,7 +490,7 @@ class AISettingsViewModel @Inject constructor(
                             inviteCode = cleanedInvite,
                             token = result.token,
                             apiBaseUrl = result.apiBaseUrl,
-                            model = "openai/gpt-oss-120b",
+                            model = "", // 空字符串表示启用自动优选模型
                             rpm = result.rpm
                         )
 
@@ -498,7 +498,7 @@ class AISettingsViewModel @Inject constructor(
                             provider = AIProvider.CUSTOM,
                             apiKey = result.token,
                             apiUrl = result.apiBaseUrl,
-                            model = "openai/gpt-oss-120b",
+                            model = "", // 空字符串表示启用自动优选模型
                             isEnabled = true
                         )
 
