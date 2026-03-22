@@ -51,10 +51,12 @@ object NetworkModule {
     fun provideAiTestOkHttpClient(): OkHttpClient {
         return OkHttpClient.Builder()
             .dns(ipv4FirstDns)
-            .connectTimeout(10, TimeUnit.SECONDS)
-            .readTimeout(15, TimeUnit.SECONDS)
-            .writeTimeout(10, TimeUnit.SECONDS)
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .writeTimeout(15, TimeUnit.SECONDS)
+            .pingInterval(10, TimeUnit.SECONDS)
             .retryOnConnectionFailure(true)
+            .connectionPool(ConnectionPool(3, 3, TimeUnit.MINUTES))
             .build()
     }
 
@@ -64,10 +66,12 @@ object NetworkModule {
     fun provideInviteGatewayOkHttpClient(): OkHttpClient {
         return OkHttpClient.Builder()
             .dns(ipv4FirstDns)
-            .connectTimeout(25, TimeUnit.SECONDS)
-            .readTimeout(25, TimeUnit.SECONDS)
-            .writeTimeout(15, TimeUnit.SECONDS)
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .writeTimeout(20, TimeUnit.SECONDS)
+            .pingInterval(15, TimeUnit.SECONDS)
             .retryOnConnectionFailure(true)
+            .connectionPool(ConnectionPool(3, 3, TimeUnit.MINUTES))
             .build()
     }
 
