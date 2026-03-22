@@ -250,7 +250,10 @@ fun AISettingsScreen(
                         },
                         onFetchModels = { viewModel.fetchRemoteModels() },
                         onModelSelected = { viewModel.updateInviteModel(it) },
-                        useBuiltinConfig = uiState.useBuiltinConfig
+                        useBuiltinConfig = uiState.useBuiltinConfig,
+                        onTestConnection = { modelId, callback ->
+                            viewModel.testModelConnection(modelId, callback)
+                        }
                     )
                 }
 
@@ -279,7 +282,10 @@ fun AISettingsScreen(
                         onApiKeyChange = { viewModel.updateApiKey(it) },
                         onApiUrlChange = { viewModel.updateApiUrl(it) },
                         onModelChange = { viewModel.updateModel(it) },
-                        onFetchModels = { viewModel.fetchRemoteModels() }
+                        onFetchModels = { viewModel.fetchRemoteModels() },
+                        onTestModelConnection = { modelId, callback ->
+                            viewModel.testModelConnection(modelId, callback)
+                        }
                     )
 
                     Spacer(modifier = Modifier.height(24.dp))

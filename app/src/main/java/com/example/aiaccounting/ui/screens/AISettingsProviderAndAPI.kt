@@ -127,7 +127,8 @@ internal fun APIConfigCard(
     onApiKeyChange: (String) -> Unit,
     onApiUrlChange: (String) -> Unit,
     onModelChange: (String) -> Unit,
-    onFetchModels: () -> Unit
+    onFetchModels: () -> Unit,
+    onTestModelConnection: ((String, (TestResult) -> Unit) -> Unit)? = null
 ) {
     // 使用远程模型列表（如果有）或默认模型列表
     val modelsToShow = if (remoteModels.isNotEmpty()) {
@@ -278,7 +279,8 @@ internal fun APIConfigCard(
                     CategorizedModelSelector(
                         models = modelsToShow,
                         selectedModelId = fixedSelectedModelId,
-                        onModelSelected = onModelChange
+                        onModelSelected = onModelChange,
+                        onTestConnection = onTestModelConnection
                     )
                 }
             }

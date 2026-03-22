@@ -391,6 +391,30 @@ class AISettingsViewModel @Inject constructor(
         }
     }
 
+    /**
+     * 测试指定模型的连接
+     */
+    fun testModelConnection(modelId: String, onResult: (com.example.aiaccounting.ui.screens.TestResult) -> Unit) {
+        viewModelScope.launch {
+            // 先检查网络
+            if (!networkUtils.isNetworkAvailable()) {
+                onResult(com.example.aiaccounting.ui.screens.TestResult.Error("网络不可用，请检查网络连接"))
+                return@launch
+            }
+
+            val config = _uiState.value.config.copy(model = modelId)
+            val startTime = System.currentTimeMillis()
+            val errorMessage = aiService.testConnection(config)
+            val latency = System.currentTimeMillis() - startTime
+
+            if (errorMessage == null) {
+                onResult(com.example.aiaccounting.ui.screens.TestResult.Success(latency))
+            } else {
+                onResult(com.example.aiaccounting.ui.screens.TestResult.Error(errorMessage))
+            }
+        }
+    }
+
     fun clearTestResult() {
         _uiState.update { it.copy(testResult = null) }
     }

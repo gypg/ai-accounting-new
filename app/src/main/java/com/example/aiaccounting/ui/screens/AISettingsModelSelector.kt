@@ -43,7 +43,8 @@ internal fun InviteModelSelectorCard(
     onToggleAuto: (Boolean) -> Unit,
     onFetchModels: () -> Unit,
     onModelSelected: (String) -> Unit,
-    useBuiltinConfig: Boolean
+    useBuiltinConfig: Boolean,
+    onTestConnection: ((String, (TestResult) -> Unit) -> Unit)? = null
 ) {
     val modelsToShow = remember(remoteModels) {
         remoteModels.map {
@@ -122,7 +123,8 @@ internal fun InviteModelSelectorCard(
                 CategorizedModelSelector(
                     models = modelsToShow,
                     selectedModelId = selectedModelId,
-                    onModelSelected = onModelSelected
+                    onModelSelected = onModelSelected,
+                    onTestConnection = onTestConnection
                 )
             } else {
                 Spacer(modifier = Modifier.height(12.dp))
@@ -146,11 +148,14 @@ internal fun InviteModelSelectorCard(
 internal fun CategorizedModelSelector(
     models: List<AIModel>,
     selectedModelId: String,
-    onModelSelected: (String) -> Unit
+    onModelSelected: (String) -> Unit,
+    onTestConnection: ((String, (TestResult) -> Unit) -> Unit)? = null
 ) {
     var showDialog by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
     var selectedCategory by remember { mutableStateOf("全部") }
+    var isTesting by remember { mutableStateOf(false) }
+    var testResult by remember { mutableStateOf<TestResult?>(null) }
 
     val selectedModel = models.find { it.id == selectedModelId }
 
@@ -334,7 +339,70 @@ internal fun CategorizedModelSelector(
                     }
                 }
             },
-            confirmButton = {},
+            confirmButton = {
+                // 测试连接按钮
+                if (onTestConnection != null && selectedModelId.isNotEmpty()) {
+                    Row(
+                        modifier = Modifier.padding(end = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (testResult != null) {
+                            when (val result = testResult) {
+                                is TestResult.Success -> {
+                                    Icon(
+                                        imageVector = Icons.Default.CheckCircle,
+                                        contentDescription = "测试成功",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Text(
+                                        text = "可用 (${result.latency}ms)",
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                                is TestResult.Error -> {
+                                    Icon(
+                                        imageVector = Icons.Default.Error,
+                                        contentDescription = "测试失败",
+                                        tint = MaterialTheme.colorScheme.error,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Text(
+                                        text = result.message,
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.error,
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                        }
+
+                        TextButton(
+                            onClick = {
+                                isTesting = true
+                                testResult = null
+                                onTestConnection(selectedModelId) { result ->
+                                    isTesting = false
+                                    testResult = result
+                                }
+                            },
+                            enabled = !isTesting
+                        ) {
+                            if (isTesting) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                            }
+                            Text(if (isTesting) "测试中..." else "测试连接")
+                        }
+                    }
+                }
+            },
             dismissButton = {
                 TextButton(onClick = {
                     showDialog = false
@@ -399,4 +467,12 @@ internal fun ModelListItem(
             )
         }
     }
+}
+
+/**
+ * 测试连接结果
+ */
+sealed class TestResult {
+    data class Success(val latency: Long) : TestResult()
+    data class Error(val message: String) : TestResult()
 }
