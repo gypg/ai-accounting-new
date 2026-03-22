@@ -67,18 +67,26 @@ AI记账是一款面向中国大陆个人用户的智能记账 Android 应用。
 
 ### 2.3 最近一轮工程收敛（2026-03-22）
 
-**Session 29 P0 发布准备：**
+**Session 29 P0 发布准备（已完成）：**
 - 创建完整优化流程规划文档 `OPTIMIZATION_ROADMAP.md`
 - **P0 模块1完成**：确认 applicationId 已是正式包名 `com.moneytalk.ai`
   - namespace `com.example.aiaccounting` 与代码包名一致（决定 R 类包名）
   - applicationId `com.moneytalk.ai` 是应用唯一标识（已是正式包名）
   - 编译验证通过
+  - Git 提交: `15b74c3`
 - **P0 模块2完成**：ProGuard 验证通过
   - 解决 R8 内存不足问题（JVM 内存 2GB → 4GB）
   - 验证 ProGuard 规则完整性
   - Release APK 构建成功（9分18秒）
   - APK 位置：`app/build/outputs/apk/release/app-release.apk`
-- 准备进入 P0 模块3: 版本发布准备
+  - Git 提交并推送: `70be448`
+- **P0 模块3完成**：v1.8.3 版本发布准备
+  - 更新版本号（versionCode: 19, versionName: "1.8.3"）
+  - 更新 VERSION.md 添加 v1.8.3 记录
+  - 创建 Git 标签 `v1.8.3` 并推送到远程
+  - Git 提交: `4d35836`
+
+**发布状态：P0 全部完成，可进入发布流程或继续 P1 标准化提升**
 
 **Session 28 多模型协作与网关迁移审计：**
 - 评价原 Zhipu 5 遗留的 IPv6 超时环境错误，修复重构网断联异常
