@@ -24,6 +24,9 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
+import java.net.ConnectException
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -161,6 +164,10 @@ class AIService @Inject constructor(
     }
 
     private fun fetchOpenAIModels(config: AIConfig): List<RemoteModel> {
+        return fetchOpenAIModelsWithClient(config, client)
+    }
+
+    private fun fetchOpenAIModelsWithClient(config: AIConfig, httpClient: OkHttpClient): List<RemoteModel> {
         val url = OpenAiUrlUtils.models(config.apiUrl)
 
         val request = Request.Builder()
@@ -170,7 +177,7 @@ class AIService @Inject constructor(
             .get()
             .build()
 
-        client.newCall(request).execute().use { response ->
+        httpClient.newCall(request).execute().use { response ->
             if (!response.isSuccessful) {
                 throw Exception("获取模型列表失败: ${response.code}")
             }
@@ -178,12 +185,11 @@ class AIService @Inject constructor(
             val responseBody = response.body?.string() ?: throw Exception("空响应")
             val json = JSONObject(responseBody)
             val data = json.getJSONArray("data")
-            
+
             val models = mutableListOf<RemoteModel>()
             for (i in 0 until data.length()) {
                 val modelObj = data.getJSONObject(i)
                 val id = modelObj.optString("id", "")
-                // 获取所有非空ID的模型，不过滤（OpenRouter有400+模型）
                 if (id.isNotBlank()) {
                     models.add(RemoteModel(
                         id = id,
@@ -234,7 +240,6 @@ class AIService @Inject constructor(
         }
 
         try {
-            // 发送一个简单的测试请求
             val testMessages = listOf(
                 ChatMessage(MessageRole.USER, "Hi")
             )
@@ -243,10 +248,20 @@ class AIService @Inject constructor(
                 AIProvider.QWEN, AIProvider.DEEPSEEK, AIProvider.ZHIPU, AIProvider.BAIDU, AIProvider.CUSTOM -> testOpenAIConnection(config, testMessages)
             }
 
-            // 如果成功执行没有抛出异常，则连接成功
             null
+        } catch (e: OpenAIChatFailure.ModelUnavailable) {
+            if (config.model.isBlank()) {
+                "自动优选暂时不可用，请稍后重试"
+            } else {
+                "当前模型不可用，请切换模型或改用自动优选"
+            }
+        } catch (e: OpenAIChatFailure.Timeout) {
+            if (config.model.isBlank()) {
+                "自动优选连接超时，请稍后重试或手动选择模型"
+            } else {
+                "连接超时，请检查网络或稍后重试"
+            }
         } catch (e: Exception) {
-            // 返回具体的错误信息
             when {
                 e.message?.contains("401") == true -> "API密钥无效或已过期"
                 e.message?.contains("403") == true -> "没有权限访问该API"
@@ -263,9 +278,40 @@ class AIService @Inject constructor(
     }
 
     private fun testOpenAIConnection(config: AIConfig, messages: List<ChatMessage>) {
+        val primaryModel = config.model.trim()
+
+        if (primaryModel.isNotBlank()) {
+            testOpenAIConnectionOnce(config.copy(model = primaryModel), messages)
+            return
+        }
+
+        val candidateModels = try {
+            fetchRemoteModelIdsForTest(config)
+        } catch (e: Exception) {
+            throw OpenAIChatFailure.Other("无法获取可用模型列表，请稍后重试")
+        }
+
+        val firstModel = pickPreferredModel(candidateModels, exclude = emptySet())
+            ?: throw OpenAIChatFailure.Other("无法获取可用模型列表，请稍后重试")
+
+        try {
+            testOpenAIConnectionOnce(config.copy(model = firstModel), messages)
+            return
+        } catch (e: OpenAIChatFailure.ModelUnavailable) {
+            // try next candidate
+        } catch (e: OpenAIChatFailure.Timeout) {
+            // try next candidate
+        }
+
+        val secondModel = pickPreferredModel(candidateModels, exclude = setOf(firstModel))
+            ?: throw OpenAIChatFailure.ModelUnavailable("model_unavailable: no alternative model")
+
+        testOpenAIConnectionOnce(config.copy(model = secondModel), messages)
+    }
+
+    private fun testOpenAIConnectionOnce(config: AIConfig, messages: List<ChatMessage>) {
         val url = OpenAiUrlUtils.chatCompletions(config.apiUrl)
 
-        // Use minimal payload to reduce latency/cost.
         val messagesArray = JSONArray()
         val first = messages.firstOrNull { it.role == MessageRole.USER }?.content?.ifBlank { "Hi" } ?: "Hi"
         messagesArray.put(
@@ -275,17 +321,8 @@ class AIService @Inject constructor(
             }
         )
 
-        val primaryModel = config.model.trim()
-        val modelToUse = if (primaryModel.isNotBlank()) {
-            primaryModel
-        } else {
-            val ids = fetchRemoteModelIds(config)
-            pickPreferredModel(ids, exclude = emptySet())
-                ?: throw Exception("无法获取可用模型列表，请稍后重试")
-        }
-
         val requestBody = JSONObject().apply {
-            put("model", modelToUse)
+            put("model", config.model)
             put("messages", messagesArray)
             put("max_tokens", 1)
             put("temperature", 0)
@@ -299,17 +336,34 @@ class AIService @Inject constructor(
             .post(requestBody.toString().toRequestBody(jsonMediaType))
             .build()
 
-        testClient.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) {
-                val errorBody = response.body?.string().orEmpty()
-                throw Exception("API请求失败(${response.code}): $errorBody")
-            }
+        try {
+            testClient.newCall(request).execute().use { response ->
+                val rawBody = response.body?.string()
 
-            val responseBody = response.body?.string() ?: throw Exception("空响应")
-            val json = JSONObject(responseBody)
-            if (!json.has("choices")) {
-                throw Exception("无效的响应格式")
+                if (!response.isSuccessful) {
+                    if (isModelUnavailable(response.code, rawBody)) {
+                        throw OpenAIChatFailure.ModelUnavailable("model_unavailable: http=${response.code} body=${rawBody.orEmpty()}")
+                    }
+                    throw OpenAIChatFailure.Other("API请求失败(${response.code}): ${rawBody.orEmpty()}")
+                }
+
+                if (rawBody.isNullOrEmpty()) {
+                    throw OpenAIChatFailure.Other("空响应")
+                }
+
+                val json = JSONObject(rawBody)
+                if (!json.has("choices")) {
+                    throw OpenAIChatFailure.Other("无效的响应格式")
+                }
             }
+        } catch (e: OpenAIChatFailure.ModelUnavailable) {
+            throw e
+        } catch (e: SocketTimeoutException) {
+            throw OpenAIChatFailure.Timeout("timeout")
+        } catch (e: ConnectException) {
+            throw OpenAIChatFailure.Timeout("connect_timeout")
+        } catch (e: UnknownHostException) {
+            throw OpenAIChatFailure.Other("UnknownHostException")
         }
     }
 
@@ -475,6 +529,7 @@ class AIService @Inject constructor(
 
     private sealed class OpenAIChatFailure(message: String) : Exception(message) {
         data class ModelUnavailable(val details: String) : OpenAIChatFailure(details)
+        data class Timeout(val details: String) : OpenAIChatFailure(details)
         data class Other(val details: String) : OpenAIChatFailure(details)
     }
 
@@ -562,7 +617,11 @@ class AIService @Inject constructor(
     }
 
     private fun fetchRemoteModelIds(config: AIConfig): List<String> {
-        return fetchOpenAIModels(config).map { it.id }.filter { it.isNotBlank() }
+        return fetchOpenAIModelsWithClient(config, client).map { it.id }.filter { it.isNotBlank() }
+    }
+
+    private fun fetchRemoteModelIdsForTest(config: AIConfig): List<String> {
+        return fetchOpenAIModelsWithClient(config, testClient).map { it.id }.filter { it.isNotBlank() }
     }
 
     private fun pickPreferredModel(

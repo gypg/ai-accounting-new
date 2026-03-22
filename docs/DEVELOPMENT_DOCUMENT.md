@@ -56,6 +56,24 @@ AI记账是一款面向中国大陆个人用户的智能记账 Android 应用。
   - 页面级连接测试结果 `TestResult`
   - 模型选择弹窗测试结果 `ModelTestResult`
 
+### 2.3 AUTO 模型测试连接与回退最新状态
+
+#### 模块 2：AUTO 模型超时与回退重构
+- `testConnection` 现已支持 AUTO 模式下的有界回退
+- 当 `model = ""` 时，测试连接会先用测试客户端获取模型列表，再依次尝试候选模型
+- 当前实现为最多 2 次测试请求：首个候选失败后，仅再尝试 1 个备用模型，避免长时间无反馈
+- FIXED 模式下不再偷偷切换模型；如果固定模型不可用，会直接返回明确引导信息
+- AUTO 模式下如果优选模型超时或不可用，会返回更具体的提示，建议稍后重试或手动选模型
+
+#### 本模块验证结果
+- 扩展 `AIServiceModelFallbackTest`：覆盖聊天 fallback、AUTO 测试连接 fallback、FIXED 模型不可用提示
+- 新增 `AISettingsConnectionTest`：覆盖设置页测试连接在 AUTO 失败时会正确落到错误态，不会一直停留在 testing
+- 本地验证：
+  - `./gradlew testDebugUnitTest --tests com.example.aiaccounting.data.service.AIServiceModelFallbackTest --tests com.example.aiaccounting.ui.viewmodel.AISettingsConnectionTest` ✅
+  - `./gradlew testDebugUnitTest --continue` ✅
+
+---
+
 ### 2.4 AI 助手图片识别模块最新状态
 
 #### 模块 1：OCR 质量增强
