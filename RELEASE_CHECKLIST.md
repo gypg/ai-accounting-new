@@ -26,6 +26,7 @@
 
 ### 发布资产
 - [ ] 最终 APK 手工安装验证
+- [ ] GitHub Actions artifacts 中同时存在 debug / release APK
 - [ ] 商店素材最终复核
 - [ ] 发布说明最终整理
 
@@ -51,6 +52,10 @@
 2. `Unit Tests`
 3. `Build APK`
 4. `release`（仅 tag `v*` 触发）
+
+额外确认：
+- `Upload Release APK` 不再出现 `No files were found with the provided path`
+- artifacts 中可下载 release APK
 
 ### 4. Tag 与 Release
 - 创建 tag：`v1.8.3`

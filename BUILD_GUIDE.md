@@ -37,7 +37,8 @@
 ```
 
 输出位置：
-- `app/build/outputs/apk/release/app-release-unsigned.apk`
+- `app/build/outputs/apk/release/app-release.apk`
+- 若签名环境不同，也可能出现 `app/build/outputs/apk/release/app-release-unsigned.apk`
 
 ## 3. Release 签名配置
 
@@ -80,6 +81,8 @@ export KEY_PASSWORD="your_key_password"
 构建产物会被重命名并上传：
 - `AI记账_v<version>_debug_<date>.apk`
 - `AI记账_v<version>_release_<date>.apk`
+
+当前 workflow 会优先探测 `app-release.apk`，并兼容 `app-release-unsigned.apk`，避免因为 release 输出文件名差异而导致 artifact 上传 warning。
 
 ## 5. 发布步骤
 

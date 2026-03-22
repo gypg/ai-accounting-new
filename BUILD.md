@@ -27,7 +27,7 @@
 
 常见输出位置：
 - Debug：`app/build/outputs/apk/debug/app-debug.apk`
-- Release：`app/build/outputs/apk/release/app-release-unsigned.apk`
+- Release：`app/build/outputs/apk/release/app-release.apk`（若签名或环境不同，也可能出现 `app-release-unsigned.apk`，CI 已兼容两种产物）
 
 ### 2. 使用命令行
 
@@ -62,6 +62,8 @@
 - `./gradlew assembleRelease`
 
 构建产物可在 Actions 页面 artifacts 中下载。
+
+当前 workflow 会优先归档 `app-release.apk`，并兼容 `app-release-unsigned.apk`，因此不再依赖单一固定的 release 文件名。
 
 ## Release 签名
 

@@ -101,6 +101,7 @@ AI记账是一款面向中国大陆个人用户的智能记账 Android 应用。
 - `lintDebug` 通过
 - `testDebugUnitTest` 通过
 - `assembleRelease` 可构建
+- GitHub Actions artifacts 中同时存在 debug / release APK
 - AI 设置页：
   - 模型列表获取正常
   - 模型测试连接正常
