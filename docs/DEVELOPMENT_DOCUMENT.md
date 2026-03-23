@@ -41,7 +41,32 @@ AI记账是一款面向中国大陆个人用户的智能记账 Android 应用。
    - 当前采取“先发布 v1.8.3，再基于真实反馈优化”的策略
    - P0 发布准备已完成，P1/P2 优化后置到反馈阶段决策
 
-### 2.2 AI 设置与模型配置最新状态
+### 2.2 AI 助手文本消息主链路最新状态
+
+#### 模块 3：指令理解与执行链路重构（当前阶段）
+- `AIAssistantViewModel` 已先抽出 `AIAssistantRemoteResponseInterpreter`
+- 远程 AI 返回现在统一分三类处理：action JSON、本地记账 fallback、普通文本回复
+- 已避免把“记住提醒”类普通对话误判成记账，但仍保留 `记账 / 记个账 / 记一笔` 等常见记账短语识别
+- `processWithAIReasoning()` 已改为委派到 `AIAssistantMessageExecutionCoordinator`
+- 当前 `ViewModel` 继续保留 UI state、仓库存储、session 入口，消息理解与执行编排开始独立化
+
+#### 本模块新增测试
+- `AIAssistantRemoteResponseInterpreterTest`
+  - 覆盖 action JSON 检测
+  - 覆盖 typed action 检测
+  - 覆盖普通文本回复 / 本地记账 fallback 分流
+  - 覆盖 fallback 成功/失败时的回复合并
+  - 覆盖“记住”类误判回归
+- `AIAssistantMessageOrchestratorTest`
+  - 覆盖 pending modification 优先级
+  - 覆盖远程可用/不可用时的路由差异
+  - 覆盖修改交易意图进入 modification flow
+
+#### 当前实现边界
+- 本阶段尚未把 pending modification 生命周期完全抽离出 `AIAssistantViewModel`
+- `processWithRemoteAI()` 仍保留 prompt 构建、stream 调用、usage 记录与超时控制
+- 下一步优先继续给 `AIAssistantMessageExecutionCoordinator` 补更细粒度测试，再考虑进一步收口修改确认状态
+
 
 #### 已实现能力
 - 模型选择界面已支持 **测试连接按钮**

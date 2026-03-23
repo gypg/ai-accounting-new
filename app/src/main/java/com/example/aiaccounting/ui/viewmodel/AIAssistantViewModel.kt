@@ -67,12 +67,17 @@ class AIAssistantViewModel @Inject constructor(
     )
     private val sessionCoordinator = AIAssistantSessionCoordinator(chatSessionRepository)
     private val messageOrchestrator = AIAssistantMessageOrchestrator()
+    private val messageExecutionCoordinator = AIAssistantMessageExecutionCoordinator(
+        aiReasoningEngine = aiReasoningEngine,
+        messageOrchestrator = messageOrchestrator
+    )
     private val modificationCoordinator = AIAssistantModificationCoordinator(transactionModificationHandler)
     private val imageMessageHandler = AIAssistantImageMessageHandler(
         aiService = aiService,
         imageProcessingService = imageProcessingService,
         aiUsageRepository = aiUsageRepository
     )
+    private val remoteResponseInterpreter = AIAssistantRemoteResponseInterpreter()
     private val promptBuilder = AIAssistantPromptBuilder()
     private val commandHandler = AIAssistantCommandHandler(
         accountRepository = accountRepository,
@@ -226,7 +231,7 @@ class AIAssistantViewModel @Inject constructor(
     /**
      * 使用AI推理引擎处理消息
      * AI自主决策调用哪些功能
-     * 
+     *
      * 【优先级处理】
      * 1. 身份确认询问（最高优先级）
      * 2. 交易修改/删除请求
@@ -236,43 +241,18 @@ class AIAssistantViewModel @Inject constructor(
      */
     private suspend fun processWithAIReasoning(message: String, isNetworkAvailable: Boolean): String {
         val currentButler = butlerCoordinator.resolveCurrentButler(_uiState.value.currentButler)
-
-        pendingModificationState?.let {
-            return handleModificationConfirmation(message, currentButler.id)
-        }
-
-        val context = AIReasoningEngine.ReasoningContext(
-            userMessage = message,
-            conversationHistory = getRecentConversationHistory()
+        return messageExecutionCoordinator.execute(
+            message = message,
+            currentButler = currentButler,
+            conversationHistory = getRecentConversationHistory(),
+            isNetworkAvailable = isNetworkAvailable,
+            currentUseBuiltinConfig = currentUseBuiltinConfig,
+            currentAIConfig = currentAIConfig,
+            pendingState = pendingModificationState,
+            handleModificationConfirmation = ::handleModificationConfirmation,
+            handleTransactionModification = ::handleTransactionModification,
+            processWithRemoteAI = ::processWithRemoteAI
         )
-
-        val reasoningResult = aiReasoningEngine.reason(context, currentButler.id)
-        return when (
-            val route = messageOrchestrator.route(
-                reasoningResult = reasoningResult,
-                userMessage = message,
-                butlerId = currentButler.id,
-                isNetworkAvailable = isNetworkAvailable,
-                isBuiltinConfigEnabled = currentUseBuiltinConfig,
-                isAIEnabled = currentAIConfig.isEnabled,
-                hasApiKey = currentAIConfig.apiKey.isNotBlank(),
-                pendingState = pendingModificationState
-            )
-        ) {
-            is AIAssistantMessageRoute.LocalActions -> {
-                aiReasoningEngine.executeActions(route.actions)
-            }
-            is AIAssistantMessageRoute.RemoteOrLocalFallback -> {
-                processWithRemoteAI(route.userMessage)
-            }
-            is AIAssistantMessageRoute.ModificationFlow -> {
-                if (route.pendingState != null) {
-                    handleModificationConfirmation(route.message, route.butlerId)
-                } else {
-                    handleTransactionModification(route.message, route.butlerId)
-                }
-            }
-        }
     }
     
     /**
@@ -330,18 +310,6 @@ class AIAssistantViewModel @Inject constructor(
     }
 
     /**
-     * 判断是否使用远程AI
-     */
-    private fun shouldUseRemoteAI(isNetworkAvailable: Boolean): Boolean {
-        // 规则联动：默认模型开启时，强制走本地 AI；关闭时才允许邀请码云端模型生效
-        if (currentUseBuiltinConfig) return false
-
-        return isNetworkAvailable &&
-               currentAIConfig.isEnabled &&
-               currentAIConfig.apiKey.isNotBlank()
-    }
-
-    /**
      * 使用远程大模型处理消息
      */
     private suspend fun processWithRemoteAI(message: String): String {
@@ -374,44 +342,31 @@ class AIAssistantViewModel @Inject constructor(
             // 记录成功
             aiUsageRepository.recordCall(success = true)
 
-            // 检查是否是JSON操作指令（兼容多种格式）
-            val actionTypeRegex = Regex("\"type\"\\s*:\\s*\"(add_transaction|create_account|query|query_accounts|query_categories|query_transactions|create_category)\"")
-            val isActionCommand = result.contains("\"action\"") ||
-                                  result.contains("\"actions\"") ||
-                                  actionTypeRegex.containsMatchIn(result)
-            if (isActionCommand) {
-                actionExecutor.executeAIActions(result)
-            } else {
-                // 如果远程AI只返回纯文本，尝试使用本地AI推理引擎处理记账请求
-                val lowerMessage = message.lowercase()
-                val isTransactionRequest = commandHandler.containsAny(lowerMessage, listOf("记", "花了", "收入", "支出", "消费", "买", "卖", "转账", "付", "赚", "工资", "奖金", "红包", "退款", "报销"))
-                
-                if (isTransactionRequest) {
+            val decision = remoteResponseInterpreter.interpret(
+                userMessage = message,
+                remoteResponse = result
+            )
+            when (decision) {
+                is RemoteResponseDecision.ExecuteActions -> {
+                    actionExecutor.executeAIActions(decision.rawResponse)
+                }
+                is RemoteResponseDecision.FallbackToLocalTransaction -> {
                     if (BuildConfig.DEBUG) {
                         Log.d("AIAssistantViewModel", "【记账请求】远程AI只返回文本，强制使用本地AI处理")
                     }
 
-                    // 【关键修复】直接使用本地AI处理记账，不依赖远程AI的JSON
-                    // 这会真正执行数据库操作
                     val localResult = processWithLocalAI(message)
                     if (BuildConfig.DEBUG) {
                         Log.d("AIAssistantViewModel", "本地AI执行结果: $localResult")
                     }
-                    
-                    // 如果本地执行成功，返回本地结果；如果失败，返回错误信息
-                    if (localResult.contains("✅")) {
-                        // 本地记账成功，返回成功信息（可以包含远程AI的友好回复）
-                        "${result}\n\n${localResult}"
-                    } else if (localResult.contains("❌")) {
-                        // 本地记账失败，返回错误信息
-                        localResult
-                    } else {
-                        // 其他情况，返回合并结果
-                        "${result}\n\n${localResult}"
-                    }
-                } else {
-                    // 普通对话回复
-                    result
+
+                    remoteResponseInterpreter.combineRemoteAndLocalReply(
+                        remoteReply = decision.remoteReply,
+                        localResult = localResult
+                    )
+                }
+                is RemoteResponseDecision.ReturnRemoteReply -> {
+                    decision.reply
                 }
             }
         } catch (e: Exception) {
@@ -419,13 +374,6 @@ class AIAssistantViewModel @Inject constructor(
             // 错误回复
             "处理请求时出错: ${e.message}"
         }
-    }
-
-    /**
-     * 确保基础分类存在
-     */
-    private suspend fun ensureBasicCategoriesExist() {
-        aiLocalProcessor.ensureBasicCategoriesExist()
     }
 
     /**
