@@ -4,6 +4,11 @@ import com.example.aiaccounting.ai.AIReasoningEngine
 import com.example.aiaccounting.data.model.AIConfig
 import com.example.aiaccounting.data.model.Butler
 
+internal sealed class AIAssistantMessageExecutionResult {
+    data class Reply(val message: String) : AIAssistantMessageExecutionResult()
+    data class ConfirmationRequired(val message: String) : AIAssistantMessageExecutionResult()
+}
+
 internal class AIAssistantMessageExecutionCoordinator(
     private val aiReasoningEngine: AIReasoningEngine,
     private val messageOrchestrator: AIAssistantMessageOrchestrator
@@ -16,12 +21,14 @@ internal class AIAssistantMessageExecutionCoordinator(
         currentUseBuiltinConfig: Boolean,
         currentAIConfig: AIConfig,
         pendingState: PendingModificationState?,
-        handleModificationConfirmation: suspend (String, String) -> String,
-        handleTransactionModification: suspend (String, String) -> String,
+        handleModificationConfirmation: suspend (String, String) -> ModificationFlowResult,
+        handleTransactionModification: suspend (String, String) -> ModificationFlowResult,
         processWithRemoteAI: suspend (String) -> String
-    ): String {
+    ): AIAssistantMessageExecutionResult {
         pendingState?.let {
-            return handleModificationConfirmation(message, currentButler.id)
+            return handleModificationFlowResult(
+                handleModificationConfirmation(message, currentButler.id)
+            )
         }
 
         val context = AIReasoningEngine.ReasoningContext(
@@ -42,14 +49,35 @@ internal class AIAssistantMessageExecutionCoordinator(
                 pendingState = pendingState
             )
         ) {
-            is AIAssistantMessageRoute.LocalActions -> aiReasoningEngine.executeActions(route.actions)
-            is AIAssistantMessageRoute.RemoteOrLocalFallback -> processWithRemoteAI(route.userMessage)
+            is AIAssistantMessageRoute.LocalActions -> {
+                AIAssistantMessageExecutionResult.Reply(
+                    aiReasoningEngine.executeActions(route.actions)
+                )
+            }
+            is AIAssistantMessageRoute.RemoteOrLocalFallback -> {
+                AIAssistantMessageExecutionResult.Reply(
+                    processWithRemoteAI(route.userMessage)
+                )
+            }
             is AIAssistantMessageRoute.ModificationFlow -> {
-                if (route.pendingState != null) {
-                    handleModificationConfirmation(route.message, route.butlerId)
-                } else {
-                    handleTransactionModification(route.message, route.butlerId)
-                }
+                handleModificationFlowResult(
+                    if (route.pendingState != null) {
+                        handleModificationConfirmation(route.message, route.butlerId)
+                    } else {
+                        handleTransactionModification(route.message, route.butlerId)
+                    }
+                )
+            }
+        }
+    }
+
+    private fun handleModificationFlowResult(
+        result: ModificationFlowResult
+    ): AIAssistantMessageExecutionResult {
+        return when (result) {
+            is ModificationFlowResult.Finish -> AIAssistantMessageExecutionResult.Reply(result.reply)
+            is ModificationFlowResult.StartConfirmation -> {
+                AIAssistantMessageExecutionResult.ConfirmationRequired(result.reply)
             }
         }
     }

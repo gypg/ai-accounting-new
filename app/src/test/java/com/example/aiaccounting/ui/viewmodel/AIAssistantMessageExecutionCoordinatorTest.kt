@@ -8,6 +8,7 @@ import io.mockk.coEvery
 import io.mockk.mockk
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AIAssistantMessageExecutionCoordinatorTest {
@@ -28,7 +29,7 @@ class AIAssistantMessageExecutionCoordinatorTest {
     )
 
     @Test
-    fun execute_returnsConfirmationResult_whenPendingStateExists() = runTest {
+    fun execute_returnsReplyResult_whenPendingStateExists() = runTest {
         val result = coordinator.execute(
             message = "确认",
             currentButler = butler,
@@ -37,12 +38,12 @@ class AIAssistantMessageExecutionCoordinatorTest {
             currentUseBuiltinConfig = false,
             currentAIConfig = AIConfig(isEnabled = true, apiKey = "key"),
             pendingState = pendingState(),
-            handleModificationConfirmation = { _, _ -> "已确认" },
-            handleTransactionModification = { _, _ -> "不会走到这里" },
+            handleModificationConfirmation = { _, _ -> ModificationFlowResult.Finish("已确认", shouldClearPending = true) },
+            handleTransactionModification = { _, _ -> ModificationFlowResult.Finish("不会走到这里") },
             processWithRemoteAI = { "不会走到这里" }
         )
 
-        assertEquals("已确认", result)
+        assertEquals(AIAssistantMessageExecutionResult.Reply("已确认"), result)
     }
 
     @Test
@@ -61,12 +62,12 @@ class AIAssistantMessageExecutionCoordinatorTest {
             currentUseBuiltinConfig = false,
             currentAIConfig = AIConfig(isEnabled = true, apiKey = "key"),
             pendingState = null,
-            handleModificationConfirmation = { _, _ -> "不会走到这里" },
-            handleTransactionModification = { _, _ -> "不会走到这里" },
+            handleModificationConfirmation = { _, _ -> ModificationFlowResult.Finish("不会走到这里") },
+            handleTransactionModification = { _, _ -> ModificationFlowResult.Finish("不会走到这里") },
             processWithRemoteAI = { "不会走到这里" }
         )
 
-        assertEquals("本地查询结果", result)
+        assertEquals(AIAssistantMessageExecutionResult.Reply("本地查询结果"), result)
     }
 
     @Test
@@ -84,16 +85,16 @@ class AIAssistantMessageExecutionCoordinatorTest {
             currentUseBuiltinConfig = false,
             currentAIConfig = AIConfig(isEnabled = true, apiKey = "key"),
             pendingState = null,
-            handleModificationConfirmation = { _, _ -> "不会走到这里" },
-            handleTransactionModification = { _, _ -> "不会走到这里" },
+            handleModificationConfirmation = { _, _ -> ModificationFlowResult.Finish("不会走到这里") },
+            handleTransactionModification = { _, _ -> ModificationFlowResult.Finish("不会走到这里") },
             processWithRemoteAI = { "远程结果" }
         )
 
-        assertEquals("远程结果", result)
+        assertEquals(AIAssistantMessageExecutionResult.Reply("远程结果"), result)
     }
 
     @Test
-    fun execute_returnsModificationResult_whenRouteIsModificationFlow() = runTest {
+    fun execute_returnsConfirmationRequired_whenModificationFlowStartsConfirmation() = runTest {
         val reasoningResult = reasoningResult(AIReasoningEngine.UserIntent.MODIFY_TRANSACTION)
         coEvery { aiReasoningEngine.reason(any(), any()) } returns reasoningResult
         coEvery { messageOrchestrator.route(any(), any(), any(), any(), any(), any(), any(), any()) } returns
@@ -103,6 +104,7 @@ class AIAssistantMessageExecutionCoordinatorTest {
                 pendingState = null
             )
 
+        var remoteCalled = false
         val result = coordinator.execute(
             message = "把上一笔改成20",
             currentButler = butler,
@@ -111,12 +113,48 @@ class AIAssistantMessageExecutionCoordinatorTest {
             currentUseBuiltinConfig = false,
             currentAIConfig = AIConfig(isEnabled = true, apiKey = "key"),
             pendingState = null,
-            handleModificationConfirmation = { _, _ -> "不会走到这里" },
-            handleTransactionModification = { _, _ -> "修改结果" },
+            handleModificationConfirmation = { _, _ -> ModificationFlowResult.Finish("不会走到这里") },
+            handleTransactionModification = { _, _ ->
+                ModificationFlowResult.StartConfirmation(
+                    pendingState = pendingState(),
+                    reply = "请确认修改"
+                )
+            },
+            processWithRemoteAI = {
+                remoteCalled = true
+                "不会走到这里"
+            }
+        )
+
+        assertEquals(AIAssistantMessageExecutionResult.ConfirmationRequired("请确认修改"), result)
+        assertTrue(!remoteCalled)
+    }
+
+    @Test
+    fun execute_returnsReplyResult_whenRouteIsModificationFlowAndConfirmationContinues() = runTest {
+        val reasoningResult = reasoningResult(AIReasoningEngine.UserIntent.MODIFY_TRANSACTION)
+        coEvery { aiReasoningEngine.reason(any(), any()) } returns reasoningResult
+        coEvery { messageOrchestrator.route(any(), any(), any(), any(), any(), any(), any(), any()) } returns
+            AIAssistantMessageRoute.ModificationFlow(
+                message = "确认",
+                butlerId = butler.id,
+                pendingState = pendingState()
+            )
+
+        val result = coordinator.execute(
+            message = "确认",
+            currentButler = butler,
+            conversationHistory = emptyList(),
+            isNetworkAvailable = true,
+            currentUseBuiltinConfig = false,
+            currentAIConfig = AIConfig(isEnabled = true, apiKey = "key"),
+            pendingState = pendingState(),
+            handleModificationConfirmation = { _, _ -> ModificationFlowResult.Finish("修改完成", shouldClearPending = true) },
+            handleTransactionModification = { _, _ -> ModificationFlowResult.Finish("不会走到这里") },
             processWithRemoteAI = { "不会走到这里" }
         )
 
-        assertEquals("修改结果", result)
+        assertEquals(AIAssistantMessageExecutionResult.Reply("修改完成"), result)
     }
 
     private fun reasoningResult(intent: AIReasoningEngine.UserIntent) = AIReasoningEngine.ReasoningResult(

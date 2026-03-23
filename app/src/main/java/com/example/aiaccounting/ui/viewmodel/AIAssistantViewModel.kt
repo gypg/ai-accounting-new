@@ -242,18 +242,23 @@ class AIAssistantViewModel @Inject constructor(
      */
     private suspend fun processWithAIReasoning(message: String, isNetworkAvailable: Boolean): String {
         val currentButler = butlerCoordinator.resolveCurrentButler(_uiState.value.currentButler)
-        return messageExecutionCoordinator.execute(
-            message = message,
-            currentButler = currentButler,
-            conversationHistory = getRecentConversationHistory(),
-            isNetworkAvailable = isNetworkAvailable,
-            currentUseBuiltinConfig = currentUseBuiltinConfig,
-            currentAIConfig = currentAIConfig,
-            pendingState = pendingModificationLifecycle.currentState(),
-            handleModificationConfirmation = ::handleModificationConfirmation,
-            handleTransactionModification = ::handleTransactionModification,
-            processWithRemoteAI = ::processWithRemoteAI
-        )
+        return when (
+            val result = messageExecutionCoordinator.execute(
+                message = message,
+                currentButler = currentButler,
+                conversationHistory = getRecentConversationHistory(),
+                isNetworkAvailable = isNetworkAvailable,
+                currentUseBuiltinConfig = currentUseBuiltinConfig,
+                currentAIConfig = currentAIConfig,
+                pendingState = pendingModificationLifecycle.currentState(),
+                handleModificationConfirmation = ::handleModificationConfirmation,
+                handleTransactionModification = ::handleTransactionModification,
+                processWithRemoteAI = ::processWithRemoteAI
+            )
+        ) {
+            is AIAssistantMessageExecutionResult.Reply -> result.message
+            is AIAssistantMessageExecutionResult.ConfirmationRequired -> result.message
+        }
     }
     
     /**
@@ -262,7 +267,7 @@ class AIAssistantViewModel @Inject constructor(
     private suspend fun handleTransactionModification(
         message: String,
         butlerId: String
-    ): String {
+    ): ModificationFlowResult {
         return pendingModificationLifecycle.begin(message, butlerId)
     }
     
@@ -272,7 +277,7 @@ class AIAssistantViewModel @Inject constructor(
     private suspend fun handleModificationConfirmation(
         message: String,
         butlerId: String
-    ): String {
+    ): ModificationFlowResult {
         return pendingModificationLifecycle.continuePending(message, butlerId)
     }
     

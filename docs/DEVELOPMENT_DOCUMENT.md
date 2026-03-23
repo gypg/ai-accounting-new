@@ -53,6 +53,7 @@ AI记账是一款面向中国大陆个人用户的智能记账 Android 应用。
 - `AIAssistantRemoteResponseIntegrityChecker` 已从花括号/围栏启发式升级为结构化 JSON object 有效性校验，但仍只对“纯 JSON / 纯 fenced JSON”形态生效
 - 模块 3C 第三段已新增 `AIAssistantRemoteExecutionResult`，把 timeout / transport failure / incomplete / action dispatch / local fallback / remote reply 统一为语义结果
 - 当前 action 执行仅允许“纯 JSON / 纯 fenced JSON”响应命中，已避免 explanatory 文本中夹带 JSON 示例被误执行
+- 模块 3D 第一段已新增 `AIAssistantMessageExecutionResult`，把主消息链路中的“最终回复”与“待确认”显式区分，避免在编排层过早把确认态抹平成普通字符串
 - 当前 `ViewModel` 继续保留 UI state、仓库存储、session 入口，消息理解与执行编排开始独立化
 
 #### 本模块新增测试
@@ -87,6 +88,15 @@ AI记账是一款面向中国大陆个人用户的智能记账 Android 应用。
   - 覆盖 chunk 聚合成功
   - 覆盖 timeout 返回
   - 覆盖异常失败返回
+- `AIAssistantMessageExecutionCoordinatorTest`
+  - 覆盖 pending confirmation 继续执行时返回最终回复
+  - 覆盖 modification flow 首次进入时返回 `ConfirmationRequired`
+  - 覆盖确认前不会提前触发远程执行
+- `AIAssistantPendingModificationLifecycleTest`
+  - 覆盖 begin / continue 返回完整 `ModificationFlowResult`
+  - 覆盖无 pending 时的 fallback finish
+  - 覆盖失败确认保留状态
+  - 覆盖需要再次确认时保留 pending 状态
 
 #### 当前实现边界
 - `AIAssistantViewModel` 已不再直接持有原始 pending modification state，而是委派给 `AIAssistantPendingModificationLifecycle`
@@ -97,12 +107,14 @@ AI记账是一款面向中国大陆个人用户的智能记账 Android 应用。
 - 当前远程执行链已基本形成 `ViewModel -> Handler -> StreamCollector / IntegrityChecker / Interpreter` 的分层
 - 当前 `processWithRemoteAI()` 已负责把 `AIAssistantRemoteExecutionResult` 统一映射为用户可见文案或副作用执行，handler 不再直接返回字符串分支
 - 当前 `AIAssistantRemoteResponseIntegrityChecker` 已升级为结构化 JSON object 有效性校验，但校验范围仍故意与解释器保持一致，只覆盖“纯 JSON / 纯 fenced JSON”
-- 下一步若继续模块 3C，应优先评估是否将 `AIAssistantRemoteExecutionResult` 的 ViewModel 映射再下沉为专用 mapper
+- 当前交易修改确认流已不再只向上返回字符串，而是通过 `ModificationFlowResult` / `AIAssistantMessageExecutionResult` 保留“待确认”语义
+- 当前显式确认态仍主要服务于 modification flow，尚未扩展成更通用的 clarification / confirmation UI 协议
+- 下一步若继续模块 3，应优先把显式确认态从修改交易流推广到更通用的需求确认闭环，而不是先回头做 mapper 下沉
 
 #### 下个窗口默认接手点
-- 模块 3C 第四段已收口完成
-- 若继续本方向，直接进入 **模块 3C：远程执行链拆分（第五段，可选）**
-- 优先评估是否把 `AIAssistantRemoteExecutionResult` 在 `ViewModel` 中的字符串/副作用映射继续下沉为专用 mapper，以进一步瘦身 `AIAssistantViewModel`
+- 模块 3D 第一段已收口完成
+- 若继续本方向，直接进入 **模块 3D 第二段：更通用的 confirmation / clarification 闭环**
+- 优先建立“需要确认”的最小触发规则，并把确认后二次进入远程执行链的路径补齐
 - 继续遵循当前工作流：测试先行 → 完成一个模块后更新 memory / 开发文档 / git commit / push
 
 
@@ -214,9 +226,30 @@ AI记账是一款面向中国大陆个人用户的智能记账 Android 应用。
   - 网络状态监测与预警提示
 
 #### 当前建议优先级
-1. 先把 **问题2 最新 reviewer follow-up** 提交到 git，确保代码 / memory / 文档 / git 状态一致
-2. 然后回到 **问题3**，优先评估是否把 `AIAssistantRemoteExecutionResult` 在 `ViewModel` 的映射继续下沉，或者直接开始“需求确认闭环”最小可用切片
+1. 先把 **问题3 的确认态显式结果模型切片** 提交到 git，确保代码 / memory / 文档 / git 状态一致
+2. 然后继续 **问题3**，把显式 confirmation 结果从 modification flow 推广到更通用的需求确认闭环
 3. **问题4** 当前仍停留在早期稳定性修复阶段，后续若恢复推进，应单独拆成新的网络能力模块群，不建议混入模块3连续重构中
+
+#### 已对齐的下一轮计划（2026-03-23）
+- 本轮已完成：
+  - 问题2 reviewer follow-up 已补码、补测、补文档，并已提交 git
+  - 问题3 已新增“确认态显式结果模型”最小切片，为后续通用 confirmation / clarification 闭环铺路
+  - 四大问题的“已完成 / 未完成”边界已重新梳理清楚
+- 下一轮对话默认目标：**继续问题3，而不是回头扩问题1/2/4**
+- 下一轮优先做的最小切片：**更通用的需求确认闭环**
+  - 对存在歧义或信息不完整的用户输入，不直接进入执行
+  - 先进入 clarification / confirmation 状态
+  - 由系统生成结构化确认问题
+  - 用户确认后，再决定是否二次请求云端 AI 或进入执行链路
+- 下一轮建议顺序：
+  1. 为“需要确认”的触发条件建立最小判定规则
+  2. 把确认态从 modification flow 扩展到更通用主消息链路
+  3. 为确认前不执行、确认后二次进入执行链路补回归测试
+  4. 该最小闭环稳定后，再评估是否继续下沉 `AIAssistantRemoteExecutionResult` 到 UI 文案 / 副作用 mapper
+- 明确暂不在下一轮处理：
+  - 问题1 的多 OCR 引擎 / OpenCV 深化方案
+  - 问题2 的运行时模型性能监测 / 预加载 / 调度
+  - 问题4 的测速、智能路由、退避、压缩与网络预警
 
 ---
 

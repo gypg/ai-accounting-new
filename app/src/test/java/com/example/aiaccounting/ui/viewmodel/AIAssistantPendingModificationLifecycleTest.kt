@@ -9,6 +9,7 @@ import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AIAssistantPendingModificationLifecycleTest {
@@ -17,7 +18,7 @@ class AIAssistantPendingModificationLifecycleTest {
     private val lifecycle = AIAssistantPendingModificationLifecycle(modificationCoordinator)
 
     @Test
-    fun begin_storesPendingState_whenCoordinatorStartsConfirmation() = runTest {
+    fun begin_returnsConfirmationResult_andStoresPendingState_whenCoordinatorStartsConfirmation() = runTest {
         val pendingState = pendingState()
         coEvery { modificationCoordinator.beginModification("把上一笔改成20", "xiaocainiang") } returns
             ModificationFlowResult.StartConfirmation(
@@ -25,28 +26,34 @@ class AIAssistantPendingModificationLifecycleTest {
                 reply = "请确认修改"
             )
 
-        val reply = lifecycle.begin("把上一笔改成20", "xiaocainiang")
+        val result = lifecycle.begin("把上一笔改成20", "xiaocainiang")
 
-        assertEquals("请确认修改", reply)
+        assertEquals(
+            ModificationFlowResult.StartConfirmation(
+                pendingState = pendingState,
+                reply = "请确认修改"
+            ),
+            result
+        )
         assertNotNull(lifecycle.currentState())
     }
 
     @Test
-    fun begin_keepsStateEmpty_whenCoordinatorFinishesImmediately() = runTest {
+    fun begin_returnsFinish_whenCoordinatorFinishesImmediately() = runTest {
         coEvery { modificationCoordinator.beginModification("改一下", "xiaocainiang") } returns
             ModificationFlowResult.Finish("没有找到相关交易")
 
-        val reply = lifecycle.begin("改一下", "xiaocainiang")
+        val result = lifecycle.begin("改一下", "xiaocainiang")
 
-        assertEquals("没有找到相关交易", reply)
+        assertEquals(ModificationFlowResult.Finish("没有找到相关交易"), result)
         assertNull(lifecycle.currentState())
     }
 
     @Test
-    fun continuePending_returnsFallback_whenNoPendingStateExists() = runTest {
-        val reply = lifecycle.continuePending("确认", "xiaocainiang")
+    fun continuePending_returnsFallbackFinish_whenNoPendingStateExists() = runTest {
+        val result = lifecycle.continuePending("确认", "xiaocainiang")
 
-        assertEquals("抱歉，没有待确认的操作。", reply)
+        assertEquals(ModificationFlowResult.Finish("抱歉，没有待确认的操作。"), result)
     }
 
     @Test
@@ -56,9 +63,9 @@ class AIAssistantPendingModificationLifecycleTest {
             modificationCoordinator.continueModification("确认", "xiaocainiang", any())
         } returns ModificationFlowResult.Finish("已确认", shouldClearPending = true)
 
-        val reply = lifecycle.continuePending("确认", "xiaocainiang")
+        val result = lifecycle.continuePending("确认", "xiaocainiang")
 
-        assertEquals("已确认", reply)
+        assertEquals(ModificationFlowResult.Finish("已确认", shouldClearPending = true), result)
         assertNull(lifecycle.currentState())
     }
 
@@ -69,9 +76,9 @@ class AIAssistantPendingModificationLifecycleTest {
             modificationCoordinator.continueModification("取消", "xiaocainiang", any())
         } returns ModificationFlowResult.Finish("已取消", shouldClearPending = true)
 
-        val reply = lifecycle.continuePending("取消", "xiaocainiang")
+        val result = lifecycle.continuePending("取消", "xiaocainiang")
 
-        assertEquals("已取消", reply)
+        assertEquals(ModificationFlowResult.Finish("已取消", shouldClearPending = true), result)
         assertNull(lifecycle.currentState())
     }
 
@@ -82,9 +89,30 @@ class AIAssistantPendingModificationLifecycleTest {
             modificationCoordinator.continueModification("确认", "xiaocainiang", any())
         } returns ModificationFlowResult.Finish("修改失败：数据库忙，请稍后重试", shouldClearPending = false)
 
-        val reply = lifecycle.continuePending("确认", "xiaocainiang")
+        val result = lifecycle.continuePending("确认", "xiaocainiang")
 
-        assertEquals("修改失败：数据库忙，请稍后重试", reply)
+        assertEquals(
+            ModificationFlowResult.Finish("修改失败：数据库忙，请稍后重试", shouldClearPending = false),
+            result
+        )
+        assertNotNull(lifecycle.currentState())
+    }
+
+    @Test
+    fun continuePending_keepsState_whenCoordinatorRequestsAnotherConfirmationStep() = runTest {
+        val pendingState = pendingState()
+        lifecycle.seedForTest(pendingState)
+        coEvery {
+            modificationCoordinator.continueModification("确认", "xiaocainiang", any())
+        } returns ModificationFlowResult.StartConfirmation(
+            pendingState = pendingState,
+            reply = "请再确认一次"
+        )
+
+        val result = lifecycle.continuePending("确认", "xiaocainiang")
+
+        assertTrue(result is ModificationFlowResult.StartConfirmation)
+        assertEquals("请再确认一次", (result as ModificationFlowResult.StartConfirmation).reply)
         assertNotNull(lifecycle.currentState())
     }
 
