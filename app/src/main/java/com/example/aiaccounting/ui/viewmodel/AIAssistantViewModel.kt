@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.aiaccounting.ai.AIOperationExecutor
 import com.example.aiaccounting.ai.AIReasoningEngine
 import com.example.aiaccounting.ai.AILocalProcessor
+import com.example.aiaccounting.ai.AIMessageParser
 import com.example.aiaccounting.ai.TransactionModificationHandler
 import com.example.aiaccounting.data.model.AIConfig
 import com.example.aiaccounting.data.model.Butler
@@ -63,6 +64,7 @@ class AIAssistantViewModel @Inject constructor(
     )
     private val modificationCoordinator = AIAssistantModificationCoordinator(transactionModificationHandler)
     private val pendingModificationLifecycle = AIAssistantPendingModificationLifecycle(modificationCoordinator)
+    private val pendingClarificationLifecycle = AIAssistantPendingClarificationLifecycle(AIMessageParser())
     private val imageMessageHandler = AIAssistantImageMessageHandler(
         aiService = aiService,
         imageProcessingService = imageProcessingService,
@@ -242,6 +244,10 @@ class AIAssistantViewModel @Inject constructor(
      */
     private suspend fun processWithAIReasoning(message: String, isNetworkAvailable: Boolean): String {
         val currentButler = butlerCoordinator.resolveCurrentButler(_uiState.value.currentButler)
+        val pendingClarificationResult = handlePendingClarificationIfNeeded(message, currentButler.id)
+        if (pendingClarificationResult != null) {
+            return pendingClarificationResult
+        }
         return when (
             val result = messageExecutionCoordinator.execute(
                 message = message,
@@ -258,6 +264,9 @@ class AIAssistantViewModel @Inject constructor(
         ) {
             is AIAssistantMessageExecutionResult.Reply -> result.message
             is AIAssistantMessageExecutionResult.ConfirmationRequired -> result.message
+            is AIAssistantMessageExecutionResult.ClarificationRequired -> {
+                pendingClarificationLifecycle.begin(message, result.message).reply
+            }
         }
     }
     
@@ -281,6 +290,41 @@ class AIAssistantViewModel @Inject constructor(
         return pendingModificationLifecycle.continuePending(message, butlerId)
     }
     
+    private suspend fun handlePendingClarificationIfNeeded(
+        message: String,
+        butlerId: String
+    ): String? {
+        return when (val result = pendingClarificationLifecycle.currentState()?.let {
+            pendingClarificationLifecycle.continuePending(message, butlerId)
+        }) {
+            null -> null
+            is ClarificationFlowResult.RequestClarification -> result.reply
+            is ClarificationFlowResult.Finish -> result.reply
+            is ClarificationFlowResult.ContinueWithMessage -> {
+                when (
+                    val continuationResult = messageExecutionCoordinator.execute(
+                        message = result.message,
+                        currentButler = butlerCoordinator.resolveCurrentButler(_uiState.value.currentButler),
+                        conversationHistory = getRecentConversationHistory(),
+                        isNetworkAvailable = _uiState.value.isNetworkAvailable,
+                        currentUseBuiltinConfig = currentUseBuiltinConfig,
+                        currentAIConfig = currentAIConfig,
+                        pendingState = pendingModificationLifecycle.currentState(),
+                        handleModificationConfirmation = ::handleModificationConfirmation,
+                        handleTransactionModification = ::handleTransactionModification,
+                        processWithRemoteAI = ::processWithRemoteAI
+                    )
+                ) {
+                    is AIAssistantMessageExecutionResult.Reply -> continuationResult.message
+                    is AIAssistantMessageExecutionResult.ConfirmationRequired -> continuationResult.message
+                    is AIAssistantMessageExecutionResult.ClarificationRequired -> {
+                        pendingClarificationLifecycle.begin(result.message, continuationResult.message).reply
+                    }
+                }
+            }
+        }
+    }
+
     /**
      * 获取最近的对话历史
      */
@@ -341,6 +385,11 @@ class AIAssistantViewModel @Inject constructor(
         )
     }
 
+    private fun clearPendingInteractionStates() {
+        pendingModificationLifecycle.clear()
+        pendingClarificationLifecycle.clear()
+    }
+
     /**
      * 创建新对话会话
      */
@@ -349,6 +398,7 @@ class AIAssistantViewModel @Inject constructor(
             try {
                 val session = sessionCoordinator.createNewSession("新对话 ${System.currentTimeMillis() / 1000}")
                 _uiState.update { it.copy(currentSessionId = session.id) }
+                clearPendingInteractionStates()
                 conversationRepository.clearAllConversations()
                 val currentButler = butlerCoordinator.resolveCurrentButler(_uiState.value.currentButler)
                 val welcomeMessage = when (currentButler.id) {
@@ -377,6 +427,7 @@ class AIAssistantViewModel @Inject constructor(
             try {
                 val messages = sessionCoordinator.switchSession(sessionId)
                 _uiState.update { it.copy(currentSessionId = sessionId) }
+                clearPendingInteractionStates()
                 conversationRepository.clearAllConversations()
                 messages.forEach { msg ->
                     when (msg.role) {
@@ -404,6 +455,7 @@ class AIAssistantViewModel @Inject constructor(
                     DeleteSessionResult.DeletedNonCurrentSession -> Unit
 
                     DeleteSessionResult.ResetCurrentSingleSession -> {
+                        clearPendingInteractionStates()
                         conversationRepository.clearAllConversations()
                         val currentButler = butlerCoordinator.resolveCurrentButler(_uiState.value.currentButler)
                         val welcomeMessage = when (currentButler.id) {
@@ -419,11 +471,13 @@ class AIAssistantViewModel @Inject constructor(
 
                     DeleteSessionResult.ClearedCurrentSession -> {
                         _uiState.update { it.copy(currentSessionId = null) }
+                        clearPendingInteractionStates()
                         conversationRepository.clearAllConversations()
                     }
 
                     is DeleteSessionResult.SwitchedToSession -> {
                         _uiState.update { it.copy(currentSessionId = result.sessionId) }
+                        clearPendingInteractionStates()
                         conversationRepository.clearAllConversations()
                         result.messages.forEach { msg ->
                             when (msg.role) {

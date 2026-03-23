@@ -482,7 +482,13 @@ class AIReasoningEngine @Inject constructor(
         val amount = messageParser.extractAmount(message) ?: return listOf(
             AIAction.RequestClarification("请问这笔交易的金额是多少呢？")
         )
-        
+
+        if (requiresTransactionTypeClarification(message)) {
+            return listOf(
+                AIAction.RequestClarification("这笔是收入、支出还是转账呢？")
+            )
+        }
+
         // 判断交易类型
         val type = when {
             message.contains("收入") || message.contains("收到") || message.contains("工资") || 
@@ -559,6 +565,19 @@ class AIReasoningEngine @Inject constructor(
 
     private fun isTransactionAmountClarificationPrompt(message: String): Boolean {
         return message.contains("金额") && message.contains("交易")
+    }
+
+    private fun requiresTransactionTypeClarification(message: String): Boolean {
+        if (!messageParser.containsAmount(message)) {
+            return false
+        }
+        val lowerMessage = message.lowercase()
+        val explicitRecordRequest = lowerMessage.contains("记一笔") || lowerMessage.contains("记一下") || lowerMessage.contains("记个")
+        val hasExplicitType = listOf(
+            "收入", "支出", "转账", "花了", "消费", "用了", "买", "付", "收到", "赚", "工资", "奖金"
+        ).any { lowerMessage.contains(it) }
+        val inferredExpenseCategory = categoryInferrer.inferCategory(message, TransactionType.EXPENSE)
+        return explicitRecordRequest && !hasExplicitType && inferredExpenseCategory == null
     }
 
     private fun generateReluctantResponse(butlerId: String, action: String): String? {

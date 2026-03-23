@@ -71,7 +71,7 @@ class AIAssistantMessageExecutionCoordinatorTest {
     }
 
     @Test
-    fun execute_returnsReplyResult_whenLocalActionsContainRequestClarification() = runTest {
+    fun execute_returnsClarificationRequired_whenLocalActionsContainRequestClarification() = runTest {
         val reasoningResult = reasoningResult(AIReasoningEngine.UserIntent.RECORD_TRANSACTION)
         coEvery { aiReasoningEngine.reason(any(), any()) } returns reasoningResult
         coEvery { aiReasoningEngine.executeActions(any()) } returns "请问这笔交易的金额是多少呢？"
@@ -97,7 +97,7 @@ class AIAssistantMessageExecutionCoordinatorTest {
             }
         )
 
-        assertEquals(AIAssistantMessageExecutionResult.Reply("请问这笔交易的金额是多少呢？"), result)
+        assertEquals(AIAssistantMessageExecutionResult.ClarificationRequired("请问这笔交易的金额是多少呢？"), result)
         assertTrue(!remoteCalled)
     }
 

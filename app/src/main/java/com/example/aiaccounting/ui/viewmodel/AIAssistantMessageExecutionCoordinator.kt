@@ -7,6 +7,7 @@ import com.example.aiaccounting.data.model.Butler
 internal sealed class AIAssistantMessageExecutionResult {
     data class Reply(val message: String) : AIAssistantMessageExecutionResult()
     data class ConfirmationRequired(val message: String) : AIAssistantMessageExecutionResult()
+    data class ClarificationRequired(val message: String) : AIAssistantMessageExecutionResult()
 }
 
 internal class AIAssistantMessageExecutionCoordinator(
@@ -50,9 +51,12 @@ internal class AIAssistantMessageExecutionCoordinator(
             )
         ) {
             is AIAssistantMessageRoute.LocalActions -> {
-                AIAssistantMessageExecutionResult.Reply(
-                    aiReasoningEngine.executeActions(route.actions)
-                )
+                val reply = aiReasoningEngine.executeActions(route.actions)
+                if (route.actions.any { it is AIReasoningEngine.AIAction.RequestClarification }) {
+                    AIAssistantMessageExecutionResult.ClarificationRequired(reply)
+                } else {
+                    AIAssistantMessageExecutionResult.Reply(reply)
+                }
             }
             is AIAssistantMessageRoute.RemoteOrLocalFallback -> {
                 AIAssistantMessageExecutionResult.Reply(

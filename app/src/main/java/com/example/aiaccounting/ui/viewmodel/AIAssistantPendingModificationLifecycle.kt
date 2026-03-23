@@ -7,6 +7,10 @@ internal class AIAssistantPendingModificationLifecycle(
 
     fun currentState(): PendingModificationState? = pendingState
 
+    fun clear() {
+        pendingState = null
+    }
+
     suspend fun begin(message: String, butlerId: String): ModificationFlowResult {
         return when (val result = modificationCoordinator.beginModification(message, butlerId)) {
             is ModificationFlowResult.StartConfirmation -> {

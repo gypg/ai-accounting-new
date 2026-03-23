@@ -55,6 +55,9 @@ AI记账是一款面向中国大陆个人用户的智能记账 Android 应用。
 - 当前 action 执行仅允许“纯 JSON / 纯 fenced JSON”响应命中，已避免 explanatory 文本中夹带 JSON 示例被误执行
 - 模块 3D 第一段已新增 `AIAssistantMessageExecutionResult`，把主消息链路中的“最终回复”与“待确认”显式区分，避免在编排层过早把确认态抹平成普通字符串
 - 模块 3D 第二段已将 `RequestClarification` 接入更通用的记账澄清闭环：缺金额时优先本地追问，补充金额后可沿最近澄清上下文继续走记账处理
+- 模块 3D 第三段已新增 `PendingClarificationState` / `ClarificationTrigger` / `ClarificationFlowResult`，把 clarification 从轻量历史 continuation 升级为显式 pending clarification state
+- 当前 clarification 已覆盖两类本地澄清：缺金额、以及“显式记一笔 + 已给金额但交易类型仍不明确”
+- 新建会话、切换会话、删除/重置当前会话时，都会统一清理 pending modification / pending clarification state，避免跨 session 串流旧确认或旧澄清
 - 当前 `ViewModel` 继续保留 UI state、仓库存储、session 入口，消息理解与执行编排开始独立化
 
 #### 本模块新增测试
@@ -92,15 +95,23 @@ AI记账是一款面向中国大陆个人用户的智能记账 Android 应用。
 - `AIAssistantMessageExecutionCoordinatorTest`
   - 覆盖 pending confirmation 继续执行时返回最终回复
   - 覆盖 modification flow 首次进入时返回 `ConfirmationRequired`
+  - 覆盖 clarification 场景返回显式 `ClarificationRequired`
   - 覆盖确认前不会提前触发远程执行
 - `AIAssistantPendingModificationLifecycleTest`
   - 覆盖 begin / continue 返回完整 `ModificationFlowResult`
   - 覆盖无 pending 时的 fallback finish
   - 覆盖失败确认保留状态
   - 覆盖需要再次确认时保留 pending 状态
+- `AIAssistantPendingClarificationLifecycleTest`
+  - 覆盖金额澄清 / 类型澄清 trigger 建立
+  - 覆盖补充信息前重复追问、补齐后继续执行、取消后清理状态
+  - 覆盖 lifecycle clear 后 pending clarification state 被清空
+- `AIAssistantPendingStateResetTest`
+  - 覆盖 pending modification / clarification state 的显式清理
 - `AIReasoningEngineTest`
   - 覆盖缺金额记账请求先返回 `RequestClarification`
   - 覆盖金额补充消息在澄清上下文下继续产出 `RecordTransaction`
+  - 覆盖“记一笔 + 已给金额但未指明类型”时先追问收入 / 支出 / 转账
 
 #### 当前实现边界
 - `AIAssistantViewModel` 已不再直接持有原始 pending modification state，而是委派给 `AIAssistantPendingModificationLifecycle`
@@ -112,14 +123,15 @@ AI记账是一款面向中国大陆个人用户的智能记账 Android 应用。
 - 当前 `processWithRemoteAI()` 已负责把 `AIAssistantRemoteExecutionResult` 统一映射为用户可见文案或副作用执行，handler 不再直接返回字符串分支
 - 当前 `AIAssistantRemoteResponseIntegrityChecker` 已升级为结构化 JSON object 有效性校验，但校验范围仍故意与解释器保持一致，只覆盖“纯 JSON / 纯 fenced JSON”
 - 当前交易修改确认流已不再只向上返回字符串，而是通过 `ModificationFlowResult` / `AIAssistantMessageExecutionResult` 保留“待确认”语义
-- 当前通用 clarification 已先覆盖“缺金额的记账请求”这一最小闭环：本地追问金额，下一轮金额补充可沿上下文继续执行
-- 当前更通用的 clarification 仍是轻量上下文拼接实现，还未沉淀为独立 pending clarification state / UI 协议
-- 下一步若继续模块 3，应优先把 clarification 从“缺金额记账”继续扩展到更多缺失字段/歧义场景，并考虑是否需要独立的 pending clarification model
+- 当前通用 clarification 已不再只停留在“缺金额 + 最近历史拼接”的最小闭环，而是引入独立 `PendingClarificationState` / `ClarificationTrigger`，并由 `ClarificationRequired` 显式表示待澄清态
+- 当前 clarification 已先覆盖“缺金额”与“金额已给但交易类型不明确”两类本地澄清
+- 当前 session 边界已统一清理 pending modification / pending clarification state，避免跨会话误消费旧确认或旧澄清
+- 下一步若继续模块 3，应优先继续扩展更多 clarification trigger（账户、日期、分类歧义等），并评估是否需要把 clarification / confirmation 进一步统一到更高层 pending interaction model
 
 #### 下个窗口默认接手点
-- 模块 3D 第二段已收口完成
-- 若继续本方向，直接进入 **模块 3D 第三段：提炼更通用的 pending clarification state**
-- 优先评估是否将当前基于最近对话历史的轻量 continuation，升级为显式 clarification state / trigger model
+- 模块 3D 第三段已收口完成
+- 若继续本方向，直接进入 **模块 3D 第四段：扩展更多 clarification trigger 并评估统一 pending interaction model**
+- 优先扩展账户、日期、分类歧义等缺失字段/歧义场景，并评估 clarification / confirmation 是否要统一到更高层 pending interaction state
 - 继续遵循当前工作流：测试先行 → 完成一个模块后更新 memory / 开发文档 / git commit / push
 
 
@@ -206,15 +218,20 @@ AI记账是一款面向中国大陆个人用户的智能记账 Android 应用。
   - 模型预加载与资源调度管理
 
 #### 问题3：指令理解与执行流程优化
-- **当前状态：部分完成（模块 3C 第四段完成，整套交互确认机制未完全产品化）**
+- **当前状态：部分完成（模块 3D 第三段完成，整套交互确认机制仍未完全产品化）**
 - **已完成**：
   - 远程响应解释、消息执行 coordinator、pending modification 生命周期收口
   - 远程 handler / stream collector / integrity checker 分层
   - 远程执行结果统一模型
   - 结构化 JSON 完整性校验
   - explanatory JSON 误执行风险修复
+  - 通用 clarification 最小闭环：缺金额时先本地追问，补充金额后继续原请求
+  - 显式 pending clarification state / trigger model
+  - session 边界 pending state 清理
 - **未完成/未落地为正式能力**：
   - 面向用户的分步意图澄清 UI/交互机制
+  - 更全面的缺失字段 / 歧义 trigger 覆盖（账户、日期、分类歧义等）
+  - clarification / confirmation 更高层统一 pending interaction model
   - 明确的“需求确认后再二次请求云端 AI”的完整闭环
   - 更彻底的结构化分步上送协议与可视化思考/确认流程
 
@@ -240,16 +257,18 @@ AI记账是一款面向中国大陆个人用户的智能记账 Android 应用。
   - 问题2 reviewer follow-up 已补码、补测、补文档，并已提交 git
   - 问题3 已新增“确认态显式结果模型”最小切片，为后续通用 confirmation / clarification 闭环铺路
   - 问题3 已新增“缺金额记账请求”的通用澄清最小闭环：先本地追问，补充金额后可沿上下文继续执行
+  - 问题3 已新增显式 `PendingClarificationState` / `ClarificationTrigger`，并扩展到“已给金额但交易类型仍不明确”的类型澄清场景
+  - 问题3 已在 create / switch / delete session 边界统一清理 pending modification / clarification state
   - 四大问题的“已完成 / 未完成”边界已重新梳理清楚
 - 下一轮对话默认目标：**继续问题3，而不是回头扩问题1/2/4**
-- 下一轮优先做的最小切片：**更通用的 clarification state / trigger model**
+- 下一轮优先做的最小切片：**扩展更多 clarification trigger，并评估统一 pending interaction model**
   - 对存在歧义或信息不完整的用户输入，不直接进入执行
   - 先进入更显式的 clarification / confirmation 状态
   - 由系统生成结构化确认问题
   - 用户确认后，再决定是否二次请求云端 AI 或进入执行链路
 - 下一轮建议顺序：
-  1. 把 clarification 触发条件从“缺金额记账”扩展到更多缺失字段/歧义场景
-  2. 评估是否引入独立 pending clarification state，替代当前轻量历史拼接 continuation
+  1. 把 clarification 触发条件从“缺金额/缺交易类型”扩展到更多缺失字段/歧义场景
+  2. 评估 clarification / confirmation 是否进一步统一为更高层 pending interaction state
   3. 为确认前不执行、确认后二次进入执行链路补更完整回归测试
   4. 该最小闭环稳定后，再评估是否继续下沉 `AIAssistantRemoteExecutionResult` 到 UI 文案 / 副作用 mapper
 - 明确暂不在下一轮处理：

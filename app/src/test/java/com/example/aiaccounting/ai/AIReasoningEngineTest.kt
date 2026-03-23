@@ -55,6 +55,23 @@ class AIReasoningEngineTest {
     }
 
     @Test
+    fun reason_returnsRequestClarification_forExplicitRecordRequestWithoutTransactionType() = runTest {
+        stubNonIdentityAndNonModification()
+
+        val result = engine.reason(
+            context = AIReasoningEngine.ReasoningContext(userMessage = "帮我记一笔 25 元"),
+            currentButlerId = "xiaocainiang"
+        )
+
+        assertEquals(AIReasoningEngine.UserIntent.RECORD_TRANSACTION, result.intent)
+        assertTrue(result.actions.single() is AIReasoningEngine.AIAction.RequestClarification)
+        assertEquals(
+            "这笔是收入、支出还是转账呢？",
+            (result.actions.single() as AIReasoningEngine.AIAction.RequestClarification).question
+        )
+    }
+
+    @Test
     fun reason_treatsAmountOnlyFollowUpAsRecordTransaction_whenConversationHistoryShowsPreviousClarification() = runTest {
         stubNonIdentityAndNonModification()
 
