@@ -42,6 +42,10 @@ internal class AIAssistantMessageOrchestrator {
             )
         }
 
+        if (reasoningResult.actions.any { it is AIReasoningEngine.AIAction.RequestClarification }) {
+            return AIAssistantMessageRoute.LocalActions(reasoningResult.actions)
+        }
+
         return when (reasoningResult.intent) {
             AIReasoningEngine.UserIntent.IDENTITY_CONFIRMATION,
             AIReasoningEngine.UserIntent.QUERY_INFORMATION,

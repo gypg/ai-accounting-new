@@ -92,10 +92,32 @@ class AIAssistantMessageOrchestratorTest {
         assertTrue(route is AIAssistantMessageRoute.ModificationFlow)
     }
 
-    private fun reasoningResult(intent: AIReasoningEngine.UserIntent) = AIReasoningEngine.ReasoningResult(
+    @Test
+    fun route_returnsLocalActions_whenReasoningResultContainsRequestClarification_evenIfRemoteIsAvailable() {
+        val route = orchestrator.route(
+            reasoningResult = reasoningResult(
+                intent = AIReasoningEngine.UserIntent.RECORD_TRANSACTION,
+                actions = listOf(AIReasoningEngine.AIAction.RequestClarification("请问这笔交易的金额是多少呢？"))
+            ),
+            userMessage = "帮我记一笔午饭",
+            butlerId = "xiaocainiang",
+            isNetworkAvailable = true,
+            isBuiltinConfigEnabled = false,
+            isAIEnabled = true,
+            hasApiKey = true,
+            pendingState = null
+        )
+
+        assertTrue(route is AIAssistantMessageRoute.LocalActions)
+    }
+
+    private fun reasoningResult(
+        intent: AIReasoningEngine.UserIntent,
+        actions: List<AIReasoningEngine.AIAction> = emptyList()
+    ) = AIReasoningEngine.ReasoningResult(
         intent = intent,
         confidence = 0.9f,
-        actions = emptyList(),
+        actions = actions,
         reasoningExplanation = "test"
     )
 }

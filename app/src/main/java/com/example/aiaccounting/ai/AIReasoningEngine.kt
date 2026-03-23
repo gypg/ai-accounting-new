@@ -220,7 +220,7 @@ class AIReasoningEngine @Inject constructor(
         }
         
         // 【第三步】分析其他意图
-        val intentAnalysis = analyzeIntent(context.userMessage)
+        val intentAnalysis = analyzeIntent(context.userMessage, context.conversationHistory)
         
         // 【第四步】根据意图生成动作序列
         // 【权限统一】所有人格拥有完全相同的操作权限，统一使用 "unified" ID
@@ -253,7 +253,7 @@ class AIReasoningEngine @Inject constructor(
         message: String, 
         context: ReasoningContext
     ): List<AIAction> {
-        val intentAnalysis = analyzeIntent(message)
+        val intentAnalysis = analyzeIntent(message, context.conversationHistory)
         
         // 所有人格统一使用 "unified" ID，确保权限完全一致
         return when (intentAnalysis.intent) {
@@ -269,8 +269,12 @@ class AIReasoningEngine @Inject constructor(
     /**
      * 分析用户意图
      */
-    private fun analyzeIntent(message: String): IntentAnalysis {
+    private fun analyzeIntent(message: String, conversationHistory: List<String> = emptyList()): IntentAnalysis {
         val lowerMessage = message.lowercase()
+
+        if (shouldContinueTransactionClarification(message, conversationHistory)) {
+            return IntentAnalysis(UserIntent.RECORD_TRANSACTION, 0.88f)
+        }
 
         // 上下文引用：如果有上一笔操作且用户在引用它，视为记账意图
         if (lastExecutedTransaction != null && detectContextReference(message) != null) {
@@ -292,11 +296,14 @@ class AIReasoningEngine @Inject constructor(
         // 分析意图特征
         val transactionScore = transactionPatterns.count { lowerMessage.contains(it) }
         val queryScore = queryPatterns.count { lowerMessage.contains(it) }
-        
+        val isExplicitRecordRequest = lowerMessage.contains("记一笔") || lowerMessage.contains("记一下") || lowerMessage.contains("记个")
+
         // 判断意图
         return when {
             // 高置信度记账
-            transactionScore >= 2 || (transactionScore >= 1 && messageParser.containsAmount(message)) -> {
+            transactionScore >= 2 ||
+                (transactionScore >= 1 && messageParser.containsAmount(message)) ||
+                isExplicitRecordRequest -> {
                 IntentAnalysis(UserIntent.RECORD_TRANSACTION, 0.85f)
             }
             
@@ -455,7 +462,7 @@ class AIReasoningEngine @Inject constructor(
         intentAnalysis: IntentAnalysis,
         currentButlerId: String
     ): List<AIAction> {
-        val message = context.userMessage
+        val message = resolveTransactionMessage(context)
         val actions = mutableListOf<AIAction>()
 
         // 上下文连续：检测是否引用上一笔操作
@@ -520,6 +527,40 @@ class AIReasoningEngine @Inject constructor(
      * 
      * 【重要】所有人格都有完全相同的操作权限，此函数仅影响回复语气，不影响功能执行
      */
+    private fun resolveTransactionMessage(context: ReasoningContext): String {
+        val currentMessage = context.userMessage
+        if (!shouldContinueTransactionClarification(currentMessage, context.conversationHistory)) {
+            return currentMessage
+        }
+
+        val lastClarificationIndex = context.conversationHistory.indexOfLast { isTransactionAmountClarificationPrompt(it) }
+        if (lastClarificationIndex <= 0) {
+            return currentMessage
+        }
+
+        val previousUserMessage = context.conversationHistory[lastClarificationIndex - 1]
+        return "$previousUserMessage $currentMessage"
+    }
+
+    private fun shouldContinueTransactionClarification(
+        message: String,
+        conversationHistory: List<String>
+    ): Boolean {
+        if (!messageParser.containsAmount(message)) {
+            return false
+        }
+        val lastClarificationIndex = conversationHistory.indexOfLast { isTransactionAmountClarificationPrompt(it) }
+        if (lastClarificationIndex <= 0) {
+            return false
+        }
+        val previousUserMessage = conversationHistory[lastClarificationIndex - 1]
+        return previousUserMessage != message
+    }
+
+    private fun isTransactionAmountClarificationPrompt(message: String): Boolean {
+        return message.contains("金额") && message.contains("交易")
+    }
+
     private fun generateReluctantResponse(butlerId: String, action: String): String? {
         // 所有人格都有相同权限，这里只返回null，不限制任何操作
         // 所有记账、查询、管理操作都能正常执行

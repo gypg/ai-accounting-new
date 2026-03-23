@@ -71,6 +71,37 @@ class AIAssistantMessageExecutionCoordinatorTest {
     }
 
     @Test
+    fun execute_returnsReplyResult_whenLocalActionsContainRequestClarification() = runTest {
+        val reasoningResult = reasoningResult(AIReasoningEngine.UserIntent.RECORD_TRANSACTION)
+        coEvery { aiReasoningEngine.reason(any(), any()) } returns reasoningResult
+        coEvery { aiReasoningEngine.executeActions(any()) } returns "请问这笔交易的金额是多少呢？"
+        coEvery { messageOrchestrator.route(any(), any(), any(), any(), any(), any(), any(), any()) } returns
+            AIAssistantMessageRoute.LocalActions(
+                listOf(AIReasoningEngine.AIAction.RequestClarification("请问这笔交易的金额是多少呢？"))
+            )
+
+        var remoteCalled = false
+        val result = coordinator.execute(
+            message = "帮我记一笔午饭",
+            currentButler = butler,
+            conversationHistory = emptyList(),
+            isNetworkAvailable = true,
+            currentUseBuiltinConfig = false,
+            currentAIConfig = AIConfig(isEnabled = true, apiKey = "key"),
+            pendingState = null,
+            handleModificationConfirmation = { _, _ -> ModificationFlowResult.Finish("不会走到这里") },
+            handleTransactionModification = { _, _ -> ModificationFlowResult.Finish("不会走到这里") },
+            processWithRemoteAI = {
+                remoteCalled = true
+                "不会走到这里"
+            }
+        )
+
+        assertEquals(AIAssistantMessageExecutionResult.Reply("请问这笔交易的金额是多少呢？"), result)
+        assertTrue(!remoteCalled)
+    }
+
+    @Test
     fun execute_returnsRemoteResult_whenRouteIsRemoteFallback() = runTest {
         val reasoningResult = reasoningResult(AIReasoningEngine.UserIntent.GENERAL_CONVERSATION)
         coEvery { aiReasoningEngine.reason(any(), any()) } returns reasoningResult
