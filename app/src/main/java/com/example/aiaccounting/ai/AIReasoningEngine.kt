@@ -489,6 +489,12 @@ class AIReasoningEngine @Inject constructor(
             )
         }
 
+        if (requiresTransactionAccountClarification(message)) {
+            return listOf(
+                AIAction.RequestClarification("这笔记到哪个账户呢？比如现金、微信、支付宝或银行卡。")
+            )
+        }
+
         // 判断交易类型
         val type = when {
             message.contains("收入") || message.contains("收到") || message.contains("工资") || 
@@ -578,6 +584,19 @@ class AIReasoningEngine @Inject constructor(
         ).any { lowerMessage.contains(it) }
         val inferredExpenseCategory = categoryInferrer.inferCategory(message, TransactionType.EXPENSE)
         return explicitRecordRequest && !hasExplicitType && inferredExpenseCategory == null
+    }
+
+    private suspend fun requiresTransactionAccountClarification(message: String): Boolean {
+        if (inferAccount(message) != null) {
+            return false
+        }
+        val lowerMessage = message.lowercase()
+        val explicitRecordRequest = lowerMessage.contains("记一笔") || lowerMessage.contains("记一下") || lowerMessage.contains("记个")
+        if (!explicitRecordRequest) {
+            return false
+        }
+        val activeAccounts = accountRepository.getAllAccountsList().filterNot { it.isArchived }
+        return activeAccounts.size > 1
     }
 
     private fun generateReluctantResponse(butlerId: String, action: String): String? {

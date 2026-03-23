@@ -1,5 +1,7 @@
 package com.example.aiaccounting.ai
 
+import com.example.aiaccounting.data.local.entity.Account
+import com.example.aiaccounting.data.local.entity.AccountType
 import com.example.aiaccounting.data.local.entity.TransactionType
 import com.example.aiaccounting.data.repository.AccountRepository
 import com.example.aiaccounting.data.repository.CategoryRepository
@@ -69,6 +71,62 @@ class AIReasoningEngineTest {
             "这笔是收入、支出还是转账呢？",
             (result.actions.single() as AIReasoningEngine.AIAction.RequestClarification).question
         )
+    }
+
+    @Test
+    fun reason_returnsRequestClarification_forExplicitRecordRequestWithoutAccount_whenMultipleAccountsExist() = runTest {
+        stubNonIdentityAndNonModification()
+        coEvery { accountRepository.getAllAccountsList() } returns listOf(
+            Account(id = 1, name = "微信", type = AccountType.WECHAT),
+            Account(id = 2, name = "支付宝", type = AccountType.ALIPAY)
+        )
+
+        val result = engine.reason(
+            context = AIReasoningEngine.ReasoningContext(userMessage = "帮我记一笔午饭 25 元 支出"),
+            currentButlerId = "xiaocainiang"
+        )
+
+        assertEquals(AIReasoningEngine.UserIntent.RECORD_TRANSACTION, result.intent)
+        assertTrue(result.actions.single() is AIReasoningEngine.AIAction.RequestClarification)
+        assertEquals(
+            "这笔记到哪个账户呢？比如现金、微信、支付宝或银行卡。",
+            (result.actions.single() as AIReasoningEngine.AIAction.RequestClarification).question
+        )
+    }
+
+    @Test
+    fun reason_returnsRecordTransaction_whenExplicitAccountIsProvided_evenWithMultipleAccounts() = runTest {
+        stubNonIdentityAndNonModification()
+        coEvery { accountRepository.getAllAccountsList() } returns listOf(
+            Account(id = 1, name = "微信", type = AccountType.WECHAT),
+            Account(id = 2, name = "支付宝", type = AccountType.ALIPAY)
+        )
+
+        val result = engine.reason(
+            context = AIReasoningEngine.ReasoningContext(userMessage = "帮我记一笔午饭 25 元 支出 微信"),
+            currentButlerId = "xiaocainiang"
+        )
+
+        assertEquals(AIReasoningEngine.UserIntent.RECORD_TRANSACTION, result.intent)
+        assertTrue(result.actions.single() is AIReasoningEngine.AIAction.RecordTransaction)
+        val action = result.actions.single() as AIReasoningEngine.AIAction.RecordTransaction
+        assertEquals("微信", action.accountHint)
+    }
+
+    @Test
+    fun reason_returnsRecordTransaction_whenOnlyOneActiveAccountExists() = runTest {
+        stubNonIdentityAndNonModification()
+        coEvery { accountRepository.getAllAccountsList() } returns listOf(
+            Account(id = 1, name = "默认账户", type = AccountType.BANK)
+        )
+
+        val result = engine.reason(
+            context = AIReasoningEngine.ReasoningContext(userMessage = "帮我记一笔午饭 25 元 支出"),
+            currentButlerId = "xiaocainiang"
+        )
+
+        assertEquals(AIReasoningEngine.UserIntent.RECORD_TRANSACTION, result.intent)
+        assertTrue(result.actions.single() is AIReasoningEngine.AIAction.RecordTransaction)
     }
 
     @Test

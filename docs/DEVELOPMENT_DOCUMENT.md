@@ -56,7 +56,7 @@ AI记账是一款面向中国大陆个人用户的智能记账 Android 应用。
 - 模块 3D 第一段已新增 `AIAssistantMessageExecutionResult`，把主消息链路中的“最终回复”与“待确认”显式区分，避免在编排层过早把确认态抹平成普通字符串
 - 模块 3D 第二段已将 `RequestClarification` 接入更通用的记账澄清闭环：缺金额时优先本地追问，补充金额后可沿最近澄清上下文继续走记账处理
 - 模块 3D 第三段已新增 `PendingClarificationState` / `ClarificationTrigger` / `ClarificationFlowResult`，把 clarification 从轻量历史 continuation 升级为显式 pending clarification state
-- 当前 clarification 已覆盖两类本地澄清：缺金额、以及“显式记一笔 + 已给金额但交易类型仍不明确”
+- 模块 3D 第四段已把 clarification 扩展到账户缺口：当用户明确记账、金额和交易类型已足够、但存在多个可用账户且消息未指明账户时，系统会先本地追问账户，而不是静默落默认账户
 - 新建会话、切换会话、删除/重置当前会话时，都会统一清理 pending modification / pending clarification state，避免跨 session 串流旧确认或旧澄清
 - 当前 `ViewModel` 继续保留 UI state、仓库存储、session 入口，消息理解与执行编排开始独立化
 
@@ -103,7 +103,7 @@ AI记账是一款面向中国大陆个人用户的智能记账 Android 应用。
   - 覆盖失败确认保留状态
   - 覆盖需要再次确认时保留 pending 状态
 - `AIAssistantPendingClarificationLifecycleTest`
-  - 覆盖金额澄清 / 类型澄清 trigger 建立
+  - 覆盖金额澄清 / 类型澄清 / 账户澄清 trigger 建立
   - 覆盖补充信息前重复追问、补齐后继续执行、取消后清理状态
   - 覆盖 lifecycle clear 后 pending clarification state 被清空
 - `AIAssistantPendingStateResetTest`
@@ -112,6 +112,8 @@ AI记账是一款面向中国大陆个人用户的智能记账 Android 应用。
   - 覆盖缺金额记账请求先返回 `RequestClarification`
   - 覆盖金额补充消息在澄清上下文下继续产出 `RecordTransaction`
   - 覆盖“记一笔 + 已给金额但未指明类型”时先追问收入 / 支出 / 转账
+  - 覆盖“记一笔 + 已给金额/类型但多账户未指明账户”时先追问账户
+  - 覆盖已显式给出账户或仅有单账户时不触发账户澄清
 
 #### 当前实现边界
 - `AIAssistantViewModel` 已不再直接持有原始 pending modification state，而是委派给 `AIAssistantPendingModificationLifecycle`

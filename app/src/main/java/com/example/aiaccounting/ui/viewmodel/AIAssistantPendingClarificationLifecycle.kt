@@ -5,6 +5,7 @@ import com.example.aiaccounting.ai.AIMessageParser
 internal enum class ClarificationTrigger {
     TRANSACTION_AMOUNT,
     TRANSACTION_TYPE,
+    TRANSACTION_ACCOUNT,
     GENERIC
 }
 
@@ -87,6 +88,9 @@ internal class AIAssistantPendingClarificationLifecycle(
             question.contains("收入") || question.contains("支出") || question.contains("转账") -> {
                 ClarificationTrigger.TRANSACTION_TYPE
             }
+            question.contains("账户") || question.contains("微信") || question.contains("支付宝") || question.contains("银行卡") -> {
+                ClarificationTrigger.TRANSACTION_ACCOUNT
+            }
             else -> ClarificationTrigger.GENERIC
         }
     }
@@ -95,6 +99,7 @@ internal class AIAssistantPendingClarificationLifecycle(
         return when (state.trigger) {
             ClarificationTrigger.TRANSACTION_AMOUNT -> !messageParser.containsAmount(message)
             ClarificationTrigger.TRANSACTION_TYPE -> !containsTransactionType(message)
+            ClarificationTrigger.TRANSACTION_ACCOUNT -> !containsTransactionAccount(message)
             ClarificationTrigger.GENERIC -> message.isBlank()
         }
     }
@@ -104,6 +109,14 @@ internal class AIAssistantPendingClarificationLifecycle(
         return listOf("收入", "支出", "转账", "花了", "消费", "赚", "收到", "工资", "奖金").any {
             lowerMessage.contains(it)
         }
+    }
+
+    private fun containsTransactionAccount(message: String): Boolean {
+        val lowerMessage = message.lowercase()
+        return listOf(
+            "微信", "wechat", "wx", "支付宝", "alipay", "现金", "cash",
+            "信用卡", "银行卡", "银行", "储蓄卡", "借记卡", "debit", "credit"
+        ).any { lowerMessage.contains(it) }
     }
 
     private fun isCancellation(message: String): Boolean {

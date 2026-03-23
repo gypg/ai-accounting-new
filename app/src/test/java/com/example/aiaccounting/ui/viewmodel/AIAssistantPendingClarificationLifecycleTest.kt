@@ -34,6 +34,18 @@ class AIAssistantPendingClarificationLifecycleTest {
     }
 
     @Test
+    fun begin_storesPendingState_withTransactionAccountTrigger() {
+        val result = lifecycle.begin(
+            originalMessage = "帮我记一笔午饭 25 元 支出",
+            question = "这笔记到哪个账户呢？比如现金、微信、支付宝或银行卡。"
+        )
+
+        assertEquals("这笔记到哪个账户呢？比如现金、微信、支付宝或银行卡。", result.reply)
+        assertEquals(ClarificationTrigger.TRANSACTION_ACCOUNT, result.pendingState.trigger)
+        assertNotNull(lifecycle.currentState())
+    }
+
+    @Test
     fun continuePending_returnsFallbackFinish_whenNoPendingStateExists() {
         val result = lifecycle.continuePending("25元", "xiaocainiang")
 
@@ -90,6 +102,51 @@ class AIAssistantPendingClarificationLifecycleTest {
             result
         )
         assertNotNull(lifecycle.currentState())
+    }
+
+    @Test
+    fun continuePending_reasksQuestion_whenTransactionAccountIsStillMissing() {
+        lifecycle.seedForTest(
+            PendingClarificationState(
+                originalMessage = "帮我记一笔午饭 25 元 支出",
+                question = "这笔记到哪个账户呢？比如现金、微信、支付宝或银行卡。",
+                trigger = ClarificationTrigger.TRANSACTION_ACCOUNT
+            )
+        )
+
+        val result = lifecycle.continuePending("午饭", "xiaocainiang")
+
+        assertEquals(
+            ClarificationFlowResult.RequestClarification(
+                pendingState = PendingClarificationState(
+                    originalMessage = "帮我记一笔午饭 25 元 支出",
+                    question = "这笔记到哪个账户呢？比如现金、微信、支付宝或银行卡。",
+                    trigger = ClarificationTrigger.TRANSACTION_ACCOUNT
+                ),
+                reply = "这笔记到哪个账户呢？比如现金、微信、支付宝或银行卡。"
+            ),
+            result
+        )
+        assertNotNull(lifecycle.currentState())
+    }
+
+    @Test
+    fun continuePending_mergesOriginalMessage_whenUserProvidesTransactionAccount() {
+        lifecycle.seedForTest(
+            PendingClarificationState(
+                originalMessage = "帮我记一笔午饭 25 元 支出",
+                question = "这笔记到哪个账户呢？比如现金、微信、支付宝或银行卡。",
+                trigger = ClarificationTrigger.TRANSACTION_ACCOUNT
+            )
+        )
+
+        val result = lifecycle.continuePending("微信", "xiaocainiang")
+
+        assertEquals(
+            ClarificationFlowResult.ContinueWithMessage("帮我记一笔午饭 25 元 支出 微信"),
+            result
+        )
+        assertNull(lifecycle.currentState())
     }
 
     @Test
