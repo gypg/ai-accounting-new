@@ -46,8 +46,13 @@ AI记账是一款面向中国大陆个人用户的智能记账 Android 应用。
 #### 模块 3：指令理解与执行链路重构（当前阶段）
 - `AIAssistantViewModel` 已先抽出 `AIAssistantRemoteResponseInterpreter`
 - 远程 AI 返回现在统一分三类处理：action JSON、本地记账 fallback、普通文本回复
-- 已避免把“记住提醒”类普通对话误判成记账，但仍保留 `记账 / 记个账 / 记一笔` 等常见记账短语识别
+- 已避免把“记住提醒”类普通对话误判成记账，并在第二段补回 `记下 / 记录 / 记录一笔` 等记账短语回退保护
 - `processWithAIReasoning()` 已改为委派到 `AIAssistantMessageExecutionCoordinator`
+- `processWithRemoteAI()` 已进一步瘦身，当前只保留上下文准备与 prompt 构建，再委派给 `AIAssistantRemoteExecutionHandler`
+- `AIAssistantRemoteExecutionHandler` 中的 `stream 收集 / timeout / 失败 usage 记录` 已再下沉到新的 `AIAssistantRemoteStreamCollector`
+- `AIAssistantRemoteResponseIntegrityChecker` 已从花括号/围栏启发式升级为结构化 JSON object 有效性校验，但仍只对“纯 JSON / 纯 fenced JSON”形态生效
+- 模块 3C 第三段已新增 `AIAssistantRemoteExecutionResult`，把 timeout / transport failure / incomplete / action dispatch / local fallback / remote reply 统一为语义结果
+- 当前 action 执行仅允许“纯 JSON / 纯 fenced JSON”响应命中，已避免 explanatory 文本中夹带 JSON 示例被误执行
 - 当前 `ViewModel` 继续保留 UI state、仓库存储、session 入口，消息理解与执行编排开始独立化
 
 #### 本模块新增测试
@@ -57,17 +62,48 @@ AI记账是一款面向中国大陆个人用户的智能记账 Android 应用。
   - 覆盖普通文本回复 / 本地记账 fallback 分流
   - 覆盖 fallback 成功/失败时的回复合并
   - 覆盖“记住”类误判回归
+  - 覆盖 `记下 / 记录一笔` 等记账短语回归
 - `AIAssistantMessageOrchestratorTest`
   - 覆盖 pending modification 优先级
   - 覆盖远程可用/不可用时的路由差异
   - 覆盖修改交易意图进入 modification flow
+- `AIAssistantRemoteExecutionHandlerTest`
+  - 覆盖 stream chunk 聚合后的正常返回
+  - 覆盖 timeout 时返回 `Timeout` 语义结果并保留失败 usage 记录
+  - 覆盖异常时返回 `TransportFailure` 语义结果
+  - 覆盖不完整响应时返回 `IncompleteResponse` 并记录失败 usage
+  - 覆盖远程文本回退为 `LocalFallbackRequested`
+  - 覆盖 `ExecuteActions` 分支返回 `ActionExecutionRequested`
+- `AIAssistantRemoteResponseIntegrityCheckerTest`
+  - 覆盖空响应
+  - 覆盖未闭合 fenced JSON
+  - 覆盖花括号不平衡的 JSON 片段
+  - 覆盖普通文本与完整 fenced JSON 的放行
+  - 覆盖普通文本即使包含 `{预算}` 这类孤立花括号也不会误判不完整
+  - 覆盖 bare JSON valid
+  - 覆盖 bare / fenced JSON trailing comma invalid
+  - 覆盖 non-json fenced text 仍按普通文本放行
+- `AIAssistantRemoteStreamCollectorTest`
+  - 覆盖 chunk 聚合成功
+  - 覆盖 timeout 返回
+  - 覆盖异常失败返回
 
 #### 当前实现边界
 - `AIAssistantViewModel` 已不再直接持有原始 pending modification state，而是委派给 `AIAssistantPendingModificationLifecycle`
 - `AIAssistantModificationCoordinator` 已为结束态补充 `shouldClearPending`，避免依赖用户输入文案猜测是否清理状态
 - 失败确认场景现在会保留 pending state，用户仍可继续重试或取消
-- `processWithRemoteAI()` 仍保留 prompt 构建、stream 调用、usage 记录与超时控制
-- 下一步优先继续拆远程执行链本身，再考虑是否让 `AIAssistantMessageExecutionCoordinator` 持有更完整的执行结果模型
+- `processWithRemoteAI()` 当前已不再直接处理 stream 调用、timeout 与 usage 记录，这些职责已分别抽到 `AIAssistantRemoteExecutionHandler` 与 `AIAssistantRemoteStreamCollector`
+- 响应完整性检查已从 `ViewModel` 外移到 `AIAssistantRemoteResponseIntegrityChecker`
+- 当前远程执行链已基本形成 `ViewModel -> Handler -> StreamCollector / IntegrityChecker / Interpreter` 的分层
+- 当前 `processWithRemoteAI()` 已负责把 `AIAssistantRemoteExecutionResult` 统一映射为用户可见文案或副作用执行，handler 不再直接返回字符串分支
+- 当前 `AIAssistantRemoteResponseIntegrityChecker` 已升级为结构化 JSON object 有效性校验，但校验范围仍故意与解释器保持一致，只覆盖“纯 JSON / 纯 fenced JSON”
+- 下一步若继续模块 3C，应优先评估是否将 `AIAssistantRemoteExecutionResult` 的 ViewModel 映射再下沉为专用 mapper
+
+#### 下个窗口默认接手点
+- 模块 3C 第四段已收口完成
+- 若继续本方向，直接进入 **模块 3C：远程执行链拆分（第五段，可选）**
+- 优先评估是否把 `AIAssistantRemoteExecutionResult` 在 `ViewModel` 中的字符串/副作用映射继续下沉为专用 mapper，以进一步瘦身 `AIAssistantViewModel`
+- 继续遵循当前工作流：测试先行 → 完成一个模块后更新 memory / 开发文档 / git commit / push
 
 
 #### 已实现能力

@@ -15,7 +15,8 @@ internal class AIAssistantRemoteResponseInterpreter {
     private val transactionKeywords = listOf(
         "花了", "收入", "支出", "消费", "买", "卖", "转账", "付", "赚", "工资", "奖金", "红包", "退款", "报销"
     )
-    private val transactionPhrases = listOf("记账", "记个账", "记一笔")
+    private val transactionPhrases = listOf("记账", "记个账", "记一笔", "记下", "记录", "记录一笔")
+    private val fencedJsonRegex = Regex("^```(?:json)?\\s*([\\s\\S]*?)\\s*```$")
 
     fun interpret(userMessage: String, remoteResponse: String): RemoteResponseDecision {
         return if (isActionCommand(remoteResponse)) {
@@ -36,17 +37,15 @@ internal class AIAssistantRemoteResponseInterpreter {
     }
 
     private fun isActionCommand(response: String): Boolean {
-        val trimmed = response.trim()
-        val candidate = extractJsonCandidate(trimmed) ?: return false
+        val candidate = extractExecutableJsonCandidate(response.trim()) ?: return false
 
         return candidate.contains("\"action\"") ||
             candidate.contains("\"actions\"") ||
             actionTypeRegex.containsMatchIn(candidate)
     }
 
-    private fun extractJsonCandidate(response: String): String? {
-        val fencedJson = Regex("```(?:json)?\\s*([\\s\\S]*?)\\s*```")
-            .find(response)
+    private fun extractExecutableJsonCandidate(response: String): String? {
+        val fencedJson = fencedJsonRegex.find(response)
             ?.groupValues
             ?.getOrNull(1)
             ?.trim()
@@ -54,13 +53,11 @@ internal class AIAssistantRemoteResponseInterpreter {
             return fencedJson
         }
 
-        val firstBrace = response.indexOf('{')
-        val lastBrace = response.lastIndexOf('}')
-        if (firstBrace >= 0 && lastBrace > firstBrace) {
-            return response.substring(firstBrace, lastBrace + 1).trim()
+        return if (response.startsWith("{") && response.endsWith("}")) {
+            response
+        } else {
+            null
         }
-
-        return null
     }
 
     private fun isTransactionRequest(message: String): Boolean {

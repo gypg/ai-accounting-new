@@ -2,20 +2,13 @@ package com.example.aiaccounting.ui.viewmodel
 
 import android.content.Context
 import android.net.Uri
-import android.util.Log
-import com.example.aiaccounting.BuildConfig
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.aiaccounting.ai.AIOperation
 import com.example.aiaccounting.ai.AIOperationExecutor
 import com.example.aiaccounting.ai.AIReasoningEngine
 import com.example.aiaccounting.ai.AILocalProcessor
 import com.example.aiaccounting.ai.TransactionModificationHandler
-import com.example.aiaccounting.data.local.entity.AIConversation
-import com.example.aiaccounting.data.local.entity.TransactionType
 import com.example.aiaccounting.data.model.AIConfig
-import com.example.aiaccounting.data.model.ChatMessage
-import com.example.aiaccounting.data.model.MessageRole
 import com.example.aiaccounting.data.model.Butler
 import com.example.aiaccounting.data.repository.AIConfigRepository
 import com.example.aiaccounting.data.repository.AIConversationRepository
@@ -29,12 +22,9 @@ import com.example.aiaccounting.data.service.ImageProcessingService
 import com.example.aiaccounting.utils.NetworkUtils
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 
 /**
@@ -79,6 +69,18 @@ class AIAssistantViewModel @Inject constructor(
         aiUsageRepository = aiUsageRepository
     )
     private val remoteResponseInterpreter = AIAssistantRemoteResponseInterpreter()
+    private val remoteResponseIntegrityChecker = AIAssistantRemoteResponseIntegrityChecker()
+    private val remoteStreamCollector = AIAssistantRemoteStreamCollector(
+        sendChatStream = aiService::sendChatStream,
+        recordUsageFailure = { aiUsageRepository.recordCall(success = false) }
+    )
+    private val remoteExecutionHandler = AIAssistantRemoteExecutionHandler(
+        streamCollector = remoteStreamCollector,
+        integrityChecker = remoteResponseIntegrityChecker,
+        interpreter = remoteResponseInterpreter,
+        recordUsageSuccess = { aiUsageRepository.recordCall(success = true) },
+        recordUsageFailure = { aiUsageRepository.recordCall(success = false) }
+    )
     private val promptBuilder = AIAssistantPromptBuilder()
     private val commandHandler = AIAssistantCommandHandler(
         accountRepository = accountRepository,
@@ -296,66 +298,30 @@ class AIAssistantViewModel @Inject constructor(
      * 使用远程大模型处理消息
      */
     private suspend fun processWithRemoteAI(message: String): String {
-        // 获取当前账户和分类信息，提供给AI上下文
         val accounts = accountRepository.getAllAccountsList()
         val categories = categoryRepository.getAllCategoriesList()
-
-        // 获取当前管家
         val currentButler = butlerCoordinator.resolveCurrentButler(_uiState.value.currentButler)
-
-        // 使用 PromptBuilder 构建消息
         val messages = promptBuilder.buildMessages(message, currentButler, accounts, categories)
 
-        return try {
-            // 增加超时时间到60秒
-            val result = withTimeoutOrNull(60000L) {
-                var fullResponse = ""
-                aiService.sendChatStream(messages, currentAIConfig).collect { chunk ->
-                    fullResponse += chunk
-                }
-                fullResponse
+        return when (val result = remoteExecutionHandler.execute(
+            userMessage = message,
+            messages = messages,
+            config = currentAIConfig
+        )) {
+            is AIAssistantRemoteExecutionResult.Timeout -> "请求超时，请稍后重试。"
+            is AIAssistantRemoteExecutionResult.TransportFailure -> "处理请求时出错: ${result.message}"
+            is AIAssistantRemoteExecutionResult.IncompleteResponse -> "响应不完整，请稍后重试。"
+            is AIAssistantRemoteExecutionResult.ActionExecutionRequested -> {
+                actionExecutor.executeAIActions(result.rawResponse)
             }
-
-            if (result == null) {
-                aiUsageRepository.recordCall(success = false)
-                // 超时回复
-                return "请求超时，请稍后重试。"
+            is AIAssistantRemoteExecutionResult.LocalFallbackRequested -> {
+                val localResult = processWithLocalAI(message)
+                remoteResponseInterpreter.combineRemoteAndLocalReply(
+                    remoteReply = result.remoteReply,
+                    localResult = localResult
+                )
             }
-
-            // 记录成功
-            aiUsageRepository.recordCall(success = true)
-
-            val decision = remoteResponseInterpreter.interpret(
-                userMessage = message,
-                remoteResponse = result
-            )
-            when (decision) {
-                is RemoteResponseDecision.ExecuteActions -> {
-                    actionExecutor.executeAIActions(decision.rawResponse)
-                }
-                is RemoteResponseDecision.FallbackToLocalTransaction -> {
-                    if (BuildConfig.DEBUG) {
-                        Log.d("AIAssistantViewModel", "【记账请求】远程AI只返回文本，强制使用本地AI处理")
-                    }
-
-                    val localResult = processWithLocalAI(message)
-                    if (BuildConfig.DEBUG) {
-                        Log.d("AIAssistantViewModel", "本地AI执行结果: $localResult")
-                    }
-
-                    remoteResponseInterpreter.combineRemoteAndLocalReply(
-                        remoteReply = decision.remoteReply,
-                        localResult = localResult
-                    )
-                }
-                is RemoteResponseDecision.ReturnRemoteReply -> {
-                    decision.reply
-                }
-            }
-        } catch (e: Exception) {
-            aiUsageRepository.recordCall(success = false)
-            // 错误回复
-            "处理请求时出错: ${e.message}"
+            is AIAssistantRemoteExecutionResult.RemoteReply -> result.reply
         }
     }
 

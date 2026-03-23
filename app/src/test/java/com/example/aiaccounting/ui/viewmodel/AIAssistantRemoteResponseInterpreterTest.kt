@@ -19,13 +19,13 @@ class AIAssistantRemoteResponseInterpreterTest {
     }
 
     @Test
-    fun interpret_returnsExecuteActions_whenJsonActionHasTextPreamble() {
+    fun interpret_returnsRemoteReply_whenJsonActionHasTextPreamble() {
         val decision = interpreter.interpret(
             userMessage = "帮我记一笔午饭 25 元",
             remoteResponse = "好的，下面是执行结果：{\"action\":\"add_transaction\",\"amount\":25}"
         )
 
-        assertTrue(decision is RemoteResponseDecision.ExecuteActions)
+        assertTrue(decision is RemoteResponseDecision.FallbackToLocalTransaction)
     }
 
     @Test
@@ -53,6 +53,26 @@ class AIAssistantRemoteResponseInterpreterTest {
     fun interpret_returnsFallbackToLocalTransaction_whenMessageContainsLedgerPhrase() {
         val decision = interpreter.interpret(
             userMessage = "帮我记一笔午饭 25 元",
+            remoteResponse = "好的，我来帮你处理这笔记录。"
+        )
+
+        assertTrue(decision is RemoteResponseDecision.FallbackToLocalTransaction)
+    }
+
+    @Test
+    fun interpret_returnsFallbackToLocalTransaction_whenMessageContainsRecordVerb() {
+        val decision = interpreter.interpret(
+            userMessage = "帮我记下今天午饭 25 元",
+            remoteResponse = "好的，我来帮你处理这笔记录。"
+        )
+
+        assertTrue(decision is RemoteResponseDecision.FallbackToLocalTransaction)
+    }
+
+    @Test
+    fun interpret_returnsFallbackToLocalTransaction_whenMessageContainsRecordPhrase() {
+        val decision = interpreter.interpret(
+            userMessage = "记录一笔打车费 18 元",
             remoteResponse = "好的，我来帮你处理这笔记录。"
         )
 
