@@ -40,6 +40,8 @@ class AIService @Inject constructor(
 ) {
 
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
+    private val requestPolicyResolver = AIRequestPolicyResolver()
+    private val requestFailureClassifier = AIRequestFailureClassifier()
 
     /**
      * 发送对话请求（流式）
@@ -239,13 +241,16 @@ class AIService @Inject constructor(
             return@withContext "API地址不能为空"
         }
 
+        val policy = requestPolicyResolver.resolve(AIRequestKind.CONNECTION_TEST, config)
+
         try {
             val testMessages = listOf(
                 ChatMessage(MessageRole.USER, "Hi")
             )
 
             when (config.provider) {
-                AIProvider.QWEN, AIProvider.DEEPSEEK, AIProvider.ZHIPU, AIProvider.BAIDU, AIProvider.CUSTOM -> testOpenAIConnection(config, testMessages)
+                AIProvider.QWEN, AIProvider.DEEPSEEK, AIProvider.ZHIPU, AIProvider.BAIDU, AIProvider.CUSTOM ->
+                    testOpenAIConnection(config, testMessages, policy)
             }
 
             null
@@ -262,22 +267,26 @@ class AIService @Inject constructor(
                 "连接超时，请检查网络或稍后重试"
             }
         } catch (e: Exception) {
-            when {
-                e.message?.contains("401") == true -> "API密钥无效或已过期"
-                e.message?.contains("403") == true -> "没有权限访问该API"
-                e.message?.contains("404") == true -> "API地址不存在，请检查URL"
-                e.message?.contains("429") == true -> "请求过于频繁，请稍后再试"
-                e.message?.contains("500") == true || e.message?.contains("502") == true || e.message?.contains("503") == true -> "服务器错误，请稍后再试"
-                e.message?.contains("UnknownHostException") == true || e.message?.contains("无法解析主机") == true -> "无法连接到服务器，请检查网络或API地址"
-                e.message?.contains("ConnectException") == true || e.message?.contains("连接") == true -> "连接失败，请检查网络"
-                e.message?.contains("SSL") == true || e.message?.contains("证书") == true -> "SSL证书错误"
-                e.message?.contains("timeout") == true || e.message?.contains("超时") == true -> "连接超时，请检查网络"
-                else -> "连接失败: ${e.message ?: "未知错误"}"
-            }
+            mapConnectionFailureToMessage(e)
         }
     }
 
-    private fun testOpenAIConnection(config: AIConfig, messages: List<ChatMessage>) {
+    private fun mapConnectionFailureToMessage(error: Throwable): String {
+        return when (requestFailureClassifier.classify(error)) {
+            AIRequestFailureCategory.INVALID_API_KEY -> "API密钥无效或已过期"
+            AIRequestFailureCategory.FORBIDDEN -> "没有权限访问该API"
+            AIRequestFailureCategory.NOT_FOUND -> "API地址不存在，请检查URL"
+            AIRequestFailureCategory.RATE_LIMITED -> "请求过于频繁，请稍后再试"
+            AIRequestFailureCategory.SERVER_ERROR -> "服务器错误，请稍后再试"
+            AIRequestFailureCategory.DNS_FAILURE -> "无法连接到服务器，请检查网络或API地址"
+            AIRequestFailureCategory.CONNECT_FAILURE -> "连接失败，请检查网络"
+            AIRequestFailureCategory.SSL_FAILURE -> "SSL证书错误"
+            AIRequestFailureCategory.TIMEOUT -> "连接超时，请检查网络"
+            AIRequestFailureCategory.OTHER -> "连接失败: ${error.message ?: "未知错误"}"
+        }
+    }
+
+    private fun testOpenAIConnection(config: AIConfig, messages: List<ChatMessage>, policy: AIRequestPolicy) {
         val primaryModel = config.model.trim()
 
         if (primaryModel.isNotBlank()) {
@@ -301,6 +310,10 @@ class AIService @Inject constructor(
             // try next candidate
         } catch (e: OpenAIChatFailure.Timeout) {
             // try next candidate
+        }
+
+        if (!policy.allowModelFallback || policy.maxAttempts < 2) {
+            throw OpenAIChatFailure.ModelUnavailable("model_unavailable: no alternative model")
         }
 
         val secondModel = pickPreferredModel(candidateModels, exclude = setOf(firstModel))
@@ -534,11 +547,19 @@ class AIService @Inject constructor(
     }
 
     private fun isModelUnavailable(responseCode: Int, responseBody: String?): Boolean {
-        // Strong signals
-        if (responseCode == 404) return true
-
         val body = responseBody.orEmpty().lowercase()
-        // Common OpenAI/OpenRouter style messages
+
+        if (responseCode == 404) {
+            return body.contains("model") && (
+                body.contains("not found") ||
+                    body.contains("does not exist") ||
+                    body.contains("unknown model") ||
+                    body.contains("invalid model") ||
+                    body.contains("model_not_found") ||
+                    body.contains("no such model")
+                )
+        }
+
         return body.contains("model") && (
             body.contains("not found") ||
                 body.contains("does not exist") ||
@@ -669,6 +690,8 @@ class AIService @Inject constructor(
         try {
             return sendOpenAIChatNonStreamOnce(messages, config.copy(model = firstModel))
         } catch (e: OpenAIChatFailure.ModelUnavailable) {
+            // Continue to fallback
+        } catch (e: OpenAIChatFailure.Timeout) {
             // Continue to fallback
         }
 

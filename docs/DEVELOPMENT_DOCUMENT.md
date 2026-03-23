@@ -158,6 +158,66 @@ AI记账是一款面向中国大陆个人用户的智能记账 Android 应用。
   - `./gradlew testDebugUnitTest --tests com.example.aiaccounting.data.service.image.ReceiptTextHeuristicsTest --tests com.example.aiaccounting.ui.viewmodel.AIAssistantImageMessageHandlerTest` ✅
   - `./gradlew testDebugUnitTest --continue` ✅
 
+### 2.5 四大问题总体完成度对照（按最初交付要求复盘）
+
+> 说明：以下状态区分“当前模块化切片已完成”与“最初整套产品目标已全部完成”。截至 2026-03-23，前者已有明显进展，后者尚未全部收口。
+
+#### 问题1：OCR识别精度问题
+- **当前状态：部分完成（当前模块目标已完成）**
+- **已完成**：
+  - 本地 OCR 轻量预处理：缩放、灰度化、对比度增强
+  - 账单关键信号提取：金额、时间、支付方式、商户
+  - 启发式质量评分与 `HIGH / MEDIUM / LOW / NONE` 分级
+  - 非原生多模态模型下仅中高置信度结果送云端
+  - 低置信度结果本地拦截并提示重拍
+- **未完成/未落地为正式能力**：
+  - 多 OCR 引擎比对机制
+  - 更重的图像预处理链路（如倾斜校正、OpenCV 级增强）
+  - OCR 引擎原生置信度体系与模型级优化
+
+#### 问题2：自动优选模型导致超时
+- **当前状态：部分完成（连接测试链路已完成，运行时性能调度体系未完成）**
+- **已完成**：
+  - AUTO 模式连接测试有界 fallback
+  - 首候选失败时尝试 1 个备用模型
+  - FIXED 模式保持不切模型语义
+  - 404 仅在明确带 model 信号时才归为 model unavailable
+  - reviewer follow-up 回归测试已补齐：AUTO timeout fallback / plain 404 classification
+- **未完成/未落地为正式能力**：
+  - 运行时模型性能监测机制
+  - 响应时间阈值驱动的动态切换
+  - 模型预加载与资源调度管理
+
+#### 问题3：指令理解与执行流程优化
+- **当前状态：部分完成（模块 3C 第四段完成，整套交互确认机制未完全产品化）**
+- **已完成**：
+  - 远程响应解释、消息执行 coordinator、pending modification 生命周期收口
+  - 远程 handler / stream collector / integrity checker 分层
+  - 远程执行结果统一模型
+  - 结构化 JSON 完整性校验
+  - explanatory JSON 误执行风险修复
+- **未完成/未落地为正式能力**：
+  - 面向用户的分步意图澄清 UI/交互机制
+  - 明确的“需求确认后再二次请求云端 AI”的完整闭环
+  - 更彻底的结构化分步上送协议与可视化思考/确认流程
+
+#### 问题4：网络延迟与超时优化
+- **当前状态：部分完成（仅完成基础超时与连接稳定性修复）**
+- **已完成**：
+  - 测试连接与邀请码网关超时参数上调
+  - 连接池、pingInterval、IPv4-first DNS
+- **未完成/未落地为正式能力**：
+  - 网络连接测速模块
+  - 智能路由与最低延迟节点选择
+  - 明确的自动重试 + 退避算法体系
+  - 压缩传输 / 增量更新
+  - 网络状态监测与预警提示
+
+#### 当前建议优先级
+1. 先把 **问题2 最新 reviewer follow-up** 提交到 git，确保代码 / memory / 文档 / git 状态一致
+2. 然后回到 **问题3**，优先评估是否把 `AIAssistantRemoteExecutionResult` 在 `ViewModel` 的映射继续下沉，或者直接开始“需求确认闭环”最小可用切片
+3. **问题4** 当前仍停留在早期稳定性修复阶段，后续若恢复推进，应单独拆成新的网络能力模块群，不建议混入模块3连续重构中
+
 ---
 
 ## 三、构建与发布流程
