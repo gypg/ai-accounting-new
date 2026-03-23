@@ -19,10 +19,10 @@ class AIAssistantRemoteResponseInterpreterTest {
     }
 
     @Test
-    fun interpret_returnsExecuteActions_whenResponseContainsSupportedTypeField() {
+    fun interpret_returnsExecuteActions_whenJsonActionHasTextPreamble() {
         val decision = interpreter.interpret(
             userMessage = "帮我记一笔午饭 25 元",
-            remoteResponse = "```json\n{\n  \"type\": \"add_transaction\",\n  \"amount\": 25\n}\n```"
+            remoteResponse = "好的，下面是执行结果：{\"action\":\"add_transaction\",\"amount\":25}"
         )
 
         assertTrue(decision is RemoteResponseDecision.ExecuteActions)

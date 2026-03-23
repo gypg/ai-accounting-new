@@ -37,18 +37,30 @@ internal class AIAssistantRemoteResponseInterpreter {
 
     private fun isActionCommand(response: String): Boolean {
         val trimmed = response.trim()
-        val looksLikeJson =
-            (trimmed.startsWith("{") && trimmed.endsWith("}")) ||
-                trimmed.startsWith("```json") ||
-                trimmed.startsWith("```")
+        val candidate = extractJsonCandidate(trimmed) ?: return false
 
-        if (!looksLikeJson) {
-            return false
+        return candidate.contains("\"action\"") ||
+            candidate.contains("\"actions\"") ||
+            actionTypeRegex.containsMatchIn(candidate)
+    }
+
+    private fun extractJsonCandidate(response: String): String? {
+        val fencedJson = Regex("```(?:json)?\\s*([\\s\\S]*?)\\s*```")
+            .find(response)
+            ?.groupValues
+            ?.getOrNull(1)
+            ?.trim()
+        if (!fencedJson.isNullOrBlank()) {
+            return fencedJson
         }
 
-        return trimmed.contains("\"action\"") ||
-            trimmed.contains("\"actions\"") ||
-            actionTypeRegex.containsMatchIn(trimmed)
+        val firstBrace = response.indexOf('{')
+        val lastBrace = response.lastIndexOf('}')
+        if (firstBrace >= 0 && lastBrace > firstBrace) {
+            return response.substring(firstBrace, lastBrace + 1).trim()
+        }
+
+        return null
     }
 
     private fun isTransactionRequest(message: String): Boolean {

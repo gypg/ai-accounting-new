@@ -72,6 +72,7 @@ class AIAssistantViewModel @Inject constructor(
         messageOrchestrator = messageOrchestrator
     )
     private val modificationCoordinator = AIAssistantModificationCoordinator(transactionModificationHandler)
+    private val pendingModificationLifecycle = AIAssistantPendingModificationLifecycle(modificationCoordinator)
     private val imageMessageHandler = AIAssistantImageMessageHandler(
         aiService = aiService,
         imageProcessingService = imageProcessingService,
@@ -85,8 +86,6 @@ class AIAssistantViewModel @Inject constructor(
         aiOperationExecutor = aiOperationExecutor
     )
 
-    // 待确认的交易修改状态
-    private var pendingModificationState: PendingModificationState? = null
     private var switchSessionJob: Job? = null
 
     private val _uiState = MutableStateFlow(AIAssistantUiState())
@@ -248,7 +247,7 @@ class AIAssistantViewModel @Inject constructor(
             isNetworkAvailable = isNetworkAvailable,
             currentUseBuiltinConfig = currentUseBuiltinConfig,
             currentAIConfig = currentAIConfig,
-            pendingState = pendingModificationState,
+            pendingState = pendingModificationLifecycle.currentState(),
             handleModificationConfirmation = ::handleModificationConfirmation,
             handleTransactionModification = ::handleTransactionModification,
             processWithRemoteAI = ::processWithRemoteAI
@@ -262,13 +261,7 @@ class AIAssistantViewModel @Inject constructor(
         message: String,
         butlerId: String
     ): String {
-        return when (val result = modificationCoordinator.beginModification(message, butlerId)) {
-            is ModificationFlowResult.StartConfirmation -> {
-                pendingModificationState = result.pendingState
-                result.reply
-            }
-            is ModificationFlowResult.Finish -> result.reply
-        }
+        return pendingModificationLifecycle.begin(message, butlerId)
     }
     
     /**
@@ -278,17 +271,7 @@ class AIAssistantViewModel @Inject constructor(
         message: String,
         butlerId: String
     ): String {
-        val pendingState = pendingModificationState ?: return "抱歉，没有待确认的操作。"
-        val result = modificationCoordinator.continueModification(message, butlerId, pendingState)
-        if (result is ModificationFlowResult.Finish &&
-            (transactionModificationHandler.isConfirmation(message) || transactionModificationHandler.isCancellation(message))
-        ) {
-            pendingModificationState = null
-        }
-        return when (result) {
-            is ModificationFlowResult.Finish -> result.reply
-            is ModificationFlowResult.StartConfirmation -> result.reply
-        }
+        return pendingModificationLifecycle.continuePending(message, butlerId)
     }
     
     /**

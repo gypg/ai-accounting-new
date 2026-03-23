@@ -63,9 +63,11 @@ AI记账是一款面向中国大陆个人用户的智能记账 Android 应用。
   - 覆盖修改交易意图进入 modification flow
 
 #### 当前实现边界
-- 本阶段尚未把 pending modification 生命周期完全抽离出 `AIAssistantViewModel`
+- `AIAssistantViewModel` 已不再直接持有原始 pending modification state，而是委派给 `AIAssistantPendingModificationLifecycle`
+- `AIAssistantModificationCoordinator` 已为结束态补充 `shouldClearPending`，避免依赖用户输入文案猜测是否清理状态
+- 失败确认场景现在会保留 pending state，用户仍可继续重试或取消
 - `processWithRemoteAI()` 仍保留 prompt 构建、stream 调用、usage 记录与超时控制
-- 下一步优先继续给 `AIAssistantMessageExecutionCoordinator` 补更细粒度测试，再考虑进一步收口修改确认状态
+- 下一步优先继续拆远程执行链本身，再考虑是否让 `AIAssistantMessageExecutionCoordinator` 持有更完整的执行结果模型
 
 
 #### 已实现能力

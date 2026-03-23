@@ -13,7 +13,10 @@ internal sealed class ModificationFlowResult {
         val reply: String
     ) : ModificationFlowResult()
 
-    data class Finish(val reply: String) : ModificationFlowResult()
+    data class Finish(
+        val reply: String,
+        val shouldClearPending: Boolean = false
+    ) : ModificationFlowResult()
 }
 
 internal class AIAssistantModificationCoordinator(
@@ -57,7 +60,7 @@ internal class AIAssistantModificationCoordinator(
                     "yishuihan" -> "（微笑）好的，已为您取消。"
                     else -> "已取消修改。"
                 }
-                ModificationFlowResult.Finish(reply)
+                ModificationFlowResult.Finish(reply, shouldClearPending = true)
             }
 
             transactionModificationHandler.isConfirmation(message) -> {
@@ -72,7 +75,8 @@ internal class AIAssistantModificationCoordinator(
                 }
                 if (result.success) {
                     ModificationFlowResult.Finish(
-                        transactionModificationHandler.generatePersonalitySuccessMessage(butlerId, result)
+                        transactionModificationHandler.generatePersonalitySuccessMessage(butlerId, result),
+                        shouldClearPending = true
                     )
                 } else {
                     ModificationFlowResult.Finish("修改失败：${result.message}")
