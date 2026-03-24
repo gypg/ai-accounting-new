@@ -219,7 +219,13 @@ class AIAssistantPendingClarificationLifecycleTest {
         val result = lifecycle.continuePending("微信", "xiaocainiang")
 
         assertEquals(
-            ClarificationFlowResult.ContinueWithMessage("帮我记一笔午饭 25 元 支出 微信"),
+            ClarificationFlowResult.ContinueWithPayload(
+                ClarificationContinuationRequest(
+                    originalMessage = "帮我记一笔午饭 25 元 支出",
+                    resumedMessage = "帮我记一笔午饭 25 元 支出 微信",
+                    trigger = ClarificationTrigger.TRANSACTION_ACCOUNT
+                )
+            ),
             result
         )
         assertNotNull(lifecycle.currentState())
@@ -240,7 +246,13 @@ class AIAssistantPendingClarificationLifecycleTest {
         val result = lifecycle.continuePending("工行", "xiaocainiang")
 
         assertEquals(
-            ClarificationFlowResult.ContinueWithMessage("帮我记一笔午饭 25 元 支出 今天 工行"),
+            ClarificationFlowResult.ContinueWithPayload(
+                ClarificationContinuationRequest(
+                    originalMessage = "帮我记一笔午饭 25 元 支出 今天",
+                    resumedMessage = "帮我记一笔午饭 25 元 支出 今天 工行",
+                    trigger = ClarificationTrigger.TRANSACTION_ACCOUNT
+                )
+            ),
             result
         )
         assertNotNull(lifecycle.currentState())
@@ -261,7 +273,13 @@ class AIAssistantPendingClarificationLifecycleTest {
         val result = lifecycle.continuePending("25元", "xiaocainiang")
 
         assertEquals(
-            ClarificationFlowResult.ContinueWithMessage("帮我记一笔午饭 25元"),
+            ClarificationFlowResult.ContinueWithPayload(
+                ClarificationContinuationRequest(
+                    originalMessage = "帮我记一笔午饭",
+                    resumedMessage = "帮我记一笔午饭 25元",
+                    trigger = ClarificationTrigger.TRANSACTION_AMOUNT
+                )
+            ),
             result
         )
         assertNotNull(lifecycle.currentState())
@@ -282,7 +300,13 @@ class AIAssistantPendingClarificationLifecycleTest {
         val result = lifecycle.continuePending("支出", "xiaocainiang")
 
         assertEquals(
-            ClarificationFlowResult.ContinueWithMessage("帮我记一笔 25 元 支出"),
+            ClarificationFlowResult.ContinueWithPayload(
+                ClarificationContinuationRequest(
+                    originalMessage = "帮我记一笔 25 元",
+                    resumedMessage = "帮我记一笔 25 元 支出",
+                    trigger = ClarificationTrigger.TRANSACTION_TYPE
+                )
+            ),
             result
         )
         assertNotNull(lifecycle.currentState())
@@ -303,7 +327,13 @@ class AIAssistantPendingClarificationLifecycleTest {
         val result = lifecycle.continuePending("餐饮", "xiaocainiang")
 
         assertEquals(
-            ClarificationFlowResult.ContinueWithMessage("帮我记一笔 25 元 支出 今天 餐饮"),
+            ClarificationFlowResult.ContinueWithPayload(
+                ClarificationContinuationRequest(
+                    originalMessage = "帮我记一笔 25 元 支出 今天",
+                    resumedMessage = "帮我记一笔 25 元 支出 今天 餐饮",
+                    trigger = ClarificationTrigger.TRANSACTION_CATEGORY
+                )
+            ),
             result
         )
         assertNotNull(lifecycle.currentState())
@@ -324,7 +354,13 @@ class AIAssistantPendingClarificationLifecycleTest {
         val result = lifecycle.continuePending("昨天", "xiaocainiang")
 
         assertEquals(
-            ClarificationFlowResult.ContinueWithMessage("帮我记一笔午饭 25 元 支出 昨天"),
+            ClarificationFlowResult.ContinueWithPayload(
+                ClarificationContinuationRequest(
+                    originalMessage = "帮我记一笔午饭 25 元 支出",
+                    resumedMessage = "帮我记一笔午饭 25 元 支出 昨天",
+                    trigger = ClarificationTrigger.TRANSACTION_DATE
+                )
+            ),
             result
         )
         assertNotNull(lifecycle.currentState())

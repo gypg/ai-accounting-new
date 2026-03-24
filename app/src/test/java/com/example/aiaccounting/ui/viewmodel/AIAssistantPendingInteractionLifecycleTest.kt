@@ -97,7 +97,16 @@ class AIAssistantPendingInteractionLifecycleTest {
 
         val result = interactionLifecycle.continueClarification("25元", "xiaocainiang")
 
-        assertEquals(ClarificationFlowResult.ContinueWithMessage("帮我记一笔午饭 25元"), result)
+        assertEquals(
+            ClarificationFlowResult.ContinueWithPayload(
+                ClarificationContinuationRequest(
+                    originalMessage = "帮我记一笔午饭",
+                    resumedMessage = "帮我记一笔午饭 25元",
+                    trigger = ClarificationTrigger.TRANSACTION_AMOUNT
+                )
+            ),
+            result
+        )
         assertTrue(interactionLifecycle.currentState() is PendingInteractionState.Clarification)
         interactionLifecycle.clearClarificationAfterSuccessfulContinuation()
         assertNull(interactionLifecycle.currentClarificationState())

@@ -62,6 +62,10 @@ AI记账是一款面向中国大陆个人用户的智能记账 Android 应用。
 - clarification continuation 续执行时，当前会先清本地 pending clarification；如果后续重新执行抛错，会 restore 原 pending clarification，避免用户补充后因为异常丢失上下文
 - `ClarificationRequired` 现已显式携带 `originalMessage + question`，减少 `ViewModel` 对 continuation message 拼接与状态恢复细节的参与
 - 已修复 resumed clarification message 可能被 `AIReasoningEngine` 按旧历史再次 prepend 原始请求、导致原始消息重复拼接的问题
+- 模块 3D 第八段已把 clarification continuation 的“本地续执行 / 二次请求云端 AI”分叉提升为显式 continuation decision，避免补充信息后隐式重跑整条普通消息链
+- 模块 3D 第九段已把 clarification continuation 从裸 message string 提升为结构化 payload / request model：`ClarificationContinuationRequest`、`AIAssistantContinuationPayload`、`RemoteExecutionRequest`、`ModificationExecutionRequest` 现在会显式携带原始消息、续执行消息、trigger、next step 与 route stage
+- 模块 3D 第十段已把分析 → 澄清 → 确认 → 执行的阶段语义显式建模到主执行链：`AIAssistantInteractionStage` 与带 `stage` 的 `AIAssistantMessageExecutionResult` / route request 让 coordinator / orchestrator / ViewModel 在不重写 UI 的前提下保留用户可见分步语义
+- 已补 chained clarification 回归：当用户补完一个缺口后又触发下一轮澄清时，新的 pending clarification 仍保留最初 `originalMessage`，避免后续回答只拼到中间续执行消息上而丢失原始记账意图
 
 #### 本模块新增测试
 - `AIAssistantRemoteResponseInterpreterTest`
@@ -76,6 +80,8 @@ AI记账是一款面向中国大陆个人用户的智能记账 Android 应用。
   - 覆盖 pending clarification 不会误走 modification flow
   - 覆盖远程可用/不可用时的路由差异
   - 覆盖修改交易意图进入 modification flow
+  - 覆盖 structured remote / modification request payload 与 stage 映射
+  - 覆盖 continuation decision 对本地续执行 / 二次上云 / modification continuation 的结构化分流
 - `AIAssistantRemoteExecutionHandlerTest`
   - 覆盖 stream chunk 聚合后的正常返回
   - 覆盖 timeout 时返回 `Timeout` 语义结果并保留失败 usage 记录
@@ -103,6 +109,8 @@ AI记账是一款面向中国大陆个人用户的智能记账 Android 应用。
   - 覆盖 clarification continuation 成功续执行前先清 pending clarification
   - 覆盖 clarification continuation 续执行失败时 restore 原 pending clarification
   - 覆盖 confirmation / clarification 前不会提前触发远程执行
+  - 覆盖 clarification continuation 的结构化 payload / stage 映射
+  - 覆盖 chained clarification 仍保留最初 original message
 - `AIAssistantPendingModificationLifecycleTest`
   - 覆盖 begin / continue 返回完整 `ModificationFlowResult`
   - 覆盖无 pending 时的 fallback finish
@@ -143,11 +151,14 @@ AI记账是一款面向中国大陆个人用户的智能记账 Android 应用。
 - 当前统一 pending interaction 已进一步下沉到 `AIAssistantMessageExecutionCoordinator` / `AIAssistantMessageOrchestrator`：`ViewModel` 只负责把当前 pending interaction state 与 lifecycle 回调传入 coordinator，不再直接编排 clarification continuation 续执行细节
 - 当前 clarification continuation 在 coordinator 中采用“续执行前先清、失败时 restore”语义，避免异常路径丢失待补充上下文
 - 当前 `AIReasoningEngine` 已避免对已经包含原始请求的 clarification continuation message 再次拼接旧用户输入，减少 resumed message 重复污染后续解析
+- 当前 clarification continuation 已不再只靠裸字符串续跑，而是通过结构化 request / continuation payload 显式携带 `originalMessage`、`resumedMessage`、`trigger` 与 `nextStep`
+- 当前主消息执行结果与 route 已显式带 `AIAssistantInteractionStage`，让分析 / 澄清 / 确认 / 执行阶段语义可在链路中持续保留
+- 当前 chained clarification 会沿用最初 original message 建立下一轮 pending clarification，避免多轮补充时丢失最初交易意图
 
 #### 下个窗口默认接手点
-- 模块 3D 第六段已收口完成
-- 若继续本方向，直接进入 **模块 3D 第七段：把统一 pending interaction 进一步下沉到 coordinator / route 层，并继续收口“确认/澄清优先于云端”的完整闭环**
-- 优先减少 `ViewModel` 中 pending interaction 的编排细节，把统一 pending 模型继续下沉到 coordinator / orchestrator，评估是否引入更结构化的 step / protocol result model
+- 模块 3D 第十段已收口完成
+- 若继续问题3方向，优先进入 **问题2 / 模块2B：运行时模型性能监测** 与 **问题4 / 模块4A：网络测速模块** 的取舍评估，而不是回头重开 3D-9 / 3D-10
+- 问题3 后续若再继续，应偏向更产品化的展示层落地（例如把 stage 语义进一步映射到消息 UI / session 元数据），而不是再回退成字符串 continuation
 - 继续遵循当前工作流：测试先行 → 完成一个模块后更新 memory / 开发文档 / git commit / push
 
 
@@ -234,7 +245,7 @@ AI记账是一款面向中国大陆个人用户的智能记账 Android 应用。
   - 模型预加载与资源调度管理
 
 #### 问题3：指令理解与执行流程优化
-- **当前状态：部分完成（模块 3D 第七段完成，整套交互确认机制仍未完全产品化）**
+- **当前状态：部分完成（模块 3D 第十段完成，主链路结构化 continuation / stage model 已收口，剩更高层产品化展示）**
 - **已完成**：
   - 远程响应解释、消息执行 coordinator、pending modification 生命周期收口
   - 远程 handler / stream collector / integrity checker 分层
@@ -244,12 +255,13 @@ AI记账是一款面向中国大陆个人用户的智能记账 Android 应用。
   - 通用 clarification 最小闭环：缺金额时先本地追问，补充金额后继续原请求
   - 显式 pending clarification state / trigger model
   - session 边界 pending state 清理
+  - clarification continuation 完成后显式判断是本地续执行还是二次请求云端 AI
+  - clarification continuation 的结构化 payload / request model
+  - 分析 / 澄清 / 确认 / 执行阶段在 execution result / route 中的显式 stage 建模
 - **未完成/未落地为正式能力**：
-  - 面向用户的分步意图澄清 UI/交互机制
-  - 更全面的缺失字段 / 歧义 trigger 覆盖（账户、日期、分类歧义等）
-  - clarification / confirmation 更高层统一 pending interaction model
-  - 明确的“需求确认后再二次请求云端 AI”的完整闭环
-  - 更彻底的结构化分步上送协议与可视化思考/确认流程
+  - 把 stage 语义进一步映射到更丰富的消息 UI / session 元数据
+  - 更高层、更完整的产品化思考展示与过程可视化
+  - 问题2 / 问题4 仍未接入这套阶段语义的统一用户提示
 
 #### 问题4：网络延迟与超时优化
 - **当前状态：部分完成（仅完成基础超时与连接稳定性修复）**
@@ -264,11 +276,10 @@ AI记账是一款面向中国大陆个人用户的智能记账 Android 应用。
   - 网络状态监测与预警提示
 
 #### 当前建议优先级
-1. 继续 **问题3 / 模块3D-8**：收口“确认/澄清后再决定是否二次请求云端”的完整闭环
-2. 然后继续 **问题3 / 模块3D-9**：把 continuation / confirmation / clarification 从字符串拼接过渡到更结构化的 step / protocol result model
-3. 再继续 **问题3 / 模块3D-10**：面向用户的分步确认 / 思考展示
-4. 若问题3高层链路稳定，再评估优先进入 **问题2 / 模块2B**（运行时模型性能监测）还是 **问题4 / 模块4A**（网络测速模块）
-5. **问题1** 当前不再是默认主线；若后续回头深化，则从 **模块1B**（OCR 深度预处理增强）开始
+1. 继续 **问题3 / 模块3D-9**：把 continuation / confirmation / clarification 从字符串拼接过渡到更结构化的 step / protocol result model
+2. 再继续 **问题3 / 模块3D-10**：面向用户的分步确认 / 思考展示
+3. 若问题3高层链路稳定，再评估优先进入 **问题2 / 模块2B**（运行时模型性能监测）还是 **问题4 / 模块4A**（网络测速模块）
+4. **问题1** 当前不再是默认主线；若后续回头深化，则从 **模块1B**（OCR 深度预处理增强）开始
 
 #### 重新编号后的剩余模块清单（供后续窗口直接接手）
 - **问题1：OCR识别精度问题**
@@ -278,14 +289,14 @@ AI记账是一款面向中国大陆个人用户的智能记账 Android 应用。
   - 已完成：模块2
   - 未完成：模块2B（运行时模型性能监测）、模块2C（动态切换策略）、模块2D（模型预加载与资源调度）
 - **问题3：指令理解与执行流程优化**
-  - 已完成：模块3A、模块3B、模块3C-1~4、模块3D-1~7
-  - 未完成：模块3D-8（确认后再请求云端的完整闭环）、模块3D-9（结构化 step / protocol model）、模块3D-10（面向用户的分步确认/思考展示）
+  - 已完成：模块3A、模块3B、模块3C-1~4、模块3D-1~8
+  - 未完成：模块3D-9（结构化 step / protocol model）、模块3D-10（面向用户的分步确认/思考展示）
 - **问题4：网络延迟与超时优化**
   - 已完成：暂无正式模块，仅完成基础超时与连接稳定性修补
   - 未完成：模块4A（网络测速）、模块4B（智能路由）、模块4C（重试与退避体系）、模块4D（压缩传输与增量更新）、模块4E（网络状态监测与预警）
 
 #### 切换窗口时的默认接手点
-- 默认继续：**问题3 / 模块3D-8**
+- 默认继续：**问题3 / 模块3D-9**
 - 默认不要回头重开问题1、问题2连接测试链路，或把问题4混入当前重构主线，除非用户明确改优先级
 
 ---

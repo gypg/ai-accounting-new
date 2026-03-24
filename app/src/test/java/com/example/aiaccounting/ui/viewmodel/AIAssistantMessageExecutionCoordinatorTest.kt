@@ -46,7 +46,13 @@ class AIAssistantMessageExecutionCoordinatorTest {
             processWithRemoteAI = { "不会走到这里" }
         )
 
-        assertEquals(AIAssistantMessageExecutionResult.Reply("已确认"), result)
+        assertEquals(
+            AIAssistantMessageExecutionResult.Reply(
+                message = "已确认",
+                stage = AIAssistantInteractionStage.Reply
+            ),
+            result
+        )
     }
 
     @Test
@@ -81,7 +87,8 @@ class AIAssistantMessageExecutionCoordinatorTest {
         assertEquals(
             AIAssistantMessageExecutionResult.ClarificationRequired(
                 originalMessage = pendingState.originalMessage,
-                question = "请再补充金额"
+                question = "请再补充金额",
+                stage = AIAssistantInteractionStage.Clarification
             ),
             result
         )
@@ -99,7 +106,17 @@ class AIAssistantMessageExecutionCoordinatorTest {
         }
         coEvery { aiReasoningEngine.executeActions(any()) } returns "本地查询结果"
         coEvery { messageOrchestrator.route(any(), any(), any(), any(), any(), any(), any(), any()) } returns
-            AIAssistantMessageRoute.LocalActions(emptyList())
+            AIAssistantMessageRoute.LocalActions(
+                actions = emptyList(),
+                stage = AIAssistantInteractionStage.Execution
+            )
+        coEvery { messageOrchestrator.decideContinuation(any(), any()) } returns
+            AIAssistantContinuationDecision.ExecuteLocally(
+                AIAssistantMessageRoute.LocalActions(
+                    actions = emptyList(),
+                    stage = AIAssistantInteractionStage.Execution
+                )
+            )
 
         val result = coordinator.execute(
             message = "二十五元",
@@ -110,7 +127,13 @@ class AIAssistantMessageExecutionCoordinatorTest {
             currentAIConfig = AIConfig(isEnabled = true, apiKey = "key"),
             pendingInteractionState = PendingInteractionState.Clarification(pendingState),
             continuePendingClarification = { _, _ ->
-                ClarificationFlowResult.ContinueWithMessage("帮我记一笔午饭 二十五元")
+                ClarificationFlowResult.ContinueWithPayload(
+                    ClarificationContinuationRequest(
+                        originalMessage = "帮我记一笔午饭",
+                        resumedMessage = "帮我记一笔午饭 二十五元",
+                        trigger = ClarificationTrigger.TRANSACTION_AMOUNT
+                    )
+                )
             },
             clearPendingClarificationAfterSuccessfulContinuation = { cleared = true },
             restorePendingClarification = {
@@ -121,8 +144,78 @@ class AIAssistantMessageExecutionCoordinatorTest {
             processWithRemoteAI = { "不会走到这里" }
         )
 
-        assertEquals(AIAssistantMessageExecutionResult.Reply("本地查询结果"), result)
+        assertEquals(
+            AIAssistantMessageExecutionResult.Reply(
+                message = "本地查询结果",
+                stage = AIAssistantInteractionStage.Execution
+            ),
+            result
+        )
         assertTrue(cleared)
+    }
+
+    @Test
+    fun execute_requestsSecondRemoteOnce_whenClarificationContinuationIsRemote() = runTest {
+        val pendingState = pendingClarificationState()
+        val resumedMessage = "帮我记一笔午饭 二十五元"
+        val reasoningResult = reasoningResult(AIReasoningEngine.UserIntent.GENERAL_CONVERSATION)
+        var remoteCallCount = 0
+
+        coEvery { aiReasoningEngine.reason(any(), any()) } returns reasoningResult
+        coEvery { messageOrchestrator.route(any(), any(), any(), any(), any(), any(), any(), any()) } returns
+            AIAssistantMessageRoute.RemoteOrLocalFallback(
+                request = RemoteExecutionRequest(userMessage = resumedMessage)
+            )
+        coEvery { messageOrchestrator.decideContinuation(any(), any()) } returns
+            AIAssistantContinuationDecision.RequestSecondRemote(
+                request = RemoteExecutionRequest(
+                    userMessage = resumedMessage,
+                    continuationPayload = AIAssistantContinuationPayload(
+                        originalMessage = pendingState.originalMessage,
+                        resumedMessage = resumedMessage,
+                        trigger = pendingState.trigger,
+                        nextStep = AIAssistantContinuationStep.RequestSecondRemote
+                    )
+                )
+            )
+
+        val result = coordinator.execute(
+            message = "二十五元",
+            currentButler = butler,
+            conversationHistory = listOf("帮我记一笔午饭"),
+            isNetworkAvailable = true,
+            currentUseBuiltinConfig = false,
+            currentAIConfig = AIConfig(isEnabled = true, apiKey = "key"),
+            pendingInteractionState = PendingInteractionState.Clarification(pendingState),
+            continuePendingClarification = { _, _ ->
+                ClarificationFlowResult.ContinueWithPayload(
+                    ClarificationContinuationRequest(
+                        originalMessage = pendingState.originalMessage,
+                        resumedMessage = resumedMessage,
+                        trigger = pendingState.trigger
+                    )
+                )
+            },
+            clearPendingClarificationAfterSuccessfulContinuation = {},
+            restorePendingClarification = {
+                throw AssertionError("should not restore pending clarification")
+            },
+            handleModificationConfirmation = { _, _ -> ModificationFlowResult.Finish("不会走到这里") },
+            handleTransactionModification = { _, _ -> ModificationFlowResult.Finish("不会走到这里") },
+            processWithRemoteAI = {
+                remoteCallCount += 1
+                "远程续执行结果"
+            }
+        )
+
+        assertEquals(
+            AIAssistantMessageExecutionResult.Reply(
+                message = "远程续执行结果",
+                stage = AIAssistantInteractionStage.Execution
+            ),
+            result
+        )
+        assertEquals(1, remoteCallCount)
     }
 
     @Test
@@ -133,7 +226,13 @@ class AIAssistantMessageExecutionCoordinatorTest {
 
         coEvery { aiReasoningEngine.reason(any(), any()) } returns reasoningResult
         coEvery { messageOrchestrator.route(any(), any(), any(), any(), any(), any(), any(), any()) } returns
-            AIAssistantMessageRoute.RemoteOrLocalFallback("帮我记一笔午饭 二十五元")
+            AIAssistantMessageRoute.RemoteOrLocalFallback(
+                request = RemoteExecutionRequest(userMessage = "帮我记一笔午饭 二十五元")
+            )
+        coEvery { messageOrchestrator.decideContinuation(any(), any()) } returns
+            AIAssistantContinuationDecision.RequestSecondRemote(
+                request = RemoteExecutionRequest(userMessage = "帮我记一笔午饭 二十五元")
+            )
 
         val error = runCatching {
             coordinator.execute(
@@ -145,7 +244,13 @@ class AIAssistantMessageExecutionCoordinatorTest {
                 currentAIConfig = AIConfig(isEnabled = true, apiKey = "key"),
                 pendingInteractionState = PendingInteractionState.Clarification(pendingState),
                 continuePendingClarification = { _, _ ->
-                    ClarificationFlowResult.ContinueWithMessage("帮我记一笔午饭 二十五元")
+                    ClarificationFlowResult.ContinueWithPayload(
+                        ClarificationContinuationRequest(
+                            originalMessage = pendingState.originalMessage,
+                            resumedMessage = "帮我记一笔午饭 二十五元",
+                            trigger = pendingState.trigger
+                        )
+                    )
                 },
                 clearPendingClarificationAfterSuccessfulContinuation = {},
                 restorePendingClarification = { restoredState = it },
@@ -182,7 +287,13 @@ class AIAssistantMessageExecutionCoordinatorTest {
             processWithRemoteAI = { "不会走到这里" }
         )
 
-        assertEquals(AIAssistantMessageExecutionResult.Reply("已取消"), result)
+        assertEquals(
+            AIAssistantMessageExecutionResult.Reply(
+                message = "已取消",
+                stage = AIAssistantInteractionStage.Reply
+            ),
+            result
+        )
         assertTrue(!cleared)
         assertTrue(!restored)
     }
@@ -194,7 +305,8 @@ class AIAssistantMessageExecutionCoordinatorTest {
         coEvery { aiReasoningEngine.executeActions(any()) } returns "请问这笔交易的金额是多少呢？"
         coEvery { messageOrchestrator.route(any(), any(), any(), any(), any(), any(), any(), any()) } returns
             AIAssistantMessageRoute.LocalActions(
-                listOf(AIReasoningEngine.AIAction.RequestClarification("请问这笔交易的金额是多少呢？"))
+                actions = listOf(AIReasoningEngine.AIAction.RequestClarification("请问这笔交易的金额是多少呢？")),
+                stage = AIAssistantInteractionStage.Clarification
             )
 
         var remoteCalled = false
@@ -220,7 +332,8 @@ class AIAssistantMessageExecutionCoordinatorTest {
         assertEquals(
             AIAssistantMessageExecutionResult.ClarificationRequired(
                 originalMessage = "帮我记一笔午饭",
-                question = "请问这笔交易的金额是多少呢？"
+                question = "请问这笔交易的金额是多少呢？",
+                stage = AIAssistantInteractionStage.Clarification
             ),
             result
         )
@@ -232,7 +345,9 @@ class AIAssistantMessageExecutionCoordinatorTest {
         val reasoningResult = reasoningResult(AIReasoningEngine.UserIntent.GENERAL_CONVERSATION)
         coEvery { aiReasoningEngine.reason(any(), any()) } returns reasoningResult
         coEvery { messageOrchestrator.route(any(), any(), any(), any(), any(), any(), any(), any()) } returns
-            AIAssistantMessageRoute.RemoteOrLocalFallback("帮我记一笔午饭")
+            AIAssistantMessageRoute.RemoteOrLocalFallback(
+                request = RemoteExecutionRequest(userMessage = "帮我记一笔午饭")
+            )
 
         val result = coordinator.execute(
             message = "帮我记一笔午饭",
@@ -250,7 +365,13 @@ class AIAssistantMessageExecutionCoordinatorTest {
             processWithRemoteAI = { "远程结果" }
         )
 
-        assertEquals(AIAssistantMessageExecutionResult.Reply("远程结果"), result)
+        assertEquals(
+            AIAssistantMessageExecutionResult.Reply(
+                message = "远程结果",
+                stage = AIAssistantInteractionStage.Execution
+            ),
+            result
+        )
     }
 
     @Test
@@ -259,9 +380,12 @@ class AIAssistantMessageExecutionCoordinatorTest {
         coEvery { aiReasoningEngine.reason(any(), any()) } returns reasoningResult
         coEvery { messageOrchestrator.route(any(), any(), any(), any(), any(), any(), any(), any()) } returns
             AIAssistantMessageRoute.ModificationFlow(
-                message = "把上一笔改成20",
-                butlerId = butler.id,
-                pendingState = null
+                request = ModificationExecutionRequest(
+                    message = "把上一笔改成20",
+                    butlerId = butler.id,
+                    pendingState = null,
+                    stage = AIAssistantInteractionStage.Confirmation
+                )
             )
 
         var remoteCalled = false
@@ -289,7 +413,13 @@ class AIAssistantMessageExecutionCoordinatorTest {
             }
         )
 
-        assertEquals(AIAssistantMessageExecutionResult.ConfirmationRequired("请确认修改"), result)
+        assertEquals(
+            AIAssistantMessageExecutionResult.ConfirmationRequired(
+                message = "请确认修改",
+                stage = AIAssistantInteractionStage.Confirmation
+            ),
+            result
+        )
         assertTrue(!remoteCalled)
     }
 
@@ -299,9 +429,12 @@ class AIAssistantMessageExecutionCoordinatorTest {
         coEvery { aiReasoningEngine.reason(any(), any()) } returns reasoningResult
         coEvery { messageOrchestrator.route(any(), any(), any(), any(), any(), any(), any(), any()) } returns
             AIAssistantMessageRoute.ModificationFlow(
-                message = "确认",
-                butlerId = butler.id,
-                pendingState = pendingModificationState()
+                request = ModificationExecutionRequest(
+                    message = "确认",
+                    butlerId = butler.id,
+                    pendingState = pendingModificationState(),
+                    stage = AIAssistantInteractionStage.Confirmation
+                )
             )
 
         val result = coordinator.execute(
@@ -320,7 +453,75 @@ class AIAssistantMessageExecutionCoordinatorTest {
             processWithRemoteAI = { "不会走到这里" }
         )
 
-        assertEquals(AIAssistantMessageExecutionResult.Reply("修改完成"), result)
+        assertEquals(
+            AIAssistantMessageExecutionResult.Reply(
+                message = "修改完成",
+                stage = AIAssistantInteractionStage.Reply
+            ),
+            result
+        )
+    }
+
+    @Test
+    fun execute_preservesOriginalMessage_whenContinuationTriggersAnotherClarification() = runTest {
+        val pendingState = pendingClarificationState()
+        val resumedMessage = "帮我记一笔午饭 25元"
+        val payload = AIAssistantContinuationPayload(
+            originalMessage = pendingState.originalMessage,
+            resumedMessage = resumedMessage,
+            trigger = pendingState.trigger,
+            nextStep = AIAssistantContinuationStep.ExecuteLocally
+        )
+        val reasoningResult = reasoningResult(AIReasoningEngine.UserIntent.RECORD_TRANSACTION)
+
+        coEvery { aiReasoningEngine.reason(any(), any()) } returns reasoningResult
+        coEvery { messageOrchestrator.route(any(), any(), any(), any(), any(), any(), any(), any()) } returns
+            AIAssistantMessageRoute.LocalActions(
+                actions = listOf(AIReasoningEngine.AIAction.RequestClarification("这笔是收入还是支出？")),
+                stage = AIAssistantInteractionStage.Clarification
+            )
+        coEvery { messageOrchestrator.decideContinuation(any(), any()) } returns
+            AIAssistantContinuationDecision.ExecuteLocally(
+                AIAssistantMessageRoute.LocalActions(
+                    actions = listOf(AIReasoningEngine.AIAction.RequestClarification("这笔是收入还是支出？")),
+                    stage = AIAssistantInteractionStage.Clarification
+                )
+            )
+        coEvery { aiReasoningEngine.executeActions(any()) } returns "这笔是收入还是支出？"
+
+        val result = coordinator.execute(
+            message = "25元",
+            currentButler = butler,
+            conversationHistory = emptyList(),
+            isNetworkAvailable = true,
+            currentUseBuiltinConfig = false,
+            currentAIConfig = AIConfig(isEnabled = true, apiKey = "key"),
+            pendingInteractionState = PendingInteractionState.Clarification(pendingState),
+            continuePendingClarification = { _, _ ->
+                ClarificationFlowResult.ContinueWithPayload(
+                    ClarificationContinuationRequest(
+                        originalMessage = pendingState.originalMessage,
+                        resumedMessage = resumedMessage,
+                        trigger = pendingState.trigger
+                    )
+                )
+            },
+            clearPendingClarificationAfterSuccessfulContinuation = {},
+            restorePendingClarification = {},
+            handleModificationConfirmation = { _, _ -> ModificationFlowResult.Finish("不会走到这里") },
+            handleTransactionModification = { _, _ -> ModificationFlowResult.Finish("不会走到这里") },
+            processWithRemoteAI = { "不会走到这里" }
+        )
+
+        assertEquals(
+            AIAssistantMessageExecutionResult.ClarificationRequired(
+                originalMessage = pendingState.originalMessage,
+                question = "这笔是收入还是支出？",
+                continuationPayload = payload,
+                stage = AIAssistantInteractionStage.Clarification
+            ),
+            result
+        )
     }
 
     private fun reasoningResult(intent: AIReasoningEngine.UserIntent) = AIReasoningEngine.ReasoningResult(

@@ -17,13 +17,19 @@ internal data class PendingClarificationState(
     val trigger: ClarificationTrigger
 )
 
+internal data class ClarificationContinuationRequest(
+    val originalMessage: String,
+    val resumedMessage: String,
+    val trigger: ClarificationTrigger
+)
+
 internal sealed class ClarificationFlowResult {
     data class RequestClarification(
         val pendingState: PendingClarificationState,
         val reply: String
     ) : ClarificationFlowResult()
 
-    data class ContinueWithMessage(val message: String) : ClarificationFlowResult()
+    data class ContinueWithPayload(val payload: ClarificationContinuationRequest) : ClarificationFlowResult()
 
     data class Finish(
         val reply: String,
@@ -74,8 +80,12 @@ internal class AIAssistantPendingClarificationLifecycle(
             )
         }
 
-        return ClarificationFlowResult.ContinueWithMessage(
-            message = "${currentPendingState.originalMessage} $message".trim()
+        return ClarificationFlowResult.ContinueWithPayload(
+            payload = ClarificationContinuationRequest(
+                originalMessage = currentPendingState.originalMessage,
+                resumedMessage = "${currentPendingState.originalMessage} $message".trim(),
+                trigger = currentPendingState.trigger
+            )
         )
     }
 

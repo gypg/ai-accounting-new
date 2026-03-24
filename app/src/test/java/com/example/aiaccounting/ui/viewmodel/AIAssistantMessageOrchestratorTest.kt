@@ -45,7 +45,9 @@ class AIAssistantMessageOrchestratorTest {
         )
 
         assertTrue(route is AIAssistantMessageRoute.ModificationFlow)
-        assertEquals(pendingState, (route as AIAssistantMessageRoute.ModificationFlow).pendingState)
+        route as AIAssistantMessageRoute.ModificationFlow
+        assertEquals(pendingState, route.request.pendingState)
+        assertEquals(AIAssistantInteractionStage.Confirmation, route.request.stage)
     }
 
     @Test
@@ -68,6 +70,9 @@ class AIAssistantMessageOrchestratorTest {
         )
 
         assertTrue(route is AIAssistantMessageRoute.RemoteOrLocalFallback)
+        route as AIAssistantMessageRoute.RemoteOrLocalFallback
+        assertEquals("补充一下是午饭", route.request.userMessage)
+        assertEquals(AIAssistantInteractionStage.Execution, route.request.stage)
     }
 
     @Test
@@ -84,6 +89,9 @@ class AIAssistantMessageOrchestratorTest {
         )
 
         assertTrue(route is AIAssistantMessageRoute.RemoteOrLocalFallback)
+        route as AIAssistantMessageRoute.RemoteOrLocalFallback
+        assertEquals("帮我记一笔午饭 25 元", route.request.userMessage)
+        assertEquals(AIAssistantInteractionStage.Execution, route.request.stage)
     }
 
     @Test
@@ -100,6 +108,8 @@ class AIAssistantMessageOrchestratorTest {
         )
 
         assertTrue(route is AIAssistantMessageRoute.LocalActions)
+        route as AIAssistantMessageRoute.LocalActions
+        assertEquals(AIAssistantInteractionStage.Execution, route.stage)
     }
 
     @Test
@@ -116,6 +126,9 @@ class AIAssistantMessageOrchestratorTest {
         )
 
         assertTrue(route is AIAssistantMessageRoute.ModificationFlow)
+        route as AIAssistantMessageRoute.ModificationFlow
+        assertEquals(AIAssistantInteractionStage.Confirmation, route.request.stage)
+        assertEquals("把上一笔改成 20", route.request.message)
     }
 
     @Test
@@ -135,6 +148,79 @@ class AIAssistantMessageOrchestratorTest {
         )
 
         assertTrue(route is AIAssistantMessageRoute.LocalActions)
+        route as AIAssistantMessageRoute.LocalActions
+        assertEquals(AIAssistantInteractionStage.Clarification, route.stage)
+    }
+
+    @Test
+    fun decideContinuation_requestsSecondRemote_whenRouteNeedsRemoteFallback() {
+        val route = AIAssistantMessageRoute.RemoteOrLocalFallback(
+            request = RemoteExecutionRequest(userMessage = "帮我记一笔午饭 25 元")
+        )
+        val payload = AIAssistantContinuationPayload(
+            originalMessage = "帮我记一笔午饭",
+            resumedMessage = "帮我记一笔午饭 25 元",
+            trigger = ClarificationTrigger.TRANSACTION_AMOUNT,
+            nextStep = AIAssistantContinuationStep.RequestSecondRemote
+        )
+        val decision = orchestrator.decideContinuation(route, payload)
+
+        assertEquals(
+            AIAssistantContinuationDecision.RequestSecondRemote(
+                RemoteExecutionRequest(
+                    userMessage = "帮我记一笔午饭 25 元",
+                    continuationPayload = payload
+                )
+            ),
+            decision
+        )
+    }
+
+    @Test
+    fun decideContinuation_executesLocally_whenRouteIsLocalActions() {
+        val route = AIAssistantMessageRoute.LocalActions(emptyList())
+        val payload = AIAssistantContinuationPayload(
+            originalMessage = "帮我记一笔午饭",
+            resumedMessage = "帮我记一笔午饭 25 元",
+            trigger = ClarificationTrigger.TRANSACTION_AMOUNT,
+            nextStep = AIAssistantContinuationStep.ExecuteLocally
+        )
+        val decision = orchestrator.decideContinuation(route, payload)
+
+        assertEquals(
+            AIAssistantContinuationDecision.ExecuteLocally(
+                route.copy(stage = AIAssistantInteractionStage.Execution)
+            ),
+            decision
+        )
+    }
+
+    @Test
+    fun decideContinuation_executesLocally_whenRouteIsModificationFlow() {
+        val route = AIAssistantMessageRoute.ModificationFlow(
+            request = ModificationExecutionRequest(
+                message = "把上一笔改成 20",
+                butlerId = "xiaocainiang",
+                pendingState = null,
+                stage = AIAssistantInteractionStage.Execution
+            )
+        )
+        val payload = AIAssistantContinuationPayload(
+            originalMessage = "把上一笔改成 10",
+            resumedMessage = "把上一笔改成 20",
+            trigger = ClarificationTrigger.GENERIC,
+            nextStep = AIAssistantContinuationStep.ExecuteModification
+        )
+        val decision = orchestrator.decideContinuation(route, payload)
+
+        assertEquals(
+            AIAssistantContinuationDecision.ExecuteLocally(
+                AIAssistantMessageRoute.ModificationFlow(
+                    route.request.copy(stage = AIAssistantInteractionStage.Confirmation)
+                )
+            ),
+            decision
+        )
     }
 
     private fun reasoningResult(
