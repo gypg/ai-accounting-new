@@ -9,6 +9,8 @@ import com.example.aiaccounting.data.repository.AIUsageRepository
 import com.example.aiaccounting.data.repository.AIUsageStats
 import com.example.aiaccounting.data.service.AIService
 import com.example.aiaccounting.data.service.InviteGatewayService
+import com.example.aiaccounting.data.service.NetworkSpeedTestResult
+import com.example.aiaccounting.data.service.NetworkSpeedTestService
 import com.example.aiaccounting.data.service.RemoteModel
 import com.example.aiaccounting.utils.DeviceIdProvider
 import com.example.aiaccounting.utils.NetworkUtils
@@ -29,7 +31,8 @@ class AISettingsViewModel @Inject constructor(
     private val aiUsageRepository: AIUsageRepository,
     private val networkUtils: NetworkUtils,
     private val inviteGatewayService: InviteGatewayService,
-    private val deviceIdProvider: DeviceIdProvider
+    private val deviceIdProvider: DeviceIdProvider,
+    private val networkSpeedTestService: NetworkSpeedTestService? = null
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(AISettingsUiState())
@@ -359,6 +362,70 @@ class AISettingsViewModel @Inject constructor(
         toggleBuiltinConfig(true)
     }
 
+    fun runNetworkSpeedTest() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isTestingNetworkSpeed = true, networkSpeedTestResult = null) }
+
+            if (!networkUtils.isNetworkAvailable()) {
+                _uiState.update {
+                    it.copy(
+                        isTestingNetworkSpeed = false,
+                        networkSpeedTestResult = NetworkSpeedTestUiResult.Error("网络不可用，请检查网络连接")
+                    )
+                }
+                return@launch
+            }
+
+            val service = networkSpeedTestService
+            if (service == null) {
+                _uiState.update {
+                    it.copy(
+                        isTestingNetworkSpeed = false,
+                        networkSpeedTestResult = NetworkSpeedTestUiResult.Error("网络测速服务不可用")
+                    )
+                }
+                return@launch
+            }
+
+            val summary = service.test(
+                config = _uiState.value.config,
+                gatewayBaseUrl = gatewayBaseUrl.value
+            )
+
+            val nextResult = summary.fastest?.let { fastest ->
+                NetworkSpeedTestUiResult.Success(
+                    fastestLabel = fastest.target.label,
+                    latencyMs = fastest.latencyMs,
+                    measuredTargets = summary.targets.map { targetResult ->
+                        when (targetResult) {
+                            is NetworkSpeedTestResult.Success -> NetworkSpeedTestMeasuredTarget(
+                                label = targetResult.target.label,
+                                latencyMs = targetResult.latencyMs,
+                                message = "HTTP ${targetResult.statusCode}"
+                            )
+                            is NetworkSpeedTestResult.Error -> NetworkSpeedTestMeasuredTarget(
+                                label = targetResult.target.label,
+                                latencyMs = null,
+                                message = targetResult.message
+                            )
+                        }
+                    }
+                )
+            } ?: NetworkSpeedTestUiResult.Error(summary.errorMessage ?: "网络测速失败")
+
+            _uiState.update {
+                it.copy(
+                    isTestingNetworkSpeed = false,
+                    networkSpeedTestResult = nextResult
+                )
+            }
+        }
+    }
+
+    fun clearNetworkSpeedTestResult() {
+        _uiState.update { it.copy(networkSpeedTestResult = null) }
+    }
+
     fun testConnection() {
         viewModelScope.launch {
             _uiState.update { it.copy(isTesting = true, testResult = null) }
@@ -625,6 +692,8 @@ data class AISettingsUiState(
     val saveSuccess: Boolean = false,
     val isTesting: Boolean = false,
     val testResult: TestResult? = null,
+    val isTestingNetworkSpeed: Boolean = false,
+    val networkSpeedTestResult: NetworkSpeedTestUiResult? = null,
     val usageStats: AIUsageStats = AIUsageStats(),
     val isNetworkAvailable: Boolean = true,
     val isFetchingModels: Boolean = false,
@@ -642,6 +711,22 @@ sealed class TestResult {
     object Success : TestResult()
     data class Error(val message: String) : TestResult()
 }
+
+sealed class NetworkSpeedTestUiResult {
+    data class Success(
+        val fastestLabel: String,
+        val latencyMs: Long,
+        val measuredTargets: List<NetworkSpeedTestMeasuredTarget>
+    ) : NetworkSpeedTestUiResult()
+
+    data class Error(val message: String) : NetworkSpeedTestUiResult()
+}
+
+data class NetworkSpeedTestMeasuredTarget(
+    val label: String,
+    val latencyMs: Long?,
+    val message: String
+)
 
 sealed class InviteBindResult {
     data class Success(

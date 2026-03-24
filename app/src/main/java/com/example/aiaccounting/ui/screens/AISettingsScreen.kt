@@ -43,6 +43,8 @@ fun AISettingsScreen(
     val inviteApiBaseUrl by viewModel.inviteApiBaseUrl.collectAsState()
     val inviteRpm by viewModel.inviteRpm.collectAsState()
     val inviteCodeMasked by viewModel.inviteCodeMasked.collectAsState()
+    val gatewayBaseUrlState = remember(savedGatewayBaseUrl) { mutableStateOf(savedGatewayBaseUrl) }
+    var gatewayBaseUrl by gatewayBaseUrlState
     val isInviteBound = uiState.inviteBound
     var showApiKey by remember { mutableStateOf(false) }
     var showResetConfirmDialog by remember { mutableStateOf(false) }
@@ -50,7 +52,6 @@ fun AISettingsScreen(
     var importApiKeyInput by remember { mutableStateOf("") }
 
     var inviteCode by remember { mutableStateOf("") }
-    var gatewayBaseUrl by remember(savedGatewayBaseUrl) { mutableStateOf(savedGatewayBaseUrl) }
 
     // 显示保存成功提示
     LaunchedEffect(uiState.saveSuccess) {
@@ -185,8 +186,8 @@ fun AISettingsScreen(
                         inviteCodeMasked = inviteCodeMasked,
                         gatewayBaseUrl = savedGatewayBaseUrl,
                         apiBaseUrl = inviteApiBaseUrl,
-                        rpmText = inviteRpm.takeIf { it > 0 }?.let { "$it rpm" }
-                            ?: (uiState.inviteBindResult as? InviteBindResult.Success)?.let { "${it.rpm} rpm" }.orEmpty(),
+                        rpmText = inviteRpm.takeIf { rpm -> rpm > 0 }?.let { rpm -> "$rpm rpm" }
+                            ?: (uiState.inviteBindResult as? InviteBindResult.Success)?.let { success -> "${success.rpm} rpm" }.orEmpty(),
                         onClear = { viewModel.clearInviteBinding() }
                     )
                     Spacer(modifier = Modifier.height(16.dp))
@@ -305,6 +306,34 @@ fun AISettingsScreen(
                         Icon(Icons.Default.NetworkCheck, contentDescription = null)
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("测试连接")
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    OutlinedButton(
+                        onClick = { viewModel.runNetworkSpeedTest() },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !uiState.isTestingNetworkSpeed && uiState.isNetworkAvailable &&
+                            (uiState.config.apiUrl.isNotBlank() || savedGatewayBaseUrl.isNotBlank())
+                    ) {
+                        if (uiState.isTestingNetworkSpeed) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                strokeWidth = 2.dp
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                        }
+                        Icon(Icons.Default.Speed, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("网络测速")
+                    }
+
+                    uiState.networkSpeedTestResult?.let { result ->
+                        Spacer(modifier = Modifier.height(8.dp))
+                        NetworkSpeedTestResultCard(
+                            result = result,
+                            onDismiss = { viewModel.clearNetworkSpeedTestResult() }
+                        )
                     }
 
                     // 测试结果

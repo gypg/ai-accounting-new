@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.sp
 import com.example.aiaccounting.data.model.AIModel
 import com.example.aiaccounting.data.model.AIProvider
 import com.example.aiaccounting.data.service.RemoteModel
+import com.example.aiaccounting.ui.viewmodel.NetworkSpeedTestUiResult
 import com.example.aiaccounting.utils.ModelIdCategorizer.categorizeModelId
 
 /**
@@ -281,6 +282,102 @@ internal fun APIConfigCard(
                         onModelSelected = onModelChange,
                         onTestConnection = onTestModelConnection
                     )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun NetworkSpeedTestResultCard(
+    result: NetworkSpeedTestUiResult,
+    onDismiss: () -> Unit
+) {
+    when (result) {
+        is NetworkSpeedTestUiResult.Success -> {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer
+                )
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Speed,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            text = "最快节点：${result.fastestLabel}（${result.latencyMs} ms）",
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(onClick = onDismiss) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "关闭",
+                                tint = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    result.measuredTargets.forEach { target ->
+                        Text(
+                            text = if (target.latencyMs != null) {
+                                "• ${target.label}: ${target.latencyMs} ms（${target.message}）"
+                            } else {
+                                "• ${target.label}: ${target.message}"
+                            },
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                    }
+                }
+            }
+        }
+
+        is NetworkSpeedTestUiResult.Error -> {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.errorContainer
+                )
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Speed,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onErrorContainer
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text(
+                        text = result.message,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(onClick = onDismiss) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "关闭",
+                            tint = MaterialTheme.colorScheme.onErrorContainer
+                        )
+                    }
                 }
             }
         }

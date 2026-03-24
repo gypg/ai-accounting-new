@@ -6,6 +6,7 @@ import com.example.aiaccounting.data.repository.AIUsageRepository
 import com.example.aiaccounting.data.repository.AIUsageStats
 import com.example.aiaccounting.data.service.AIService
 import com.example.aiaccounting.data.service.InviteGatewayService
+import com.example.aiaccounting.data.service.NetworkSpeedTestService
 import com.example.aiaccounting.utils.DeviceIdProvider
 import com.example.aiaccounting.utils.NetworkUtils
 import io.mockk.coEvery
@@ -35,6 +36,7 @@ class AISettingsConnectionTest {
     private lateinit var networkUtils: NetworkUtils
     private lateinit var inviteGatewayService: InviteGatewayService
     private lateinit var deviceIdProvider: DeviceIdProvider
+    private lateinit var networkSpeedTestService: NetworkSpeedTestService
 
     @Before
     fun setUp() {
@@ -46,6 +48,7 @@ class AISettingsConnectionTest {
         networkUtils = mockk(relaxed = true)
         inviteGatewayService = mockk(relaxed = true)
         deviceIdProvider = mockk(relaxed = true)
+        networkSpeedTestService = mockk(relaxed = true)
 
         every { aiConfigRepository.getUseBuiltin() } returns flowOf(false)
         every { aiConfigRepository.getAIConfig() } returns flowOf(AIConfig(isEnabled = true, apiKey = "k", apiUrl = "https://example.com"))
@@ -75,7 +78,8 @@ class AISettingsConnectionTest {
             aiUsageRepository = aiUsageRepository,
             networkUtils = networkUtils,
             inviteGatewayService = inviteGatewayService,
-            deviceIdProvider = deviceIdProvider
+            deviceIdProvider = deviceIdProvider,
+            networkSpeedTestService = networkSpeedTestService
         )
 
         testDispatcher.scheduler.advanceUntilIdle()
@@ -86,6 +90,31 @@ class AISettingsConnectionTest {
         assertEquals(
             "自动优选暂时不可用，请稍后重试",
             (vm.uiState.value.testResult as TestResult.Error).message
+        )
+    }
+
+    @Test
+    fun runNetworkSpeedTest_whenOffline_setsErrorAndStopsTesting() = runTest {
+        coEvery { networkUtils.isNetworkAvailable() } returns false
+
+        val vm = AISettingsViewModel(
+            aiConfigRepository = aiConfigRepository,
+            aiService = aiService,
+            aiUsageRepository = aiUsageRepository,
+            networkUtils = networkUtils,
+            inviteGatewayService = inviteGatewayService,
+            deviceIdProvider = deviceIdProvider,
+            networkSpeedTestService = networkSpeedTestService
+        )
+
+        testDispatcher.scheduler.advanceUntilIdle()
+        vm.runNetworkSpeedTest()
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertFalse(vm.uiState.value.isTestingNetworkSpeed)
+        assertEquals(
+            "网络不可用，请检查网络连接",
+            (vm.uiState.value.networkSpeedTestResult as NetworkSpeedTestUiResult.Error).message
         )
     }
 }
