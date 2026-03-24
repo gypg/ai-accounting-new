@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.*
 import androidx.datastore.preferences.preferencesDataStore
 import com.example.aiaccounting.data.model.AIConfig
 import com.example.aiaccounting.data.model.AIProvider
+import com.example.aiaccounting.data.service.PreferredNetworkRoute
 import com.example.aiaccounting.security.SecurityManager
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
@@ -382,6 +383,44 @@ class AIConfigRepository @Inject constructor(
         }
     }
 
+    fun getPreferredNetworkRoute(): Flow<PreferredNetworkRoute?> {
+        return dataStore.data.map { preferences ->
+            val targetId = preferences[stringPreferencesKey(AIConfig.KEY_PREFERRED_ROUTE_TARGET)].orEmpty().trim()
+            val label = preferences[stringPreferencesKey(AIConfig.KEY_PREFERRED_ROUTE_LABEL)].orEmpty().trim()
+            val latencyMs = preferences[longPreferencesKey(AIConfig.KEY_PREFERRED_ROUTE_LATENCY_MS)]
+            val updatedAtMillis = preferences[longPreferencesKey(AIConfig.KEY_PREFERRED_ROUTE_UPDATED_AT)]
+
+            if (targetId.isBlank() || label.isBlank() || latencyMs == null || updatedAtMillis == null) {
+                null
+            } else {
+                PreferredNetworkRoute(
+                    targetId = targetId,
+                    label = label,
+                    latencyMs = latencyMs,
+                    updatedAtMillis = updatedAtMillis
+                )
+            }
+        }
+    }
+
+    suspend fun savePreferredNetworkRoute(route: PreferredNetworkRoute) {
+        dataStore.edit { preferences ->
+            preferences[stringPreferencesKey(AIConfig.KEY_PREFERRED_ROUTE_TARGET)] = route.targetId
+            preferences[stringPreferencesKey(AIConfig.KEY_PREFERRED_ROUTE_LABEL)] = route.label
+            preferences[longPreferencesKey(AIConfig.KEY_PREFERRED_ROUTE_LATENCY_MS)] = route.latencyMs
+            preferences[longPreferencesKey(AIConfig.KEY_PREFERRED_ROUTE_UPDATED_AT)] = route.updatedAtMillis
+        }
+    }
+
+    suspend fun clearPreferredNetworkRoute() {
+        dataStore.edit { preferences ->
+            preferences.remove(stringPreferencesKey(AIConfig.KEY_PREFERRED_ROUTE_TARGET))
+            preferences.remove(stringPreferencesKey(AIConfig.KEY_PREFERRED_ROUTE_LABEL))
+            preferences.remove(longPreferencesKey(AIConfig.KEY_PREFERRED_ROUTE_LATENCY_MS))
+            preferences.remove(longPreferencesKey(AIConfig.KEY_PREFERRED_ROUTE_UPDATED_AT))
+        }
+    }
+
     suspend fun clearInviteBinding() {
         dataStore.edit { preferences ->
             preferences[booleanPreferencesKey(AIConfig.KEY_INVITE_BOUND)] = false
@@ -389,6 +428,10 @@ class AIConfigRepository @Inject constructor(
             preferences.remove(stringPreferencesKey(AIConfig.KEY_INVITE_MODEL))
             preferences.remove(stringPreferencesKey(AIConfig.KEY_INVITE_MODEL_MODE))
             preferences.remove(intPreferencesKey(AIConfig.KEY_INVITE_RPM))
+            preferences.remove(stringPreferencesKey(AIConfig.KEY_PREFERRED_ROUTE_TARGET))
+            preferences.remove(stringPreferencesKey(AIConfig.KEY_PREFERRED_ROUTE_LABEL))
+            preferences.remove(longPreferencesKey(AIConfig.KEY_PREFERRED_ROUTE_LATENCY_MS))
+            preferences.remove(longPreferencesKey(AIConfig.KEY_PREFERRED_ROUTE_UPDATED_AT))
             // 解绑后回到安全默认：AI 关闭，避免遗留开启状态造成行为不一致
             preferences[booleanPreferencesKey(AIConfig.KEY_ENABLED)] = false
         }

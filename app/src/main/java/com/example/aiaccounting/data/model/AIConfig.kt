@@ -31,6 +31,12 @@ data class AIConfig(
         const val KEY_MODEL_MODE = "ai_model_mode" // AUTO | FIXED
         const val KEY_INVITE_MODEL_MODE = "ai_invite_model_mode" // AUTO | FIXED
 
+        // 网络智能路由（模块4B）
+        const val KEY_PREFERRED_ROUTE_TARGET = "ai_preferred_route_target"
+        const val KEY_PREFERRED_ROUTE_LABEL = "ai_preferred_route_label"
+        const val KEY_PREFERRED_ROUTE_LATENCY_MS = "ai_preferred_route_latency_ms"
+        const val KEY_PREFERRED_ROUTE_UPDATED_AT = "ai_preferred_route_updated_at"
+
         // 内置默认配置 - 预置的AI服务
         // 红月API - 无需用户手动配置，开箱即用
         val BUILTIN_CONFIG = AIConfig(

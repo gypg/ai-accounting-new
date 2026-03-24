@@ -43,6 +43,7 @@ fun AISettingsScreen(
     val inviteApiBaseUrl by viewModel.inviteApiBaseUrl.collectAsState()
     val inviteRpm by viewModel.inviteRpm.collectAsState()
     val inviteCodeMasked by viewModel.inviteCodeMasked.collectAsState()
+    val preferredNetworkRoute by viewModel.preferredNetworkRoute.collectAsState()
     val gatewayBaseUrlState = remember(savedGatewayBaseUrl) { mutableStateOf(savedGatewayBaseUrl) }
     var gatewayBaseUrl by gatewayBaseUrlState
     val isInviteBound = uiState.inviteBound
@@ -328,6 +329,14 @@ fun AISettingsScreen(
                         Text("网络测速")
                     }
 
+                    preferredNetworkRoute?.let { route ->
+                        Spacer(modifier = Modifier.height(8.dp))
+                        PreferredRouteCard(
+                            label = route.label,
+                            latencyMs = route.latencyMs
+                        )
+                    }
+
                     uiState.networkSpeedTestResult?.let { result ->
                         Spacer(modifier = Modifier.height(8.dp))
                         NetworkSpeedTestResultCard(
@@ -437,6 +446,45 @@ fun AISettingsScreen(
                 }
             }
         )
+    }
+}
+
+@Composable
+private fun PreferredRouteCard(
+    label: String,
+    latencyMs: Long
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.secondaryContainer
+        )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Default.Route,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.secondary
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "智能路由建议：$label",
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                )
+                Text(
+                    text = "基于最近测速推荐，延迟 ${latencyMs}ms",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                )
+            }
+        }
     }
 }
 

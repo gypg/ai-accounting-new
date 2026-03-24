@@ -11,6 +11,7 @@ import com.example.aiaccounting.data.service.AIService
 import com.example.aiaccounting.data.service.InviteGatewayService
 import com.example.aiaccounting.data.service.NetworkSpeedTestResult
 import com.example.aiaccounting.data.service.NetworkSpeedTestService
+import com.example.aiaccounting.data.service.PreferredNetworkRoute
 import com.example.aiaccounting.data.service.RemoteModel
 import com.example.aiaccounting.utils.DeviceIdProvider
 import com.example.aiaccounting.utils.NetworkUtils
@@ -70,6 +71,14 @@ class AISettingsViewModel @Inject constructor(
             initialValue = ""
         )
 
+    val preferredNetworkRoute: StateFlow<PreferredNetworkRoute?> = aiConfigRepository
+        .getPreferredNetworkRoute()
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = null
+        )
+
     init {
         viewModelScope.launch {
             aiConfigRepository.migrateLegacyApiKeyIfNeeded()
@@ -88,12 +97,13 @@ class AISettingsViewModel @Inject constructor(
         val inviteBound: Boolean,
         val config: AIConfig,
         val userModelMode: AIConfigRepository.ModelSelectionMode,
-        val inviteModelMode: AIConfigRepository.ModelSelectionMode
+        val inviteModelMode: AIConfigRepository.ModelSelectionMode,
+        val preferredRoute: PreferredNetworkRoute?
     )
 
     private fun loadAIConfig() {
         viewModelScope.launch {
-            combine(
+            val baseConfigFlow = combine(
                 aiConfigRepository.getUseBuiltin(),
                 aiConfigRepository.getInviteBound(),
                 aiConfigRepository.getAIConfig(),
@@ -105,8 +115,16 @@ class AISettingsViewModel @Inject constructor(
                     inviteBound = bound,
                     config = config,
                     userModelMode = userModelMode,
-                    inviteModelMode = inviteModelMode
+                    inviteModelMode = inviteModelMode,
+                    preferredRoute = null
                 )
+            }
+
+            combine(
+                baseConfigFlow,
+                aiConfigRepository.getPreferredNetworkRoute()
+            ) { baseResult, preferredRoute ->
+                baseResult.copy(preferredRoute = preferredRoute)
             }.collect { result ->
                 val builtinAvailable = true
 
@@ -122,6 +140,7 @@ class AISettingsViewModel @Inject constructor(
                             inviteBound = effectiveInviteBound,
                             userModelMode = result.userModelMode,
                             inviteModelMode = result.inviteModelMode,
+                            preferredRouteSummary = result.preferredRoute?.toSummary(),
                             isLoading = false,
                             testResult = TestResult.Error("默认配置不可用，请手动配置 API Key")
                         )
@@ -135,6 +154,7 @@ class AISettingsViewModel @Inject constructor(
                             inviteBound = effectiveInviteBound,
                             userModelMode = result.userModelMode,
                             inviteModelMode = result.inviteModelMode,
+                            preferredRouteSummary = result.preferredRoute?.toSummary(),
                             isLoading = false
                         )
                     }
@@ -159,6 +179,14 @@ class AISettingsViewModel @Inject constructor(
         }
     }
 
+    private fun PreferredNetworkRoute.toSummary(): PreferredRouteSummary {
+        return PreferredRouteSummary(
+            label = label,
+            latencyMs = latencyMs,
+            updatedAtMillis = updatedAtMillis
+        )
+    }
+
     private fun loadUsageStats() {
         viewModelScope.launch {
             aiUsageRepository.getUsageStats().collect { stats ->
@@ -181,13 +209,17 @@ class AISettingsViewModel @Inject constructor(
     fun updateProvider(provider: AIProvider) {
         // Invite-bound config is independent from user config. Updating provider should not clear binding.
         val defaultConfig = AIConfig.defaultFor(provider)
+        viewModelScope.launch {
+            aiConfigRepository.clearPreferredNetworkRoute()
+        }
         _uiState.update {
             it.copy(
                 config = it.config.copy(
                     provider = provider,
                     apiUrl = defaultConfig.apiUrl,
                     model = defaultConfig.model
-                )
+                ),
+                preferredRouteSummary = null
             )
         }
     }
@@ -203,19 +235,33 @@ class AISettingsViewModel @Inject constructor(
 
     fun updateApiUrl(url: String) {
         // Invite-bound config is independent from user config. Updating apiUrl should not clear binding.
+        viewModelScope.launch {
+            aiConfigRepository.clearPreferredNetworkRoute()
+        }
         _uiState.update {
-            it.copy(config = it.config.copy(apiUrl = url))
+            it.copy(
+                config = it.config.copy(apiUrl = url),
+                preferredRouteSummary = null
+            )
         }
     }
 
     fun updateModel(model: String) {
         // 邀请码绑定状态下允许选择模型，不应清除绑定
         val cleaned = model.trim()
-
-        // 普通用户：在 AUTO 模式下手动选择模型，切换回 FIXED（但不影响邀请码模式）
         val state = _uiState.value
-        if (!state.inviteBound && state.userModelMode == AIConfigRepository.ModelSelectionMode.AUTO && cleaned.isNotBlank()) {
-            updateUserModelMode(AIConfigRepository.ModelSelectionMode.FIXED)
+
+        if (cleaned.isNotBlank()) {
+            viewModelScope.launch {
+                val inviteBound = state.inviteBound || aiConfigRepository.getInviteBound().first()
+                if (!inviteBound &&
+                    (state.userModelMode == AIConfigRepository.ModelSelectionMode.AUTO || state.config.model.isBlank())) {
+                    aiConfigRepository.setModelSelectionMode(AIConfigRepository.ModelSelectionMode.FIXED)
+                    _uiState.update { current ->
+                        current.copy(userModelMode = AIConfigRepository.ModelSelectionMode.FIXED)
+                    }
+                }
+            }
         }
 
         _uiState.update {
@@ -273,12 +319,15 @@ class AISettingsViewModel @Inject constructor(
     }
 
     fun saveConfig() {
-        // Invite-bound config is persisted separately (token/apiUrl/model mode). Saving user config here must not
-        // accidentally persist invite token into the user's API key storage.
-        // If builtin is active, invite binding is kept but not effective; allow saving user config.
-        if (_uiState.value.inviteBound && !_uiState.value.useBuiltinConfig) return
-
         viewModelScope.launch {
+            val inviteBound = _uiState.value.inviteBound || aiConfigRepository.getInviteBound().first()
+            val useBuiltin = _uiState.value.useBuiltinConfig || aiConfigRepository.getUseBuiltin().first()
+
+            // Invite-bound config is persisted separately (token/apiUrl/model mode). Saving user config here must not
+            // accidentally persist invite token into the user's API key storage.
+            // If builtin is active, invite binding is kept but not effective; allow saving user config.
+            if (inviteBound && !useBuiltin) return@launch
+
             _uiState.update { it.copy(isSaving = true) }
             val config = _uiState.value.config
             aiConfigRepository.saveAIConfig(config)
@@ -303,11 +352,13 @@ class AISettingsViewModel @Inject constructor(
     fun toggleBuiltinConfig(useBuiltin: Boolean) {
         viewModelScope.launch {
             aiConfigRepository.setUseBuiltin(useBuiltin)
+            val inviteBound = _uiState.value.inviteBound || aiConfigRepository.getInviteBound().first()
 
             if (useBuiltin) {
                 _uiState.update {
                     it.copy(
                         useBuiltinConfig = true,
+                        inviteBound = inviteBound,
                         config = it.config.copy(
                             provider = AIConfig.BUILTIN_CONFIG.provider,
                             apiUrl = AIConfig.BUILTIN_CONFIG.apiUrl,
@@ -322,6 +373,7 @@ class AISettingsViewModel @Inject constructor(
                     val isBuiltinUrl = current.config.apiUrl == AIConfig.BUILTIN_CONFIG.apiUrl
                     current.copy(
                         useBuiltinConfig = false,
+                        inviteBound = inviteBound,
                         config = current.config.copy(
                             apiKey = if (isBuiltinUrl) "" else current.config.apiKey,
                             apiUrl = if (isBuiltinUrl) "" else current.config.apiUrl
@@ -393,6 +445,13 @@ class AISettingsViewModel @Inject constructor(
             )
 
             val nextResult = summary.fastest?.let { fastest ->
+                val preferredRoute = PreferredNetworkRoute(
+                    targetId = fastest.target.id,
+                    label = fastest.target.label,
+                    latencyMs = fastest.latencyMs,
+                    updatedAtMillis = System.currentTimeMillis()
+                )
+                aiConfigRepository.savePreferredNetworkRoute(preferredRoute)
                 NetworkSpeedTestUiResult.Success(
                     fastestLabel = fastest.target.label,
                     latencyMs = fastest.latencyMs,
@@ -681,7 +740,9 @@ class AISettingsViewModel @Inject constructor(
         val cleaned = value.trim()
         viewModelScope.launch {
             aiConfigRepository.setGatewayBaseUrl(cleaned)
+            aiConfigRepository.clearPreferredNetworkRoute()
         }
+        _uiState.update { it.copy(preferredRouteSummary = null) }
     }
 }
 
@@ -694,6 +755,7 @@ data class AISettingsUiState(
     val testResult: TestResult? = null,
     val isTestingNetworkSpeed: Boolean = false,
     val networkSpeedTestResult: NetworkSpeedTestUiResult? = null,
+    val preferredRouteSummary: PreferredRouteSummary? = null,
     val usageStats: AIUsageStats = AIUsageStats(),
     val isNetworkAvailable: Boolean = true,
     val isFetchingModels: Boolean = false,
@@ -726,6 +788,12 @@ data class NetworkSpeedTestMeasuredTarget(
     val label: String,
     val latencyMs: Long?,
     val message: String
+)
+
+data class PreferredRouteSummary(
+    val label: String,
+    val latencyMs: Long,
+    val updatedAtMillis: Long
 )
 
 sealed class InviteBindResult {

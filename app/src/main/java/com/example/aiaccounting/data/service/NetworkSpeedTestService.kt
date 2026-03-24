@@ -158,6 +158,13 @@ data class NetworkSpeedTestSummary(
     val errorMessage: String?
 )
 
+data class PreferredNetworkRoute(
+    val targetId: String,
+    val label: String,
+    val latencyMs: Long,
+    val updatedAtMillis: Long
+)
+
 data class NetworkSpeedTestTarget(
     val id: String,
     val label: String,

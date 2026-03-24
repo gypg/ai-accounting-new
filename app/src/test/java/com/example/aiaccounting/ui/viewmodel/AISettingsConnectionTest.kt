@@ -6,7 +6,12 @@ import com.example.aiaccounting.data.repository.AIUsageRepository
 import com.example.aiaccounting.data.repository.AIUsageStats
 import com.example.aiaccounting.data.service.AIService
 import com.example.aiaccounting.data.service.InviteGatewayService
+import com.example.aiaccounting.data.service.NetworkSpeedTestResult
 import com.example.aiaccounting.data.service.NetworkSpeedTestService
+import com.example.aiaccounting.data.service.NetworkSpeedTestSummary
+import com.example.aiaccounting.data.service.NetworkSpeedTestTarget
+import com.example.aiaccounting.data.service.NetworkSpeedTestClientType
+import com.example.aiaccounting.data.service.PreferredNetworkRoute
 import com.example.aiaccounting.utils.DeviceIdProvider
 import com.example.aiaccounting.utils.NetworkUtils
 import io.mockk.coEvery
@@ -22,6 +27,7 @@ import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Before
 import org.junit.Test
 
@@ -60,6 +66,7 @@ class AISettingsConnectionTest {
         every { aiConfigRepository.getInviteApiBaseUrl() } returns flowOf("")
         every { aiConfigRepository.getInviteRpm() } returns flowOf(0)
         every { aiConfigRepository.getInviteCodeMasked() } returns flowOf("")
+        every { aiConfigRepository.getPreferredNetworkRoute() } returns flowOf(null)
         coEvery { networkUtils.isNetworkAvailable() } returns true
     }
 
@@ -94,8 +101,29 @@ class AISettingsConnectionTest {
     }
 
     @Test
-    fun runNetworkSpeedTest_whenOffline_setsErrorAndStopsTesting() = runTest {
-        coEvery { networkUtils.isNetworkAvailable() } returns false
+    fun runNetworkSpeedTest_whenSuccessful_persistsPreferredRoute() = runTest {
+        val fastestTarget = NetworkSpeedTestTarget(
+            id = "gateway",
+            label = "邀请码网关",
+            url = "https://gateway.example/bootstrap",
+            clientType = NetworkSpeedTestClientType.GATEWAY
+        )
+        coEvery { networkSpeedTestService.test(any(), any()) } returns NetworkSpeedTestSummary(
+            targets = listOf(
+                NetworkSpeedTestResult.Success(
+                    target = fastestTarget,
+                    latencyMs = 123,
+                    statusCode = 200
+                )
+            ),
+            fastest = NetworkSpeedTestResult.Success(
+                target = fastestTarget,
+                latencyMs = 123,
+                statusCode = 200
+            ),
+            errorMessage = null
+        )
+        coEvery { aiConfigRepository.savePreferredNetworkRoute(any()) } returns Unit
 
         val vm = AISettingsViewModel(
             aiConfigRepository = aiConfigRepository,
@@ -111,10 +139,101 @@ class AISettingsConnectionTest {
         vm.runNetworkSpeedTest()
         testDispatcher.scheduler.advanceUntilIdle()
 
-        assertFalse(vm.uiState.value.isTestingNetworkSpeed)
-        assertEquals(
-            "网络不可用，请检查网络连接",
-            (vm.uiState.value.networkSpeedTestResult as NetworkSpeedTestUiResult.Error).message
+        io.mockk.coVerify {
+            aiConfigRepository.savePreferredNetworkRoute(
+                match {
+                    it.targetId == "gateway" &&
+                        it.label == "邀请码网关" &&
+                        it.latencyMs == 123L
+                }
+            )
+        }
+    }
+
+    @Test
+    fun init_whenPreferredRouteExists_exposesItInUiState() = runTest {
+        every { aiConfigRepository.getPreferredNetworkRoute() } returns flowOf(
+            PreferredNetworkRoute(
+                targetId = "api",
+                label = "API 节点",
+                latencyMs = 88,
+                updatedAtMillis = 123456L
+            )
         )
+
+        val vm = AISettingsViewModel(
+            aiConfigRepository = aiConfigRepository,
+            aiService = aiService,
+            aiUsageRepository = aiUsageRepository,
+            networkUtils = networkUtils,
+            inviteGatewayService = inviteGatewayService,
+            deviceIdProvider = deviceIdProvider,
+            networkSpeedTestService = networkSpeedTestService
+        )
+
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals("API 节点", vm.uiState.value.preferredRouteSummary?.label)
+        assertEquals(88L, vm.uiState.value.preferredRouteSummary?.latencyMs)
+    }
+
+    @Test
+    fun updateApiUrl_clearsPreferredRouteSummary() = runTest {
+        every { aiConfigRepository.getPreferredNetworkRoute() } returns flowOf(
+            PreferredNetworkRoute(
+                targetId = "api",
+                label = "API 节点",
+                latencyMs = 66,
+                updatedAtMillis = 999L
+            )
+        )
+        coEvery { aiConfigRepository.clearPreferredNetworkRoute() } returns Unit
+
+        val vm = AISettingsViewModel(
+            aiConfigRepository = aiConfigRepository,
+            aiService = aiService,
+            aiUsageRepository = aiUsageRepository,
+            networkUtils = networkUtils,
+            inviteGatewayService = inviteGatewayService,
+            deviceIdProvider = deviceIdProvider,
+            networkSpeedTestService = networkSpeedTestService
+        )
+
+        testDispatcher.scheduler.advanceUntilIdle()
+        vm.updateApiUrl("https://changed.example/v1")
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        io.mockk.coVerify { aiConfigRepository.clearPreferredNetworkRoute() }
+        assertNull(vm.uiState.value.preferredRouteSummary)
+    }
+
+    @Test
+    fun setGatewayBaseUrl_clearsPreferredRouteSummary() = runTest {
+        every { aiConfigRepository.getPreferredNetworkRoute() } returns flowOf(
+            PreferredNetworkRoute(
+                targetId = "gateway",
+                label = "邀请码网关",
+                latencyMs = 45,
+                updatedAtMillis = 999L
+            )
+        )
+        coEvery { aiConfigRepository.clearPreferredNetworkRoute() } returns Unit
+
+        val vm = AISettingsViewModel(
+            aiConfigRepository = aiConfigRepository,
+            aiService = aiService,
+            aiUsageRepository = aiUsageRepository,
+            networkUtils = networkUtils,
+            inviteGatewayService = inviteGatewayService,
+            deviceIdProvider = deviceIdProvider,
+            networkSpeedTestService = networkSpeedTestService
+        )
+
+        testDispatcher.scheduler.advanceUntilIdle()
+        vm.setGatewayBaseUrl("https://changed.gateway.example")
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        io.mockk.coVerify { aiConfigRepository.clearPreferredNetworkRoute() }
+        assertNull(vm.uiState.value.preferredRouteSummary)
     }
 }
