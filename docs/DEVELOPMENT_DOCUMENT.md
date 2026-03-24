@@ -57,8 +57,11 @@ AI记账是一款面向中国大陆个人用户的智能记账 Android 应用。
 - 模块 3D 第二段已将 `RequestClarification` 接入更通用的记账澄清闭环：缺金额时优先本地追问，补充金额后可沿最近澄清上下文继续走记账处理
 - 模块 3D 第三段已新增 `PendingClarificationState` / `ClarificationTrigger` / `ClarificationFlowResult`，把 clarification 从轻量历史 continuation 升级为显式 pending clarification state
 - 模块 3D 第四段已把 clarification 扩展到账户缺口：当用户明确记账、金额和交易类型已足够、但存在多个可用账户且消息未指明账户时，系统会先本地追问账户，而不是静默落默认账户
-- 新建会话、切换会话、删除/重置当前会话时，都会统一清理 pending modification / pending clarification state，避免跨 session 串流旧确认或旧澄清
-- 当前 `ViewModel` 继续保留 UI state、仓库存储、session 入口，消息理解与执行编排开始独立化
+- 模块 3D 第五段已继续把 clarification 扩展到分类缺口与日期缺口：当用户已明确记账且金额/交易类型已足够时，若分类仍无法稳定推断，会先本地追问分类；若分类已足够但日期缺失，也会先本地追问日期，而不是直接落默认日期/模糊分类
+- 模块 3D 第七段已继续把统一 pending interaction 下沉到 coordinator / route：`AIAssistantMessageExecutionCoordinator` 现在直接承接 pending clarification continuation，`AIAssistantMessageOrchestrator` 的路由入参也统一为 `PendingInteractionState`
+- clarification continuation 续执行时，当前会先清本地 pending clarification；如果后续重新执行抛错，会 restore 原 pending clarification，避免用户补充后因为异常丢失上下文
+- `ClarificationRequired` 现已显式携带 `originalMessage + question`，减少 `ViewModel` 对 continuation message 拼接与状态恢复细节的参与
+- 已修复 resumed clarification message 可能被 `AIReasoningEngine` 按旧历史再次 prepend 原始请求、导致原始消息重复拼接的问题
 
 #### 本模块新增测试
 - `AIAssistantRemoteResponseInterpreterTest`
@@ -70,6 +73,7 @@ AI记账是一款面向中国大陆个人用户的智能记账 Android 应用。
   - 覆盖 `记下 / 记录一笔` 等记账短语回归
 - `AIAssistantMessageOrchestratorTest`
   - 覆盖 pending modification 优先级
+  - 覆盖 pending clarification 不会误走 modification flow
   - 覆盖远程可用/不可用时的路由差异
   - 覆盖修改交易意图进入 modification flow
 - `AIAssistantRemoteExecutionHandlerTest`
@@ -96,23 +100,31 @@ AI记账是一款面向中国大陆个人用户的智能记账 Android 应用。
   - 覆盖 pending confirmation 继续执行时返回最终回复
   - 覆盖 modification flow 首次进入时返回 `ConfirmationRequired`
   - 覆盖 clarification 场景返回显式 `ClarificationRequired`
-  - 覆盖确认前不会提前触发远程执行
+  - 覆盖 clarification continuation 成功续执行前先清 pending clarification
+  - 覆盖 clarification continuation 续执行失败时 restore 原 pending clarification
+  - 覆盖 confirmation / clarification 前不会提前触发远程执行
 - `AIAssistantPendingModificationLifecycleTest`
   - 覆盖 begin / continue 返回完整 `ModificationFlowResult`
   - 覆盖无 pending 时的 fallback finish
   - 覆盖失败确认保留状态
   - 覆盖需要再次确认时保留 pending 状态
 - `AIAssistantPendingClarificationLifecycleTest`
-  - 覆盖金额澄清 / 类型澄清 / 账户澄清 trigger 建立
+  - 覆盖金额澄清 / 类型澄清 / 账户澄清 / 分类澄清 / 日期澄清 trigger 建立
   - 覆盖补充信息前重复追问、补齐后继续执行、取消后清理状态
+  - 覆盖账户别名（如工行）回答可继续消费
   - 覆盖 lifecycle clear 后 pending clarification state 被清空
+- `AIAssistantPendingInteractionLifecycleTest`
+  - 覆盖统一 pending interaction facade 对 clarification / modification 的 currentState、begin、continue、clear 委派
+  - 覆盖 clarification continuation 成功前保留 pending state、成功后再显式清理
 - `AIAssistantPendingStateResetTest`
-  - 覆盖 pending modification / clarification state 的显式清理
-- `AIReasoningEngineTest`
+  - 覆盖 unified pending interaction clear 可同时清理 modification / clarification state
+- `AIAssistantPendingClarificationLifecycleTest`
   - 覆盖缺金额记账请求先返回 `RequestClarification`
   - 覆盖金额补充消息在澄清上下文下继续产出 `RecordTransaction`
   - 覆盖“记一笔 + 已给金额但未指明类型”时先追问收入 / 支出 / 转账
-  - 覆盖“记一笔 + 已给金额/类型但多账户未指明账户”时先追问账户
+  - 覆盖“记一笔 + 已给金额/类型/日期但多账户未指明账户”时先追问账户
+  - 覆盖“记一笔 + 已给金额/类型/日期但分类缺失”时先追问分类
+  - 覆盖“记一笔 + 已给金额/类型/分类但日期缺失”时先追问日期
   - 覆盖已显式给出账户或仅有单账户时不触发账户澄清
 
 #### 当前实现边界
@@ -126,14 +138,16 @@ AI记账是一款面向中国大陆个人用户的智能记账 Android 应用。
 - 当前 `AIAssistantRemoteResponseIntegrityChecker` 已升级为结构化 JSON object 有效性校验，但校验范围仍故意与解释器保持一致，只覆盖“纯 JSON / 纯 fenced JSON”
 - 当前交易修改确认流已不再只向上返回字符串，而是通过 `ModificationFlowResult` / `AIAssistantMessageExecutionResult` 保留“待确认”语义
 - 当前通用 clarification 已不再只停留在“缺金额 + 最近历史拼接”的最小闭环，而是引入独立 `PendingClarificationState` / `ClarificationTrigger`，并由 `ClarificationRequired` 显式表示待澄清态
-- 当前 clarification 已先覆盖“缺金额”与“金额已给但交易类型不明确”两类本地澄清
-- 当前 session 边界已统一清理 pending modification / pending clarification state，避免跨会话误消费旧确认或旧澄清
-- 下一步若继续模块 3，应优先继续扩展更多 clarification trigger（账户、日期、分类歧义等），并评估是否需要把 clarification / confirmation 进一步统一到更高层 pending interaction model
+- 当前 clarification 已覆盖“缺金额”“金额已给但交易类型不明确”“多账户未指明账户”“分类缺失”“日期缺失”等本地可判定缺口
+- 当前 `AIAssistantPendingInteractionLifecycle` 已把 clarification / confirmation 收口到统一高层入口，`ViewModel` 会通过统一 facade 管理 begin / continue / clear
+- 当前统一 pending interaction 已进一步下沉到 `AIAssistantMessageExecutionCoordinator` / `AIAssistantMessageOrchestrator`：`ViewModel` 只负责把当前 pending interaction state 与 lifecycle 回调传入 coordinator，不再直接编排 clarification continuation 续执行细节
+- 当前 clarification continuation 在 coordinator 中采用“续执行前先清、失败时 restore”语义，避免异常路径丢失待补充上下文
+- 当前 `AIReasoningEngine` 已避免对已经包含原始请求的 clarification continuation message 再次拼接旧用户输入，减少 resumed message 重复污染后续解析
 
 #### 下个窗口默认接手点
-- 模块 3D 第三段已收口完成
-- 若继续本方向，直接进入 **模块 3D 第四段：扩展更多 clarification trigger 并评估统一 pending interaction model**
-- 优先扩展账户、日期、分类歧义等缺失字段/歧义场景，并评估 clarification / confirmation 是否要统一到更高层 pending interaction state
+- 模块 3D 第六段已收口完成
+- 若继续本方向，直接进入 **模块 3D 第七段：把统一 pending interaction 进一步下沉到 coordinator / route 层，并继续收口“确认/澄清优先于云端”的完整闭环**
+- 优先减少 `ViewModel` 中 pending interaction 的编排细节，把统一 pending 模型继续下沉到 coordinator / orchestrator，评估是否引入更结构化的 step / protocol result model
 - 继续遵循当前工作流：测试先行 → 完成一个模块后更新 memory / 开发文档 / git commit / push
 
 
@@ -220,7 +234,7 @@ AI记账是一款面向中国大陆个人用户的智能记账 Android 应用。
   - 模型预加载与资源调度管理
 
 #### 问题3：指令理解与执行流程优化
-- **当前状态：部分完成（模块 3D 第三段完成，整套交互确认机制仍未完全产品化）**
+- **当前状态：部分完成（模块 3D 第七段完成，整套交互确认机制仍未完全产品化）**
 - **已完成**：
   - 远程响应解释、消息执行 coordinator、pending modification 生命周期收口
   - 远程 handler / stream collector / integrity checker 分层
@@ -250,33 +264,29 @@ AI记账是一款面向中国大陆个人用户的智能记账 Android 应用。
   - 网络状态监测与预警提示
 
 #### 当前建议优先级
-1. 先把 **问题3 的通用澄清最小闭环切片** 提交到 git，确保代码 / memory / 文档 / git 状态一致
-2. 然后继续 **问题3**，把 clarification 从“缺金额记账”扩展到更通用的缺失字段/歧义确认场景
-3. **问题4** 当前仍停留在早期稳定性修复阶段，后续若恢复推进，应单独拆成新的网络能力模块群，不建议混入模块3连续重构中
+1. 继续 **问题3 / 模块3D-8**：收口“确认/澄清后再决定是否二次请求云端”的完整闭环
+2. 然后继续 **问题3 / 模块3D-9**：把 continuation / confirmation / clarification 从字符串拼接过渡到更结构化的 step / protocol result model
+3. 再继续 **问题3 / 模块3D-10**：面向用户的分步确认 / 思考展示
+4. 若问题3高层链路稳定，再评估优先进入 **问题2 / 模块2B**（运行时模型性能监测）还是 **问题4 / 模块4A**（网络测速模块）
+5. **问题1** 当前不再是默认主线；若后续回头深化，则从 **模块1B**（OCR 深度预处理增强）开始
 
-#### 已对齐的下一轮计划（2026-03-23）
-- 本轮已完成：
-  - 问题2 reviewer follow-up 已补码、补测、补文档，并已提交 git
-  - 问题3 已新增“确认态显式结果模型”最小切片，为后续通用 confirmation / clarification 闭环铺路
-  - 问题3 已新增“缺金额记账请求”的通用澄清最小闭环：先本地追问，补充金额后可沿上下文继续执行
-  - 问题3 已新增显式 `PendingClarificationState` / `ClarificationTrigger`，并扩展到“已给金额但交易类型仍不明确”的类型澄清场景
-  - 问题3 已在 create / switch / delete session 边界统一清理 pending modification / clarification state
-  - 四大问题的“已完成 / 未完成”边界已重新梳理清楚
-- 下一轮对话默认目标：**继续问题3，而不是回头扩问题1/2/4**
-- 下一轮优先做的最小切片：**扩展更多 clarification trigger，并评估统一 pending interaction model**
-  - 对存在歧义或信息不完整的用户输入，不直接进入执行
-  - 先进入更显式的 clarification / confirmation 状态
-  - 由系统生成结构化确认问题
-  - 用户确认后，再决定是否二次请求云端 AI 或进入执行链路
-- 下一轮建议顺序：
-  1. 把 clarification 触发条件从“缺金额/缺交易类型”扩展到更多缺失字段/歧义场景
-  2. 评估 clarification / confirmation 是否进一步统一为更高层 pending interaction state
-  3. 为确认前不执行、确认后二次进入执行链路补更完整回归测试
-  4. 该最小闭环稳定后，再评估是否继续下沉 `AIAssistantRemoteExecutionResult` 到 UI 文案 / 副作用 mapper
-- 明确暂不在下一轮处理：
-  - 问题1 的多 OCR 引擎 / OpenCV 深化方案
-  - 问题2 的运行时模型性能监测 / 预加载 / 调度
-  - 问题4 的测速、智能路由、退避、压缩与网络预警
+#### 重新编号后的剩余模块清单（供后续窗口直接接手）
+- **问题1：OCR识别精度问题**
+  - 已完成：模块1
+  - 未完成：模块1B（深度预处理增强）、模块1C（多引擎 OCR 比对）、模块1D（原生置信度与模型优化）
+- **问题2：自动优选模型导致超时**
+  - 已完成：模块2
+  - 未完成：模块2B（运行时模型性能监测）、模块2C（动态切换策略）、模块2D（模型预加载与资源调度）
+- **问题3：指令理解与执行流程优化**
+  - 已完成：模块3A、模块3B、模块3C-1~4、模块3D-1~7
+  - 未完成：模块3D-8（确认后再请求云端的完整闭环）、模块3D-9（结构化 step / protocol model）、模块3D-10（面向用户的分步确认/思考展示）
+- **问题4：网络延迟与超时优化**
+  - 已完成：暂无正式模块，仅完成基础超时与连接稳定性修补
+  - 未完成：模块4A（网络测速）、模块4B（智能路由）、模块4C（重试与退避体系）、模块4D（压缩传输与增量更新）、模块4E（网络状态监测与预警）
+
+#### 切换窗口时的默认接手点
+- 默认继续：**问题3 / 模块3D-8**
+- 默认不要回头重开问题1、问题2连接测试链路，或把问题4混入当前重构主线，除非用户明确改优先级
 
 ---
 

@@ -63,8 +63,10 @@ class AIAssistantViewModel @Inject constructor(
         messageOrchestrator = messageOrchestrator
     )
     private val modificationCoordinator = AIAssistantModificationCoordinator(transactionModificationHandler)
-    private val pendingModificationLifecycle = AIAssistantPendingModificationLifecycle(modificationCoordinator)
-    private val pendingClarificationLifecycle = AIAssistantPendingClarificationLifecycle(AIMessageParser())
+    private val pendingInteractionLifecycle = AIAssistantPendingInteractionLifecycle(
+        modificationLifecycle = AIAssistantPendingModificationLifecycle(modificationCoordinator),
+        clarificationLifecycle = AIAssistantPendingClarificationLifecycle(AIMessageParser())
+    )
     private val imageMessageHandler = AIAssistantImageMessageHandler(
         aiService = aiService,
         imageProcessingService = imageProcessingService,
@@ -244,10 +246,6 @@ class AIAssistantViewModel @Inject constructor(
      */
     private suspend fun processWithAIReasoning(message: String, isNetworkAvailable: Boolean): String {
         val currentButler = butlerCoordinator.resolveCurrentButler(_uiState.value.currentButler)
-        val pendingClarificationResult = handlePendingClarificationIfNeeded(message, currentButler.id)
-        if (pendingClarificationResult != null) {
-            return pendingClarificationResult
-        }
         return when (
             val result = messageExecutionCoordinator.execute(
                 message = message,
@@ -256,7 +254,11 @@ class AIAssistantViewModel @Inject constructor(
                 isNetworkAvailable = isNetworkAvailable,
                 currentUseBuiltinConfig = currentUseBuiltinConfig,
                 currentAIConfig = currentAIConfig,
-                pendingState = pendingModificationLifecycle.currentState(),
+                pendingInteractionState = pendingInteractionLifecycle.currentState(),
+                continuePendingClarification = pendingInteractionLifecycle::continueClarification,
+                clearPendingClarificationAfterSuccessfulContinuation =
+                    pendingInteractionLifecycle::clearClarificationAfterSuccessfulContinuation,
+                restorePendingClarification = pendingInteractionLifecycle::restoreClarification,
                 handleModificationConfirmation = ::handleModificationConfirmation,
                 handleTransactionModification = ::handleTransactionModification,
                 processWithRemoteAI = ::processWithRemoteAI
@@ -265,7 +267,10 @@ class AIAssistantViewModel @Inject constructor(
             is AIAssistantMessageExecutionResult.Reply -> result.message
             is AIAssistantMessageExecutionResult.ConfirmationRequired -> result.message
             is AIAssistantMessageExecutionResult.ClarificationRequired -> {
-                pendingClarificationLifecycle.begin(message, result.message).reply
+                pendingInteractionLifecycle.beginClarification(
+                    originalMessage = result.originalMessage,
+                    question = result.question
+                ).reply
             }
         }
     }
@@ -277,7 +282,7 @@ class AIAssistantViewModel @Inject constructor(
         message: String,
         butlerId: String
     ): ModificationFlowResult {
-        return pendingModificationLifecycle.begin(message, butlerId)
+        return pendingInteractionLifecycle.beginModification(message, butlerId)
     }
     
     /**
@@ -287,43 +292,10 @@ class AIAssistantViewModel @Inject constructor(
         message: String,
         butlerId: String
     ): ModificationFlowResult {
-        return pendingModificationLifecycle.continuePending(message, butlerId)
+        return pendingInteractionLifecycle.continueModification(message, butlerId)
     }
     
-    private suspend fun handlePendingClarificationIfNeeded(
-        message: String,
-        butlerId: String
-    ): String? {
-        return when (val result = pendingClarificationLifecycle.currentState()?.let {
-            pendingClarificationLifecycle.continuePending(message, butlerId)
-        }) {
-            null -> null
-            is ClarificationFlowResult.RequestClarification -> result.reply
-            is ClarificationFlowResult.Finish -> result.reply
-            is ClarificationFlowResult.ContinueWithMessage -> {
-                when (
-                    val continuationResult = messageExecutionCoordinator.execute(
-                        message = result.message,
-                        currentButler = butlerCoordinator.resolveCurrentButler(_uiState.value.currentButler),
-                        conversationHistory = getRecentConversationHistory(),
-                        isNetworkAvailable = _uiState.value.isNetworkAvailable,
-                        currentUseBuiltinConfig = currentUseBuiltinConfig,
-                        currentAIConfig = currentAIConfig,
-                        pendingState = pendingModificationLifecycle.currentState(),
-                        handleModificationConfirmation = ::handleModificationConfirmation,
-                        handleTransactionModification = ::handleTransactionModification,
-                        processWithRemoteAI = ::processWithRemoteAI
-                    )
-                ) {
-                    is AIAssistantMessageExecutionResult.Reply -> continuationResult.message
-                    is AIAssistantMessageExecutionResult.ConfirmationRequired -> continuationResult.message
-                    is AIAssistantMessageExecutionResult.ClarificationRequired -> {
-                        pendingClarificationLifecycle.begin(result.message, continuationResult.message).reply
-                    }
-                }
-            }
-        }
-    }
+
 
     /**
      * 获取最近的对话历史
@@ -386,8 +358,7 @@ class AIAssistantViewModel @Inject constructor(
     }
 
     private fun clearPendingInteractionStates() {
-        pendingModificationLifecycle.clear()
-        pendingClarificationLifecycle.clear()
+        pendingInteractionLifecycle.clear()
     }
 
     /**

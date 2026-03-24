@@ -6,6 +6,8 @@ internal enum class ClarificationTrigger {
     TRANSACTION_AMOUNT,
     TRANSACTION_TYPE,
     TRANSACTION_ACCOUNT,
+    TRANSACTION_CATEGORY,
+    TRANSACTION_DATE,
     GENERIC
 }
 
@@ -72,10 +74,17 @@ internal class AIAssistantPendingClarificationLifecycle(
             )
         }
 
-        pendingState = null
         return ClarificationFlowResult.ContinueWithMessage(
             message = "${currentPendingState.originalMessage} $message".trim()
         )
+    }
+
+    fun clearAfterSuccessfulContinuation() {
+        pendingState = null
+    }
+
+    fun restore(state: PendingClarificationState) {
+        pendingState = state
     }
 
     internal fun seedForTest(state: PendingClarificationState?) {
@@ -91,6 +100,12 @@ internal class AIAssistantPendingClarificationLifecycle(
             question.contains("账户") || question.contains("微信") || question.contains("支付宝") || question.contains("银行卡") -> {
                 ClarificationTrigger.TRANSACTION_ACCOUNT
             }
+            question.contains("分类") || question.contains("类别") || question.contains("归类") -> {
+                ClarificationTrigger.TRANSACTION_CATEGORY
+            }
+            question.contains("日期") || question.contains("时间") || question.contains("哪天") || question.contains("几号") -> {
+                ClarificationTrigger.TRANSACTION_DATE
+            }
             else -> ClarificationTrigger.GENERIC
         }
     }
@@ -100,6 +115,8 @@ internal class AIAssistantPendingClarificationLifecycle(
             ClarificationTrigger.TRANSACTION_AMOUNT -> !messageParser.containsAmount(message)
             ClarificationTrigger.TRANSACTION_TYPE -> !containsTransactionType(message)
             ClarificationTrigger.TRANSACTION_ACCOUNT -> !containsTransactionAccount(message)
+            ClarificationTrigger.TRANSACTION_CATEGORY -> !containsTransactionCategory(message)
+            ClarificationTrigger.TRANSACTION_DATE -> !containsTransactionDate(message)
             ClarificationTrigger.GENERIC -> message.isBlank()
         }
     }
@@ -114,9 +131,33 @@ internal class AIAssistantPendingClarificationLifecycle(
     private fun containsTransactionAccount(message: String): Boolean {
         val lowerMessage = message.lowercase()
         return listOf(
-            "微信", "wechat", "wx", "支付宝", "alipay", "现金", "cash",
-            "信用卡", "银行卡", "银行", "储蓄卡", "借记卡", "debit", "credit"
+            "微信", "wechat", "wx", "支付宝", "alipay", "花呗", "余额宝", "现金", "cash",
+            "信用卡", "银行卡", "银行", "工行", "建行", "农行", "中行", "招行", "招商", "交行",
+            "储蓄卡", "借记卡", "debit", "credit"
         ).any { lowerMessage.contains(it) }
+    }
+
+    private fun containsTransactionCategory(message: String): Boolean {
+        val lowerMessage = message.lowercase()
+        return listOf(
+            "餐饮", "交通", "购物", "娱乐", "住房", "医疗", "教育", "通讯",
+            "工资", "奖金", "午饭", "午餐", "晚饭", "早餐", "咖啡", "奶茶",
+            "打车", "地铁", "公交", "房租", "水电"
+        ).any { lowerMessage.contains(it) }
+    }
+
+    private fun containsTransactionDate(message: String): Boolean {
+        val lowerMessage = message.lowercase()
+        if (listOf("今天", "昨天", "前天", "大前天", "刚才", "刚刚", "本周", "这周", "上周", "本月", "上月").any {
+                lowerMessage.contains(it)
+            }) {
+            return true
+        }
+        return listOf(
+            Regex("""\d{4}年\d{1,2}月\d{1,2}[日号]?"""),
+            Regex("""\d{1,2}月\d{1,2}[日号]?"""),
+            Regex("""\d{1,2}[./-]\d{1,2}""")
+        ).any { it.containsMatchIn(message) }
     }
 
     private fun isCancellation(message: String): Boolean {

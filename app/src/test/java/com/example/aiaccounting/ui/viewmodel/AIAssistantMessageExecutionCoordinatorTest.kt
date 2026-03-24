@@ -29,7 +29,7 @@ class AIAssistantMessageExecutionCoordinatorTest {
     )
 
     @Test
-    fun execute_returnsReplyResult_whenPendingStateExists() = runTest {
+    fun execute_returnsReplyResult_whenPendingModificationStateExists() = runTest {
         val result = coordinator.execute(
             message = "确认",
             currentButler = butler,
@@ -37,7 +37,10 @@ class AIAssistantMessageExecutionCoordinatorTest {
             isNetworkAvailable = true,
             currentUseBuiltinConfig = false,
             currentAIConfig = AIConfig(isEnabled = true, apiKey = "key"),
-            pendingState = pendingState(),
+            pendingInteractionState = PendingInteractionState.Modification(pendingModificationState()),
+            continuePendingClarification = { _, _ -> ClarificationFlowResult.Finish("不会走到这里") },
+            clearPendingClarificationAfterSuccessfulContinuation = {},
+            restorePendingClarification = {},
             handleModificationConfirmation = { _, _ -> ModificationFlowResult.Finish("已确认", shouldClearPending = true) },
             handleTransactionModification = { _, _ -> ModificationFlowResult.Finish("不会走到这里") },
             processWithRemoteAI = { "不会走到这里" }
@@ -47,27 +50,141 @@ class AIAssistantMessageExecutionCoordinatorTest {
     }
 
     @Test
-    fun execute_returnsLocalActionResult_whenRouteIsLocalActions() = runTest {
+    fun execute_returnsClarificationRequired_whenPendingClarificationStillNeedsInput() = runTest {
+        val pendingState = pendingClarificationState()
+
+        val result = coordinator.execute(
+            message = "不知道",
+            currentButler = butler,
+            conversationHistory = emptyList(),
+            isNetworkAvailable = true,
+            currentUseBuiltinConfig = false,
+            currentAIConfig = AIConfig(isEnabled = true, apiKey = "key"),
+            pendingInteractionState = PendingInteractionState.Clarification(pendingState),
+            continuePendingClarification = { _, _ ->
+                ClarificationFlowResult.RequestClarification(
+                    pendingState = pendingState,
+                    reply = "请再补充金额"
+                )
+            },
+            clearPendingClarificationAfterSuccessfulContinuation = {
+                throw AssertionError("should not clear pending clarification")
+            },
+            restorePendingClarification = {
+                throw AssertionError("should not restore pending clarification")
+            },
+            handleModificationConfirmation = { _, _ -> ModificationFlowResult.Finish("不会走到这里") },
+            handleTransactionModification = { _, _ -> ModificationFlowResult.Finish("不会走到这里") },
+            processWithRemoteAI = { "不会走到这里" }
+        )
+
+        assertEquals(
+            AIAssistantMessageExecutionResult.ClarificationRequired(
+                originalMessage = pendingState.originalMessage,
+                question = "请再补充金额"
+            ),
+            result
+        )
+    }
+
+    @Test
+    fun execute_clearsPendingClarification_beforeContinuingMessage() = runTest {
+        val pendingState = pendingClarificationState()
         val reasoningResult = reasoningResult(AIReasoningEngine.UserIntent.QUERY_INFORMATION)
-        coEvery { aiReasoningEngine.reason(any(), any()) } returns reasoningResult
+        var cleared = false
+
+        coEvery { aiReasoningEngine.reason(any(), any()) } answers {
+            assertTrue(cleared)
+            reasoningResult
+        }
         coEvery { aiReasoningEngine.executeActions(any()) } returns "本地查询结果"
         coEvery { messageOrchestrator.route(any(), any(), any(), any(), any(), any(), any(), any()) } returns
             AIAssistantMessageRoute.LocalActions(emptyList())
 
         val result = coordinator.execute(
-            message = "查看余额",
+            message = "二十五元",
             currentButler = butler,
-            conversationHistory = listOf("你好"),
+            conversationHistory = listOf("帮我记一笔午饭"),
             isNetworkAvailable = true,
             currentUseBuiltinConfig = false,
             currentAIConfig = AIConfig(isEnabled = true, apiKey = "key"),
-            pendingState = null,
+            pendingInteractionState = PendingInteractionState.Clarification(pendingState),
+            continuePendingClarification = { _, _ ->
+                ClarificationFlowResult.ContinueWithMessage("帮我记一笔午饭 二十五元")
+            },
+            clearPendingClarificationAfterSuccessfulContinuation = { cleared = true },
+            restorePendingClarification = {
+                throw AssertionError("should not restore pending clarification")
+            },
             handleModificationConfirmation = { _, _ -> ModificationFlowResult.Finish("不会走到这里") },
             handleTransactionModification = { _, _ -> ModificationFlowResult.Finish("不会走到这里") },
             processWithRemoteAI = { "不会走到这里" }
         )
 
         assertEquals(AIAssistantMessageExecutionResult.Reply("本地查询结果"), result)
+        assertTrue(cleared)
+    }
+
+    @Test
+    fun execute_restoresPendingClarification_whenContinuationExecutionFails() = runTest {
+        val pendingState = pendingClarificationState()
+        val reasoningResult = reasoningResult(AIReasoningEngine.UserIntent.GENERAL_CONVERSATION)
+        var restoredState: PendingClarificationState? = null
+
+        coEvery { aiReasoningEngine.reason(any(), any()) } returns reasoningResult
+        coEvery { messageOrchestrator.route(any(), any(), any(), any(), any(), any(), any(), any()) } returns
+            AIAssistantMessageRoute.RemoteOrLocalFallback("帮我记一笔午饭 二十五元")
+
+        val error = runCatching {
+            coordinator.execute(
+                message = "二十五元",
+                currentButler = butler,
+                conversationHistory = emptyList(),
+                isNetworkAvailable = true,
+                currentUseBuiltinConfig = false,
+                currentAIConfig = AIConfig(isEnabled = true, apiKey = "key"),
+                pendingInteractionState = PendingInteractionState.Clarification(pendingState),
+                continuePendingClarification = { _, _ ->
+                    ClarificationFlowResult.ContinueWithMessage("帮我记一笔午饭 二十五元")
+                },
+                clearPendingClarificationAfterSuccessfulContinuation = {},
+                restorePendingClarification = { restoredState = it },
+                handleModificationConfirmation = { _, _ -> ModificationFlowResult.Finish("不会走到这里") },
+                handleTransactionModification = { _, _ -> ModificationFlowResult.Finish("不会走到这里") },
+                processWithRemoteAI = { throw IllegalStateException("network failed") }
+            )
+        }.exceptionOrNull()
+
+        assertTrue(error is IllegalStateException)
+        assertEquals("network failed", error?.message)
+        assertEquals(pendingState, restoredState)
+    }
+
+    @Test
+    fun execute_doesNotRestorePendingClarification_whenContinuationFinishesWithoutReexecution() = runTest {
+        val pendingState = pendingClarificationState()
+        var restored = false
+        var cleared = false
+
+        val result = coordinator.execute(
+            message = "取消",
+            currentButler = butler,
+            conversationHistory = emptyList(),
+            isNetworkAvailable = true,
+            currentUseBuiltinConfig = false,
+            currentAIConfig = AIConfig(isEnabled = true, apiKey = "key"),
+            pendingInteractionState = PendingInteractionState.Clarification(pendingState),
+            continuePendingClarification = { _, _ -> ClarificationFlowResult.Finish("已取消", shouldClearPending = true) },
+            clearPendingClarificationAfterSuccessfulContinuation = { cleared = true },
+            restorePendingClarification = { restored = true },
+            handleModificationConfirmation = { _, _ -> ModificationFlowResult.Finish("不会走到这里") },
+            handleTransactionModification = { _, _ -> ModificationFlowResult.Finish("不会走到这里") },
+            processWithRemoteAI = { "不会走到这里" }
+        )
+
+        assertEquals(AIAssistantMessageExecutionResult.Reply("已取消"), result)
+        assertTrue(!cleared)
+        assertTrue(!restored)
     }
 
     @Test
@@ -88,7 +205,10 @@ class AIAssistantMessageExecutionCoordinatorTest {
             isNetworkAvailable = true,
             currentUseBuiltinConfig = false,
             currentAIConfig = AIConfig(isEnabled = true, apiKey = "key"),
-            pendingState = null,
+            pendingInteractionState = null,
+            continuePendingClarification = { _, _ -> ClarificationFlowResult.Finish("不会走到这里") },
+            clearPendingClarificationAfterSuccessfulContinuation = {},
+            restorePendingClarification = {},
             handleModificationConfirmation = { _, _ -> ModificationFlowResult.Finish("不会走到这里") },
             handleTransactionModification = { _, _ -> ModificationFlowResult.Finish("不会走到这里") },
             processWithRemoteAI = {
@@ -97,7 +217,13 @@ class AIAssistantMessageExecutionCoordinatorTest {
             }
         )
 
-        assertEquals(AIAssistantMessageExecutionResult.ClarificationRequired("请问这笔交易的金额是多少呢？"), result)
+        assertEquals(
+            AIAssistantMessageExecutionResult.ClarificationRequired(
+                originalMessage = "帮我记一笔午饭",
+                question = "请问这笔交易的金额是多少呢？"
+            ),
+            result
+        )
         assertTrue(!remoteCalled)
     }
 
@@ -115,7 +241,10 @@ class AIAssistantMessageExecutionCoordinatorTest {
             isNetworkAvailable = true,
             currentUseBuiltinConfig = false,
             currentAIConfig = AIConfig(isEnabled = true, apiKey = "key"),
-            pendingState = null,
+            pendingInteractionState = null,
+            continuePendingClarification = { _, _ -> ClarificationFlowResult.Finish("不会走到这里") },
+            clearPendingClarificationAfterSuccessfulContinuation = {},
+            restorePendingClarification = {},
             handleModificationConfirmation = { _, _ -> ModificationFlowResult.Finish("不会走到这里") },
             handleTransactionModification = { _, _ -> ModificationFlowResult.Finish("不会走到这里") },
             processWithRemoteAI = { "远程结果" }
@@ -143,11 +272,14 @@ class AIAssistantMessageExecutionCoordinatorTest {
             isNetworkAvailable = true,
             currentUseBuiltinConfig = false,
             currentAIConfig = AIConfig(isEnabled = true, apiKey = "key"),
-            pendingState = null,
+            pendingInteractionState = null,
+            continuePendingClarification = { _, _ -> ClarificationFlowResult.Finish("不会走到这里") },
+            clearPendingClarificationAfterSuccessfulContinuation = {},
+            restorePendingClarification = {},
             handleModificationConfirmation = { _, _ -> ModificationFlowResult.Finish("不会走到这里") },
             handleTransactionModification = { _, _ ->
                 ModificationFlowResult.StartConfirmation(
-                    pendingState = pendingState(),
+                    pendingState = pendingModificationState(),
                     reply = "请确认修改"
                 )
             },
@@ -169,7 +301,7 @@ class AIAssistantMessageExecutionCoordinatorTest {
             AIAssistantMessageRoute.ModificationFlow(
                 message = "确认",
                 butlerId = butler.id,
-                pendingState = pendingState()
+                pendingState = pendingModificationState()
             )
 
         val result = coordinator.execute(
@@ -179,7 +311,10 @@ class AIAssistantMessageExecutionCoordinatorTest {
             isNetworkAvailable = true,
             currentUseBuiltinConfig = false,
             currentAIConfig = AIConfig(isEnabled = true, apiKey = "key"),
-            pendingState = pendingState(),
+            pendingInteractionState = null,
+            continuePendingClarification = { _, _ -> ClarificationFlowResult.Finish("不会走到这里") },
+            clearPendingClarificationAfterSuccessfulContinuation = {},
+            restorePendingClarification = {},
             handleModificationConfirmation = { _, _ -> ModificationFlowResult.Finish("修改完成", shouldClearPending = true) },
             handleTransactionModification = { _, _ -> ModificationFlowResult.Finish("不会走到这里") },
             processWithRemoteAI = { "不会走到这里" }
@@ -195,7 +330,7 @@ class AIAssistantMessageExecutionCoordinatorTest {
         reasoningExplanation = "test"
     )
 
-    private fun pendingState() = PendingModificationState(
+    private fun pendingModificationState() = PendingModificationState(
         intent = com.example.aiaccounting.ai.TransactionModificationHandler.ModificationIntent.MODIFY_LAST_TRANSACTION,
         confirmation = com.example.aiaccounting.ai.TransactionModificationHandler.ModificationConfirmation(
             transaction = com.example.aiaccounting.data.local.entity.Transaction(
@@ -212,5 +347,11 @@ class AIAssistantMessageExecutionCoordinatorTest {
             confirmationMessage = "确认修改",
             requiresConfirmation = true
         )
+    )
+
+    private fun pendingClarificationState() = PendingClarificationState(
+        originalMessage = "帮我记一笔午饭",
+        question = "这笔金额是多少？",
+        trigger = ClarificationTrigger.TRANSACTION_AMOUNT
     )
 }

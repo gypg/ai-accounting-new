@@ -4,6 +4,7 @@ import com.example.aiaccounting.ai.AIReasoningEngine
 import com.example.aiaccounting.ai.TransactionModificationHandler
 import com.example.aiaccounting.data.local.entity.Transaction
 import com.example.aiaccounting.data.local.entity.TransactionType
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -12,7 +13,26 @@ class AIAssistantMessageOrchestratorTest {
     private val orchestrator = AIAssistantMessageOrchestrator()
 
     @Test
-    fun route_returnsModificationFlow_whenPendingStateExists() {
+    fun route_returnsModificationFlow_whenPendingModificationExists() {
+        val pendingState = PendingModificationState(
+            intent = TransactionModificationHandler.ModificationIntent.MODIFY_LAST_TRANSACTION,
+            confirmation = TransactionModificationHandler.ModificationConfirmation(
+                transaction = Transaction(
+                    id = 1,
+                    accountId = 1,
+                    categoryId = 1,
+                    type = TransactionType.EXPENSE,
+                    amount = 10.0,
+                    date = 0L,
+                    note = "午饭"
+                ),
+                originalValues = emptyMap(),
+                newValues = emptyMap(),
+                confirmationMessage = "确认修改",
+                requiresConfirmation = true
+            )
+        )
+
         val route = orchestrator.route(
             reasoningResult = reasoningResult(AIReasoningEngine.UserIntent.QUERY_INFORMATION),
             userMessage = "确认",
@@ -21,27 +41,33 @@ class AIAssistantMessageOrchestratorTest {
             isBuiltinConfigEnabled = false,
             isAIEnabled = true,
             hasApiKey = true,
-            pendingState = PendingModificationState(
-                intent = TransactionModificationHandler.ModificationIntent.MODIFY_LAST_TRANSACTION,
-                confirmation = TransactionModificationHandler.ModificationConfirmation(
-                    transaction = Transaction(
-                        id = 1,
-                        accountId = 1,
-                        categoryId = 1,
-                        type = TransactionType.EXPENSE,
-                        amount = 10.0,
-                        date = 0L,
-                        note = "午饭"
-                    ),
-                    originalValues = emptyMap(),
-                    newValues = emptyMap(),
-                    confirmationMessage = "确认修改",
-                    requiresConfirmation = true
+            pendingInteractionState = PendingInteractionState.Modification(pendingState)
+        )
+
+        assertTrue(route is AIAssistantMessageRoute.ModificationFlow)
+        assertEquals(pendingState, (route as AIAssistantMessageRoute.ModificationFlow).pendingState)
+    }
+
+    @Test
+    fun route_doesNotReturnModificationFlow_whenPendingClarificationExists() {
+        val route = orchestrator.route(
+            reasoningResult = reasoningResult(AIReasoningEngine.UserIntent.GENERAL_CONVERSATION),
+            userMessage = "补充一下是午饭",
+            butlerId = "xiaocainiang",
+            isNetworkAvailable = true,
+            isBuiltinConfigEnabled = false,
+            isAIEnabled = true,
+            hasApiKey = true,
+            pendingInteractionState = PendingInteractionState.Clarification(
+                PendingClarificationState(
+                    originalMessage = "帮我记一笔",
+                    question = "是什么分类？",
+                    trigger = ClarificationTrigger.TRANSACTION_CATEGORY
                 )
             )
         )
 
-        assertTrue(route is AIAssistantMessageRoute.ModificationFlow)
+        assertTrue(route is AIAssistantMessageRoute.RemoteOrLocalFallback)
     }
 
     @Test
@@ -54,7 +80,7 @@ class AIAssistantMessageOrchestratorTest {
             isBuiltinConfigEnabled = false,
             isAIEnabled = true,
             hasApiKey = true,
-            pendingState = null
+            pendingInteractionState = null
         )
 
         assertTrue(route is AIAssistantMessageRoute.RemoteOrLocalFallback)
@@ -70,7 +96,7 @@ class AIAssistantMessageOrchestratorTest {
             isBuiltinConfigEnabled = false,
             isAIEnabled = true,
             hasApiKey = true,
-            pendingState = null
+            pendingInteractionState = null
         )
 
         assertTrue(route is AIAssistantMessageRoute.LocalActions)
@@ -86,7 +112,7 @@ class AIAssistantMessageOrchestratorTest {
             isBuiltinConfigEnabled = false,
             isAIEnabled = true,
             hasApiKey = true,
-            pendingState = null
+            pendingInteractionState = null
         )
 
         assertTrue(route is AIAssistantMessageRoute.ModificationFlow)
@@ -105,7 +131,7 @@ class AIAssistantMessageOrchestratorTest {
             isBuiltinConfigEnabled = false,
             isAIEnabled = true,
             hasApiKey = true,
-            pendingState = null
+            pendingInteractionState = null
         )
 
         assertTrue(route is AIAssistantMessageRoute.LocalActions)

@@ -32,13 +32,13 @@ internal class AIAssistantMessageOrchestrator {
         isBuiltinConfigEnabled: Boolean,
         isAIEnabled: Boolean,
         hasApiKey: Boolean,
-        pendingState: PendingModificationState?
+        pendingInteractionState: PendingInteractionState?
     ): AIAssistantMessageRoute {
-        if (pendingState != null) {
+        if (pendingInteractionState is PendingInteractionState.Modification) {
             return AIAssistantMessageRoute.ModificationFlow(
                 message = userMessage,
                 butlerId = butlerId,
-                pendingState = pendingState
+                pendingState = pendingInteractionState.state
             )
         }
 

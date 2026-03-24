@@ -489,6 +489,18 @@ class AIReasoningEngine @Inject constructor(
             )
         }
 
+        if (requiresTransactionCategoryClarification(message)) {
+            return listOf(
+                AIAction.RequestClarification("这笔记到哪个分类呢？比如餐饮、交通或购物。")
+            )
+        }
+
+        if (requiresTransactionDateClarification(message)) {
+            return listOf(
+                AIAction.RequestClarification("这笔是哪天发生的呢？比如今天、昨天或 3 月 15 日。")
+            )
+        }
+
         if (requiresTransactionAccountClarification(message)) {
             return listOf(
                 AIAction.RequestClarification("这笔记到哪个账户呢？比如现金、微信、支付宝或银行卡。")
@@ -566,7 +578,7 @@ class AIReasoningEngine @Inject constructor(
             return false
         }
         val previousUserMessage = conversationHistory[lastClarificationIndex - 1]
-        return previousUserMessage != message
+        return previousUserMessage != message && !message.contains(previousUserMessage)
     }
 
     private fun isTransactionAmountClarificationPrompt(message: String): Boolean {
@@ -586,6 +598,39 @@ class AIReasoningEngine @Inject constructor(
         return explicitRecordRequest && !hasExplicitType && inferredExpenseCategory == null
     }
 
+    private suspend fun requiresTransactionCategoryClarification(message: String): Boolean {
+        val lowerMessage = message.lowercase()
+        val explicitRecordRequest = lowerMessage.contains("记一笔") || lowerMessage.contains("记一下") || lowerMessage.contains("记个")
+        if (!explicitRecordRequest || !messageParser.containsAmount(message)) {
+            return false
+        }
+        val type = inferTransactionType(message) ?: return false
+        if (type == TransactionType.TRANSFER) {
+            return false
+        }
+        if (categoryInferrer.inferCategory(message, type) != null) {
+            return false
+        }
+        if (!containsConcreteTransactionDate(message)) {
+            return false
+        }
+        val availableCategories = categoryRepository.getAllCategoriesList().filter { it.type == type }
+        return availableCategories.isNotEmpty()
+    }
+
+    private fun requiresTransactionDateClarification(message: String): Boolean {
+        val lowerMessage = message.lowercase()
+        val explicitRecordRequest = lowerMessage.contains("记一笔") || lowerMessage.contains("记一下") || lowerMessage.contains("记个")
+        if (!explicitRecordRequest || !messageParser.containsAmount(message)) {
+            return false
+        }
+        val type = inferTransactionType(message) ?: return false
+        if (type == TransactionType.TRANSFER) {
+            return false
+        }
+        return categoryInferrer.inferCategory(message, type) != null && !containsConcreteTransactionDate(message)
+    }
+
     private suspend fun requiresTransactionAccountClarification(message: String): Boolean {
         if (inferAccount(message) != null) {
             return false
@@ -597,6 +642,29 @@ class AIReasoningEngine @Inject constructor(
         }
         val activeAccounts = accountRepository.getAllAccountsList().filterNot { it.isArchived }
         return activeAccounts.size > 1
+    }
+
+    private fun inferTransactionType(message: String): TransactionType? {
+        return when {
+            message.contains("收入") || message.contains("收到") || message.contains("工资") ||
+                message.contains("奖金") || message.contains("赚") -> TransactionType.INCOME
+            message.contains("转账") -> TransactionType.TRANSFER
+            message.contains("支出") || message.contains("花了") || message.contains("消费") ||
+                message.contains("用了") || message.contains("买") || message.contains("付") -> TransactionType.EXPENSE
+            else -> null
+        }
+    }
+
+    private fun containsConcreteTransactionDate(message: String): Boolean {
+        val lowerMessage = message.lowercase()
+        if (listOf("今天", "昨天", "前天", "大前天").any { lowerMessage.contains(it) }) {
+            return true
+        }
+        return listOf(
+            Regex("""\d{4}年\d{1,2}月\d{1,2}[日号]?"""),
+            Regex("""\d{1,2}月\d{1,2}[日号]?"""),
+            Regex("""\d{1,2}[./-]\d{1,2}""")
+        ).any { it.containsMatchIn(message) }
     }
 
     private fun generateReluctantResponse(butlerId: String, action: String): String? {

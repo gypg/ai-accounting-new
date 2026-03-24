@@ -46,6 +46,30 @@ class AIAssistantPendingClarificationLifecycleTest {
     }
 
     @Test
+    fun begin_storesPendingState_withTransactionCategoryTrigger() {
+        val result = lifecycle.begin(
+            originalMessage = "帮我记一笔 25 元 支出 今天",
+            question = "这笔记到哪个分类呢？比如餐饮、交通或购物。"
+        )
+
+        assertEquals("这笔记到哪个分类呢？比如餐饮、交通或购物。", result.reply)
+        assertEquals(ClarificationTrigger.TRANSACTION_CATEGORY, result.pendingState.trigger)
+        assertNotNull(lifecycle.currentState())
+    }
+
+    @Test
+    fun begin_storesPendingState_withTransactionDateTrigger() {
+        val result = lifecycle.begin(
+            originalMessage = "帮我记一笔午饭 25 元 支出",
+            question = "这笔是哪天发生的呢？比如今天、昨天或 3 月 15 日。"
+        )
+
+        assertEquals("这笔是哪天发生的呢？比如今天、昨天或 3 月 15 日。", result.reply)
+        assertEquals(ClarificationTrigger.TRANSACTION_DATE, result.pendingState.trigger)
+        assertNotNull(lifecycle.currentState())
+    }
+
+    @Test
     fun continuePending_returnsFallbackFinish_whenNoPendingStateExists() {
         val result = lifecycle.continuePending("25元", "xiaocainiang")
 
@@ -131,6 +155,58 @@ class AIAssistantPendingClarificationLifecycleTest {
     }
 
     @Test
+    fun continuePending_reasksQuestion_whenTransactionCategoryIsStillMissing() {
+        lifecycle.seedForTest(
+            PendingClarificationState(
+                originalMessage = "帮我记一笔 25 元 支出 今天",
+                question = "这笔记到哪个分类呢？比如餐饮、交通或购物。",
+                trigger = ClarificationTrigger.TRANSACTION_CATEGORY
+            )
+        )
+
+        val result = lifecycle.continuePending("这笔先记一下", "xiaocainiang")
+
+        assertEquals(
+            ClarificationFlowResult.RequestClarification(
+                pendingState = PendingClarificationState(
+                    originalMessage = "帮我记一笔 25 元 支出 今天",
+                    question = "这笔记到哪个分类呢？比如餐饮、交通或购物。",
+                    trigger = ClarificationTrigger.TRANSACTION_CATEGORY
+                ),
+                reply = "这笔记到哪个分类呢？比如餐饮、交通或购物。"
+            ),
+            result
+        )
+        assertNotNull(lifecycle.currentState())
+    }
+
+    @Test
+    fun continuePending_reasksQuestion_whenTransactionDateIsStillMissing() {
+        lifecycle.seedForTest(
+            PendingClarificationState(
+                originalMessage = "帮我记一笔午饭 25 元 支出",
+                question = "这笔是哪天发生的呢？比如今天、昨天或 3 月 15 日。",
+                trigger = ClarificationTrigger.TRANSACTION_DATE
+            )
+        )
+
+        val result = lifecycle.continuePending("午饭", "xiaocainiang")
+
+        assertEquals(
+            ClarificationFlowResult.RequestClarification(
+                pendingState = PendingClarificationState(
+                    originalMessage = "帮我记一笔午饭 25 元 支出",
+                    question = "这笔是哪天发生的呢？比如今天、昨天或 3 月 15 日。",
+                    trigger = ClarificationTrigger.TRANSACTION_DATE
+                ),
+                reply = "这笔是哪天发生的呢？比如今天、昨天或 3 月 15 日。"
+            ),
+            result
+        )
+        assertNotNull(lifecycle.currentState())
+    }
+
+    @Test
     fun continuePending_mergesOriginalMessage_whenUserProvidesTransactionAccount() {
         lifecycle.seedForTest(
             PendingClarificationState(
@@ -146,6 +222,29 @@ class AIAssistantPendingClarificationLifecycleTest {
             ClarificationFlowResult.ContinueWithMessage("帮我记一笔午饭 25 元 支出 微信"),
             result
         )
+        assertNotNull(lifecycle.currentState())
+        lifecycle.clearAfterSuccessfulContinuation()
+        assertNull(lifecycle.currentState())
+    }
+
+    @Test
+    fun continuePending_mergesOriginalMessage_whenUserProvidesBankAliasAccount() {
+        lifecycle.seedForTest(
+            PendingClarificationState(
+                originalMessage = "帮我记一笔午饭 25 元 支出 今天",
+                question = "这笔记到哪个账户呢？比如现金、微信、支付宝或银行卡。",
+                trigger = ClarificationTrigger.TRANSACTION_ACCOUNT
+            )
+        )
+
+        val result = lifecycle.continuePending("工行", "xiaocainiang")
+
+        assertEquals(
+            ClarificationFlowResult.ContinueWithMessage("帮我记一笔午饭 25 元 支出 今天 工行"),
+            result
+        )
+        assertNotNull(lifecycle.currentState())
+        lifecycle.clearAfterSuccessfulContinuation()
         assertNull(lifecycle.currentState())
     }
 
@@ -165,6 +264,8 @@ class AIAssistantPendingClarificationLifecycleTest {
             ClarificationFlowResult.ContinueWithMessage("帮我记一笔午饭 25元"),
             result
         )
+        assertNotNull(lifecycle.currentState())
+        lifecycle.clearAfterSuccessfulContinuation()
         assertNull(lifecycle.currentState())
     }
 
@@ -184,6 +285,50 @@ class AIAssistantPendingClarificationLifecycleTest {
             ClarificationFlowResult.ContinueWithMessage("帮我记一笔 25 元 支出"),
             result
         )
+        assertNotNull(lifecycle.currentState())
+        lifecycle.clearAfterSuccessfulContinuation()
+        assertNull(lifecycle.currentState())
+    }
+
+    @Test
+    fun continuePending_mergesOriginalMessage_whenUserProvidesTransactionCategory() {
+        lifecycle.seedForTest(
+            PendingClarificationState(
+                originalMessage = "帮我记一笔 25 元 支出 今天",
+                question = "这笔记到哪个分类呢？比如餐饮、交通或购物。",
+                trigger = ClarificationTrigger.TRANSACTION_CATEGORY
+            )
+        )
+
+        val result = lifecycle.continuePending("餐饮", "xiaocainiang")
+
+        assertEquals(
+            ClarificationFlowResult.ContinueWithMessage("帮我记一笔 25 元 支出 今天 餐饮"),
+            result
+        )
+        assertNotNull(lifecycle.currentState())
+        lifecycle.clearAfterSuccessfulContinuation()
+        assertNull(lifecycle.currentState())
+    }
+
+    @Test
+    fun continuePending_mergesOriginalMessage_whenUserProvidesTransactionDate() {
+        lifecycle.seedForTest(
+            PendingClarificationState(
+                originalMessage = "帮我记一笔午饭 25 元 支出",
+                question = "这笔是哪天发生的呢？比如今天、昨天或 3 月 15 日。",
+                trigger = ClarificationTrigger.TRANSACTION_DATE
+            )
+        )
+
+        val result = lifecycle.continuePending("昨天", "xiaocainiang")
+
+        assertEquals(
+            ClarificationFlowResult.ContinueWithMessage("帮我记一笔午饭 25 元 支出 昨天"),
+            result
+        )
+        assertNotNull(lifecycle.currentState())
+        lifecycle.clearAfterSuccessfulContinuation()
         assertNull(lifecycle.currentState())
     }
 

@@ -57,20 +57,24 @@ class AIReasoningEngineTest {
     }
 
     @Test
-    fun reason_returnsRequestClarification_forExplicitRecordRequestWithoutTransactionType() = runTest {
+    fun reason_doesNotMergeClarificationMessageTwice_whenMessageAlreadyContainsOriginalRequest() = runTest {
         stubNonIdentityAndNonModification()
 
         val result = engine.reason(
-            context = AIReasoningEngine.ReasoningContext(userMessage = "帮我记一笔 25 元"),
+            context = AIReasoningEngine.ReasoningContext(
+                userMessage = "帮我记一笔午饭 支出 今天 25 元",
+                conversationHistory = listOf(
+                    "帮我记一笔午饭 支出 今天",
+                    "请问这笔交易的金额是多少呢？"
+                )
+            ),
             currentButlerId = "xiaocainiang"
         )
 
         assertEquals(AIReasoningEngine.UserIntent.RECORD_TRANSACTION, result.intent)
-        assertTrue(result.actions.single() is AIReasoningEngine.AIAction.RequestClarification)
-        assertEquals(
-            "这笔是收入、支出还是转账呢？",
-            (result.actions.single() as AIReasoningEngine.AIAction.RequestClarification).question
-        )
+        assertTrue(result.actions.single() is AIReasoningEngine.AIAction.RecordTransaction)
+        val action = result.actions.single() as AIReasoningEngine.AIAction.RecordTransaction
+        assertEquals(25.0, action.amount, 0.001)
     }
 
     @Test
@@ -82,7 +86,7 @@ class AIReasoningEngineTest {
         )
 
         val result = engine.reason(
-            context = AIReasoningEngine.ReasoningContext(userMessage = "帮我记一笔午饭 25 元 支出"),
+            context = AIReasoningEngine.ReasoningContext(userMessage = "帮我记一笔午饭 25 元 支出 今天"),
             currentButlerId = "xiaocainiang"
         )
 
@@ -103,7 +107,7 @@ class AIReasoningEngineTest {
         )
 
         val result = engine.reason(
-            context = AIReasoningEngine.ReasoningContext(userMessage = "帮我记一笔午饭 25 元 支出 微信"),
+            context = AIReasoningEngine.ReasoningContext(userMessage = "帮我记一笔午饭 25 元 支出 微信 今天"),
             currentButlerId = "xiaocainiang"
         )
 
@@ -121,7 +125,7 @@ class AIReasoningEngineTest {
         )
 
         val result = engine.reason(
-            context = AIReasoningEngine.ReasoningContext(userMessage = "帮我记一笔午饭 25 元 支出"),
+            context = AIReasoningEngine.ReasoningContext(userMessage = "帮我记一笔午饭 25 元 支出 今天"),
             currentButlerId = "xiaocainiang"
         )
 
@@ -130,27 +134,43 @@ class AIReasoningEngineTest {
     }
 
     @Test
-    fun reason_treatsAmountOnlyFollowUpAsRecordTransaction_whenConversationHistoryShowsPreviousClarification() = runTest {
+    fun reason_returnsRequestClarification_forExplicitRecordRequestWithoutCategory_whenDateAndTypeArePresent() = runTest {
         stubNonIdentityAndNonModification()
+        coEvery { categoryRepository.getAllCategoriesList() } returns listOf(
+            com.example.aiaccounting.data.local.entity.Category(id = 1, name = "餐饮", type = TransactionType.EXPENSE),
+            com.example.aiaccounting.data.local.entity.Category(id = 2, name = "交通", type = TransactionType.EXPENSE)
+        )
 
         val result = engine.reason(
-            context = AIReasoningEngine.ReasoningContext(
-                userMessage = "25元",
-                conversationHistory = listOf(
-                    "帮我记一笔午饭",
-                    "请问这笔交易的金额是多少呢？"
-                )
-            ),
+            context = AIReasoningEngine.ReasoningContext(userMessage = "帮我记一笔 25 元 支出 今天"),
             currentButlerId = "xiaocainiang"
         )
 
         assertEquals(AIReasoningEngine.UserIntent.RECORD_TRANSACTION, result.intent)
-        assertTrue(result.actions.single() is AIReasoningEngine.AIAction.RecordTransaction)
-        val action = result.actions.single() as AIReasoningEngine.AIAction.RecordTransaction
-        assertEquals(25.0, action.amount, 0.001)
-        assertEquals(TransactionType.EXPENSE, action.type)
-        assertEquals("午餐", action.categoryHint)
+        assertTrue(result.actions.single() is AIReasoningEngine.AIAction.RequestClarification)
+        assertEquals(
+            "这笔记到哪个分类呢？比如餐饮、交通或购物。",
+            (result.actions.single() as AIReasoningEngine.AIAction.RequestClarification).question
+        )
     }
+
+    @Test
+    fun reason_returnsRequestClarification_forExplicitRecordRequestWithoutDate_whenAmountTypeAndCategoryArePresent() = runTest {
+        stubNonIdentityAndNonModification()
+
+        val result = engine.reason(
+            context = AIReasoningEngine.ReasoningContext(userMessage = "帮我记一笔午饭 25 元 支出"),
+            currentButlerId = "xiaocainiang"
+        )
+
+        assertEquals(AIReasoningEngine.UserIntent.RECORD_TRANSACTION, result.intent)
+        assertTrue(result.actions.single() is AIReasoningEngine.AIAction.RequestClarification)
+        assertEquals(
+            "这笔是哪天发生的呢？比如今天、昨天或 3 月 15 日。",
+            (result.actions.single() as AIReasoningEngine.AIAction.RequestClarification).question
+        )
+    }
+
 
     private suspend fun stubNonIdentityAndNonModification() {
         coEvery { transactionRepository.getRecentTransactionsList(any()) } returns emptyList()

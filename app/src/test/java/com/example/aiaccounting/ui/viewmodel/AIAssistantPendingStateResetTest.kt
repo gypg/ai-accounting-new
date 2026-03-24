@@ -9,16 +9,16 @@ import org.junit.Test
 
 class AIAssistantPendingStateResetTest {
 
-    private val pendingModificationLifecycle = AIAssistantPendingModificationLifecycle(
-        modificationCoordinator = AIAssistantModificationCoordinator(
-            transactionModificationHandler = mockk()
-        )
-    )
-    private val pendingClarificationLifecycle = AIAssistantPendingClarificationLifecycle()
-
     @Test
     fun clear_removesPendingModificationState() {
-        pendingModificationLifecycle.seedForTest(
+        val modificationLifecycle = AIAssistantPendingModificationLifecycle(
+            modificationCoordinator = AIAssistantModificationCoordinator(
+                transactionModificationHandler = mockk()
+            )
+        )
+        val clarificationLifecycle = AIAssistantPendingClarificationLifecycle()
+        val lifecycle = AIAssistantPendingInteractionLifecycle(modificationLifecycle, clarificationLifecycle)
+        modificationLifecycle.seedForTest(
             PendingModificationState(
                 intent = TransactionModificationHandler.ModificationIntent.MODIFY_LAST_TRANSACTION,
                 confirmation = TransactionModificationHandler.ModificationConfirmation(
@@ -39,14 +39,22 @@ class AIAssistantPendingStateResetTest {
             )
         )
 
-        pendingModificationLifecycle.clear()
+        lifecycle.clear()
 
-        assertNull(pendingModificationLifecycle.currentState())
+        assertNull(lifecycle.currentState())
+        assertNull(lifecycle.currentModificationState())
     }
 
     @Test
     fun clear_removesPendingClarificationState() {
-        pendingClarificationLifecycle.seedForTest(
+        val modificationLifecycle = AIAssistantPendingModificationLifecycle(
+            modificationCoordinator = AIAssistantModificationCoordinator(
+                transactionModificationHandler = mockk()
+            )
+        )
+        val clarificationLifecycle = AIAssistantPendingClarificationLifecycle()
+        val lifecycle = AIAssistantPendingInteractionLifecycle(modificationLifecycle, clarificationLifecycle)
+        clarificationLifecycle.seedForTest(
             PendingClarificationState(
                 originalMessage = "帮我记一笔午饭",
                 question = "请问这笔交易的金额是多少呢？",
@@ -54,8 +62,9 @@ class AIAssistantPendingStateResetTest {
             )
         )
 
-        pendingClarificationLifecycle.clear()
+        lifecycle.clear()
 
-        assertNull(pendingClarificationLifecycle.currentState())
+        assertNull(lifecycle.currentState())
+        assertNull(lifecycle.currentClarificationState())
     }
 }
