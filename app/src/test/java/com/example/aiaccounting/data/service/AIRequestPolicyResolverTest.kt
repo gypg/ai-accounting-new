@@ -19,19 +19,31 @@ class AIRequestPolicyResolverTest {
 
         assertEquals(2, policy.maxAttempts)
         assertTrue(policy.allowModelFallback)
-        assertFalse(policy.allowRetry)
+        assertTrue(policy.allowRetry)
     }
 
     @Test
-    fun resolve_returnsSingleAttempt_forFixedConnectionTest() {
+    fun resolve_returnsTwoAttemptsAndAllowsRetry_forFixedConnectionTest() {
         val policy = resolver.resolve(
             kind = AIRequestKind.CONNECTION_TEST,
             config = AIConfig(model = "fixed-model")
         )
 
-        assertEquals(1, policy.maxAttempts)
+        assertEquals(2, policy.maxAttempts)
         assertFalse(policy.allowModelFallback)
-        assertFalse(policy.allowRetry)
+        assertTrue(policy.allowRetry)
+    }
+
+    @Test
+    fun resolve_returnsTwoAttemptsAndAllowsRetry_forNonStreamChat() {
+        val policy = resolver.resolve(
+            kind = AIRequestKind.NON_STREAM_CHAT,
+            config = AIConfig(model = "fixed-model")
+        )
+
+        assertEquals(2, policy.maxAttempts)
+        assertTrue(policy.allowModelFallback)
+        assertTrue(policy.allowRetry)
     }
 
     @Test

@@ -11,6 +11,7 @@ import com.example.aiaccounting.data.model.MessageRole
 import com.example.aiaccounting.di.AiOkHttpClient
 import com.example.aiaccounting.di.AiTestOkHttpClient
 import com.example.aiaccounting.utils.OpenAiUrlUtils
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -27,6 +28,10 @@ import java.io.InputStream
 import java.net.ConnectException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
+import java.nio.charset.StandardCharsets
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
+import java.util.zip.GZIPOutputStream
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -42,6 +47,9 @@ class AIService @Inject constructor(
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
     private val requestPolicyResolver = AIRequestPolicyResolver()
     private val requestFailureClassifier = AIRequestFailureClassifier()
+    private val retryBackoffMillis = 300L
+    private val compressionThresholdBytes = 512
+    private val modelCache = ConcurrentHashMap<ModelCacheKey, CachedRemoteModels>()
 
     /**
      * 发送对话请求（流式）
@@ -61,6 +69,8 @@ class AIService @Inject constructor(
                 AIProvider.QWEN, AIProvider.DEEPSEEK, AIProvider.ZHIPU, AIProvider.BAIDU, AIProvider.CUSTOM -> sendOpenAIChatStream(messages, config)
             }
             emit(response)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             emit("请求失败: ${e.message}")
         }
@@ -101,6 +111,8 @@ class AIService @Inject constructor(
 
             // 尝试解析JSON响应
             parseAnalysisResponse(response)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             AIAnalysisResult(
                 summary = "分析失败: ${e.message}",
@@ -142,6 +154,8 @@ class AIService @Inject constructor(
             }
 
             parseTransactionResponse(response)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             null
         }
@@ -160,6 +174,8 @@ class AIService @Inject constructor(
             when (config.provider) {
                 AIProvider.QWEN, AIProvider.DEEPSEEK, AIProvider.ZHIPU, AIProvider.BAIDU, AIProvider.CUSTOM -> fetchOpenAIModels(config)
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             emptyList()
         }
@@ -171,15 +187,29 @@ class AIService @Inject constructor(
 
     private fun fetchOpenAIModelsWithClient(config: AIConfig, httpClient: OkHttpClient): List<RemoteModel> {
         val url = OpenAiUrlUtils.models(config.apiUrl)
+        val cacheKey = ModelCacheKey(
+            apiUrl = config.apiUrl.trim(),
+            apiKey = config.apiKey.trim()
+        )
+        val cachedModels = modelCache[cacheKey]
 
-        val request = Request.Builder()
+        val requestBuilder = Request.Builder()
             .url(url)
             .header("Authorization", "Bearer ${config.apiKey.trim()}")
             .header("Content-Type", "application/json")
             .get()
-            .build()
+
+        cachedModels?.etag?.takeIf { it.isNotBlank() }?.let {
+            requestBuilder.header("If-None-Match", it)
+        }
+
+        val request = requestBuilder.build()
 
         httpClient.newCall(request).execute().use { response ->
+            if (response.code == 304) {
+                return cachedModels?.models ?: throw Exception("模型列表缓存不可用")
+            }
+
             if (!response.isSuccessful) {
                 throw Exception("获取模型列表失败: ${response.code}")
             }
@@ -200,6 +230,11 @@ class AIService @Inject constructor(
                     ))
                 }
             }
+
+            modelCache[cacheKey] = CachedRemoteModels(
+                models = models,
+                etag = response.header("ETag")
+            )
             return models
         }
     }
@@ -266,6 +301,8 @@ class AIService @Inject constructor(
             } else {
                 "连接超时，请检查网络或稍后重试"
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             mapConnectionFailureToMessage(e)
         }
@@ -290,12 +327,16 @@ class AIService @Inject constructor(
         val primaryModel = config.model.trim()
 
         if (primaryModel.isNotBlank()) {
-            testOpenAIConnectionOnce(config.copy(model = primaryModel), messages)
+            executeWithRetry(policy) {
+                testOpenAIConnectionOnce(config.copy(model = primaryModel), messages)
+            }
             return
         }
 
         val candidateModels = try {
             fetchRemoteModelIdsForTest(config)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             throw OpenAIChatFailure.Other("无法获取可用模型列表，请稍后重试")
         }
@@ -304,7 +345,9 @@ class AIService @Inject constructor(
             ?: throw OpenAIChatFailure.Other("无法获取可用模型列表，请稍后重试")
 
         try {
-            testOpenAIConnectionOnce(config.copy(model = firstModel), messages)
+            executeWithRetry(policy) {
+                testOpenAIConnectionOnce(config.copy(model = firstModel), messages)
+            }
             return
         } catch (e: OpenAIChatFailure.ModelUnavailable) {
             // try next candidate
@@ -312,14 +355,16 @@ class AIService @Inject constructor(
             // try next candidate
         }
 
-        if (!policy.allowModelFallback || policy.maxAttempts < 2) {
+        if (!policy.allowModelFallback) {
             throw OpenAIChatFailure.ModelUnavailable("model_unavailable: no alternative model")
         }
 
         val secondModel = pickPreferredModel(candidateModels, exclude = setOf(firstModel))
             ?: throw OpenAIChatFailure.ModelUnavailable("model_unavailable: no alternative model")
 
-        testOpenAIConnectionOnce(config.copy(model = secondModel), messages)
+        executeWithRetry(policy) {
+            testOpenAIConnectionOnce(config.copy(model = secondModel), messages)
+        }
     }
 
     private fun testOpenAIConnectionOnce(config: AIConfig, messages: List<ChatMessage>) {
@@ -342,12 +387,12 @@ class AIService @Inject constructor(
             put("stream", false)
         }
 
-        val request = Request.Builder()
-            .url(url)
-            .header("Authorization", "Bearer ${config.apiKey.trim()}")
-            .header("Content-Type", "application/json")
-            .post(requestBody.toString().toRequestBody(jsonMediaType))
-            .build()
+        val request = buildOpenAiJsonPostRequest(
+            url = url,
+            apiKey = config.apiKey,
+            requestKind = AIRequestKind.CONNECTION_TEST,
+            requestBody = requestBody
+        )
 
         try {
             testClient.newCall(request).execute().use { response ->
@@ -503,7 +548,7 @@ class AIService @Inject constructor(
                 }
 
                 val responseBody = response.body?.string() ?: throw Exception("空响应")
-                
+
                 // 解析SSE格式的流式响应
                 val content = StringBuilder()
                 responseBody.lines().forEach { line ->
@@ -526,7 +571,7 @@ class AIService @Inject constructor(
                         }
                     }
                 }
-                
+
                 if (content.isNotEmpty()) {
                     content.toString()
                 } else {
@@ -534,16 +579,114 @@ class AIService @Inject constructor(
                     sendOpenAIChatNonStream(messages, config)
                 }
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             // 流式请求失败，回退到非流式
             sendOpenAIChatNonStream(messages, config)
         }
     }
 
+    private fun buildOpenAiJsonPostRequest(
+        url: String,
+        apiKey: String,
+        requestKind: AIRequestKind,
+        requestBody: JSONObject
+    ): Request {
+        val payload = requestBody.toString()
+        val requestBodyBuilder = Request.Builder()
+            .url(url)
+            .header("Authorization", "Bearer ${apiKey.trim()}")
+            .header("Content-Type", "application/json")
+
+        val compressedBody = compressRequestBodyIfNeeded(requestKind, payload)
+        val okHttpBody = if (compressedBody != null) {
+            requestBodyBuilder.header("Content-Encoding", "gzip")
+            compressedBody.toRequestBody(jsonMediaType)
+        } else {
+            payload.toRequestBody(jsonMediaType)
+        }
+
+        return requestBodyBuilder
+            .post(okHttpBody)
+            .build()
+    }
+
+    private fun compressRequestBodyIfNeeded(requestKind: AIRequestKind, payload: String): ByteArray? {
+        if (requestKind == AIRequestKind.STREAM_CHAT) {
+            return null
+        }
+        if (payload.toByteArray(StandardCharsets.UTF_8).size < compressionThresholdBytes) {
+            return null
+        }
+        return try {
+            gzip(payload)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun gzip(value: String): ByteArray {
+        val outputStream = ByteArrayOutputStream()
+        GZIPOutputStream(outputStream).bufferedWriter(StandardCharsets.UTF_8).use { writer ->
+            writer.write(value)
+        }
+        return outputStream.toByteArray()
+    }
+
+    private data class ModelCacheKey(
+        val apiUrl: String,
+        val apiKey: String
+    )
+
+    private data class CachedRemoteModels(
+        val models: List<RemoteModel>,
+        val etag: String?
+    )
+
     private sealed class OpenAIChatFailure(message: String) : Exception(message) {
         data class ModelUnavailable(val details: String) : OpenAIChatFailure(details)
         data class Timeout(val details: String) : OpenAIChatFailure(details)
         data class Other(val details: String) : OpenAIChatFailure(details)
+    }
+
+    private fun isRetryableFailure(error: Throwable): Boolean {
+        return when (requestFailureClassifier.classify(error)) {
+            AIRequestFailureCategory.TIMEOUT,
+            AIRequestFailureCategory.CONNECT_FAILURE,
+            AIRequestFailureCategory.SERVER_ERROR -> true
+            else -> false
+        }
+    }
+
+    private fun retryDelayMillis(attempt: Int): Long {
+        return retryBackoffMillis * (1L shl (attempt - 1)).coerceAtLeast(1L)
+    }
+
+    private fun <T> executeWithRetry(
+        policy: AIRequestPolicy,
+        block: () -> T
+    ): T {
+        var lastError: Throwable? = null
+
+        for (attempt in 1..policy.maxAttempts) {
+            try {
+                return block()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: OpenAIChatFailure.ModelUnavailable) {
+                throw e
+            } catch (e: Throwable) {
+                lastError = e
+                val shouldRetry = policy.allowRetry && attempt < policy.maxAttempts && isRetryableFailure(e)
+                if (!shouldRetry) {
+                    throw e
+                }
+                TimeUnit.MILLISECONDS.sleep(retryDelayMillis(attempt))
+            }
+        }
+
+        throw lastError ?: IllegalStateException("retry execution failed without error")
     }
 
     private fun isModelUnavailable(responseCode: Int, responseBody: String?): Boolean {
@@ -594,46 +737,56 @@ class AIService @Inject constructor(
             put("stream", false)
         }
 
-        val request = Request.Builder()
-            .url(url)
-            .header("Authorization", "Bearer ${config.apiKey.trim()}")
-            .header("Content-Type", "application/json")
-            .post(requestBody.toString().toRequestBody(jsonMediaType))
-            .build()
+        val request = buildOpenAiJsonPostRequest(
+            url = url,
+            apiKey = config.apiKey,
+            requestKind = AIRequestKind.NON_STREAM_CHAT,
+            requestBody = requestBody
+        )
 
-        client.newCall(request).execute().use { response ->
-            val rawBody = response.body?.string()
+        try {
+            client.newCall(request).execute().use { response ->
+                val rawBody = response.body?.string()
 
-            if (!response.isSuccessful) {
-                if (isModelUnavailable(response.code, rawBody)) {
-                    throw OpenAIChatFailure.ModelUnavailable("model_unavailable: http=${response.code} body=${rawBody.orEmpty()}")
+                if (!response.isSuccessful) {
+                    if (isModelUnavailable(response.code, rawBody)) {
+                        throw OpenAIChatFailure.ModelUnavailable("model_unavailable: http=${response.code} body=${rawBody.orEmpty()}")
+                    }
+                    throw OpenAIChatFailure.Other("API请求失败: ${response.code}")
                 }
-                throw OpenAIChatFailure.Other("API请求失败: ${response.code}")
-            }
 
-            if (rawBody.isNullOrEmpty()) {
-                throw OpenAIChatFailure.Other("空响应")
-            }
-
-            val json = JSONObject(rawBody)
-
-            // 检查是否有错误
-            if (json.has("error")) {
-                val error = json.getJSONObject("error")
-                val message = error.optString("message", "未知错误")
-                if (isModelUnavailable(responseCode = 200, responseBody = rawBody)) {
-                    throw OpenAIChatFailure.ModelUnavailable(message)
+                if (rawBody.isNullOrEmpty()) {
+                    throw OpenAIChatFailure.Other("空响应")
                 }
-                throw OpenAIChatFailure.Other(message)
-            }
 
-            val choices = json.getJSONArray("choices")
-            if (choices.length() > 0) {
-                return choices.getJSONObject(0)
-                    .getJSONObject("message")
-                    .getString("content")
+                val json = JSONObject(rawBody)
+
+                // 检查是否有错误
+                if (json.has("error")) {
+                    val error = json.getJSONObject("error")
+                    val message = error.optString("message", "未知错误")
+                    if (isModelUnavailable(responseCode = 200, responseBody = rawBody)) {
+                        throw OpenAIChatFailure.ModelUnavailable(message)
+                    }
+                    throw OpenAIChatFailure.Other(message)
+                }
+
+                val choices = json.getJSONArray("choices")
+                if (choices.length() > 0) {
+                    return choices.getJSONObject(0)
+                        .getJSONObject("message")
+                        .getString("content")
+                }
+                throw OpenAIChatFailure.Other("无效的响应格式")
             }
-            throw OpenAIChatFailure.Other("无效的响应格式")
+        } catch (e: OpenAIChatFailure.ModelUnavailable) {
+            throw e
+        } catch (e: SocketTimeoutException) {
+            throw OpenAIChatFailure.Timeout("timeout")
+        } catch (e: ConnectException) {
+            throw OpenAIChatFailure.Timeout("connect_timeout")
+        } catch (e: UnknownHostException) {
+            throw OpenAIChatFailure.Other("UnknownHostException")
         }
     }
 
@@ -667,9 +820,7 @@ class AIService @Inject constructor(
         messages: List<ChatMessage>,
         config: AIConfig
     ): String {
-        // Auto fallback: within one request, at most 2 tries with different models.
-        // Candidate pool is strictly from remote /v1/models list (per product decision).
-
+        val policy = requestPolicyResolver.resolve(AIRequestKind.NON_STREAM_CHAT, config)
         val primaryModel = config.model.trim()
 
         val remoteModelIds: List<String>?
@@ -679,6 +830,8 @@ class AIService @Inject constructor(
         } else {
             val ids = try {
                 fetchRemoteModelIds(config)
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 throw OpenAIChatFailure.Other("无法获取可用模型列表，请稍后重试")
             }
@@ -688,16 +841,23 @@ class AIService @Inject constructor(
         }
 
         try {
-            return sendOpenAIChatNonStreamOnce(messages, config.copy(model = firstModel))
+            return executeWithRetry(policy) {
+                sendOpenAIChatNonStreamOnce(messages, config.copy(model = firstModel))
+            }
         } catch (e: OpenAIChatFailure.ModelUnavailable) {
             // Continue to fallback
         } catch (e: OpenAIChatFailure.Timeout) {
             // Continue to fallback
         }
 
-        // 2nd attempt (N=2): pick next candidate from /v1/models, excluding first.
+        if (!policy.allowModelFallback) {
+            throw OpenAIChatFailure.ModelUnavailable("model_unavailable: no alternative model")
+        }
+
         val idsForFallback = remoteModelIds ?: try {
             fetchRemoteModelIds(config)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             throw OpenAIChatFailure.Other("无法获取可用模型列表，请稍后重试")
         }
@@ -705,7 +865,9 @@ class AIService @Inject constructor(
         val secondModel = pickPreferredModel(idsForFallback, exclude = setOf(firstModel))
             ?: throw OpenAIChatFailure.ModelUnavailable("model_unavailable: no alternative model")
 
-        return sendOpenAIChatNonStreamOnce(messages, config.copy(model = secondModel))
+        return executeWithRetry(policy) {
+            sendOpenAIChatNonStreamOnce(messages, config.copy(model = secondModel))
+        }
     }
 
     /**

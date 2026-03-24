@@ -22,8 +22,8 @@ internal class AIRequestPolicyResolver {
         return when (kind) {
             AIRequestKind.CONNECTION_TEST -> AIRequestPolicy(
                 kind = kind,
-                maxAttempts = if (config.model.isBlank()) 2 else 1,
-                allowRetry = false,
+                maxAttempts = 2,
+                allowRetry = true,
                 allowModelFallback = config.model.isBlank()
             )
             AIRequestKind.MODEL_FETCH -> AIRequestPolicy(
@@ -34,9 +34,9 @@ internal class AIRequestPolicyResolver {
             )
             AIRequestKind.NON_STREAM_CHAT -> AIRequestPolicy(
                 kind = kind,
-                maxAttempts = if (config.model.isBlank()) 2 else 1,
-                allowRetry = false,
-                allowModelFallback = config.model.isBlank()
+                maxAttempts = 2,
+                allowRetry = true,
+                allowModelFallback = true
             )
             AIRequestKind.STREAM_CHAT -> AIRequestPolicy(
                 kind = kind,

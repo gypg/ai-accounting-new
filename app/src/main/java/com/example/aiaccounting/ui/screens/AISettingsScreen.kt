@@ -25,6 +25,9 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.aiaccounting.data.model.AIModel
 import com.example.aiaccounting.data.model.AIProvider
 import com.example.aiaccounting.data.repository.AIUsageStats
@@ -39,6 +42,7 @@ fun AISettingsScreen(
     viewModel: AISettingsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val lifecycleOwner = LocalLifecycleOwner.current
     val savedGatewayBaseUrl by viewModel.gatewayBaseUrl.collectAsState()
     val inviteApiBaseUrl by viewModel.inviteApiBaseUrl.collectAsState()
     val inviteRpm by viewModel.inviteRpm.collectAsState()
@@ -63,9 +67,18 @@ fun AISettingsScreen(
     }
 
     // 网络状态提示
-    if (!uiState.isNetworkAvailable) {
-        LaunchedEffect(Unit) {
-            viewModel.refreshNetworkStatus()
+    LaunchedEffect(Unit) {
+        viewModel.refreshNetworkStatus()
+    }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                viewModel.refreshNetworkStatus()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
         }
     }
 
@@ -144,9 +157,8 @@ fun AISettingsScreen(
                     .verticalScroll(rememberScrollState())
                     .padding(16.dp)
             ) {
-                // 网络状态提示
-                if (!uiState.isNetworkAvailable) {
-                    NetworkStatusCard()
+                uiState.networkHealthWarning?.let { warning ->
+                    NetworkHealthWarningCard(warning = warning)
                     Spacer(modifier = Modifier.height(16.dp))
                 }
 

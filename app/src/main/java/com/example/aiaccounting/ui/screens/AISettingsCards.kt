@@ -11,11 +11,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
+import com.example.aiaccounting.ui.viewmodel.NetworkHealthWarning
+import com.example.aiaccounting.ui.viewmodel.NetworkHealthWarningLevel
+
 /**
  * AISettingsScreen 基础卡片组件
  *
  * 包含以下组件：
  * - NetworkStatusCard: 网络状态提示卡片
+ * - NetworkHealthWarningCard: 网络预警卡片
  * - BuiltinConfigCard: 内置默认模型配置卡片
  * - EnableAICard: 启用AI助手开关卡片
  * - InfoCard: 使用说明卡片
@@ -23,10 +27,41 @@ import androidx.compose.ui.unit.sp
 
 @Composable
 internal fun NetworkStatusCard() {
+    NetworkHealthWarningCard(
+        warning = NetworkHealthWarning(
+            level = NetworkHealthWarningLevel.Error,
+            title = "网络不可用",
+            message = "当前处于离线模式，AI助手将使用本地解析",
+            observedAtMillis = 0L
+        )
+    )
+}
+
+@Composable
+internal fun NetworkHealthWarningCard(
+    warning: NetworkHealthWarning
+) {
+    val containerColor = when (warning.level) {
+        NetworkHealthWarningLevel.Error -> MaterialTheme.colorScheme.errorContainer
+        NetworkHealthWarningLevel.Warning -> MaterialTheme.colorScheme.tertiaryContainer
+    }
+    val contentColor = when (warning.level) {
+        NetworkHealthWarningLevel.Error -> MaterialTheme.colorScheme.onErrorContainer
+        NetworkHealthWarningLevel.Warning -> MaterialTheme.colorScheme.onTertiaryContainer
+    }
+    val iconTint = when (warning.level) {
+        NetworkHealthWarningLevel.Error -> MaterialTheme.colorScheme.error
+        NetworkHealthWarningLevel.Warning -> MaterialTheme.colorScheme.tertiary
+    }
+    val icon = when (warning.level) {
+        NetworkHealthWarningLevel.Error -> Icons.Default.WifiOff
+        NetworkHealthWarningLevel.Warning -> Icons.Default.WarningAmber
+    }
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.errorContainer
+            containerColor = containerColor
         )
     ) {
         Row(
@@ -36,21 +71,21 @@ internal fun NetworkStatusCard() {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Icon(
-                imageVector = Icons.Default.WifiOff,
+                imageVector = icon,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.error
+                tint = iconTint
             )
             Spacer(modifier = Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "网络不可用",
+                    text = warning.title,
                     fontWeight = FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.onErrorContainer
+                    color = contentColor
                 )
                 Text(
-                    text = "当前处于离线模式，AI助手将使用本地解析",
+                    text = warning.message,
                     fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.8f)
+                    color = contentColor.copy(alpha = 0.8f)
                 )
             }
         }

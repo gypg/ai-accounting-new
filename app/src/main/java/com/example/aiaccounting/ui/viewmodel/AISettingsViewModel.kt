@@ -11,6 +11,7 @@ import com.example.aiaccounting.data.service.AIService
 import com.example.aiaccounting.data.service.InviteGatewayService
 import com.example.aiaccounting.data.service.NetworkSpeedTestResult
 import com.example.aiaccounting.data.service.NetworkSpeedTestService
+import com.example.aiaccounting.data.service.NetworkSpeedTestSummary
 import com.example.aiaccounting.data.service.PreferredNetworkRoute
 import com.example.aiaccounting.data.service.RemoteModel
 import com.example.aiaccounting.utils.DeviceIdProvider
@@ -21,6 +22,7 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 private const val DEFAULT_GATEWAY_BASE_URL = "https://api.gdmon.dpdns.org"
+private const val NETWORK_WARNING_LATENCY_THRESHOLD_MS = 800L
 private val LEGACY_GATEWAY_HOST_KEYWORDS = listOf(
     "workers.dev"
 )
@@ -145,6 +147,7 @@ class AISettingsViewModel @Inject constructor(
                             testResult = TestResult.Error("默认配置不可用，请手动配置 API Key")
                         )
                     }
+                    refreshNetworkHealthWarning()
                 } else {
                     _uiState.update { current ->
                         val effectiveInviteBound = result.inviteBound || current.inviteBound
@@ -158,6 +161,7 @@ class AISettingsViewModel @Inject constructor(
                             isLoading = false
                         )
                     }
+                    refreshNetworkHealthWarning()
                 }
             }
         }
@@ -187,6 +191,74 @@ class AISettingsViewModel @Inject constructor(
         )
     }
 
+    private fun NetworkSpeedTestSummary.toWarning(): NetworkHealthWarning? {
+        val fastestLatency = fastest?.latencyMs
+        if (fastestLatency != null && fastestLatency >= NETWORK_WARNING_LATENCY_THRESHOLD_MS) {
+            return NetworkHealthWarning(
+                level = NetworkHealthWarningLevel.Warning,
+                title = "网络延迟较高",
+                message = "当前最快节点延迟 ${fastestLatency}ms，云端 AI 响应可能变慢。",
+                observedAtMillis = System.currentTimeMillis()
+            )
+        }
+
+        if (fastest == null) {
+            val errorResult = targets.filterIsInstance<NetworkSpeedTestResult.Error>().firstOrNull()
+            val message = errorResult?.message ?: errorMessage ?: "网络测速失败，请稍后重试"
+            return NetworkHealthWarning(
+                level = NetworkHealthWarningLevel.Error,
+                title = "网络状态异常",
+                message = message,
+                observedAtMillis = System.currentTimeMillis()
+            )
+        }
+
+        return null
+    }
+
+    private fun buildNetworkHealthWarning(
+        isNetworkAvailable: Boolean,
+        preferredRouteSummary: PreferredRouteSummary?,
+        latestSpeedTestWarning: NetworkHealthWarning?
+    ): NetworkHealthWarning? {
+        if (!isNetworkAvailable) {
+            return NetworkHealthWarning(
+                level = NetworkHealthWarningLevel.Error,
+                title = "网络不可用",
+                message = "当前处于离线模式，AI 助手将优先使用本地解析。",
+                observedAtMillis = System.currentTimeMillis()
+            )
+        }
+
+        if (latestSpeedTestWarning != null) {
+            return latestSpeedTestWarning
+        }
+
+        val preferredLatency = preferredRouteSummary?.latencyMs ?: return null
+        if (preferredLatency < NETWORK_WARNING_LATENCY_THRESHOLD_MS) {
+            return null
+        }
+
+        return NetworkHealthWarning(
+            level = NetworkHealthWarningLevel.Warning,
+            title = "推荐线路延迟偏高",
+            message = "最近一次测速推荐线路延迟 ${preferredLatency}ms，建议重新测速或稍后再试。",
+            observedAtMillis = preferredRouteSummary.updatedAtMillis
+        )
+    }
+
+    private fun refreshNetworkHealthWarning() {
+        _uiState.update { current ->
+            current.copy(
+                networkHealthWarning = buildNetworkHealthWarning(
+                    isNetworkAvailable = current.isNetworkAvailable,
+                    preferredRouteSummary = current.preferredRouteSummary,
+                    latestSpeedTestWarning = current.latestSpeedTestWarning
+                )
+            )
+        }
+    }
+
     private fun loadUsageStats() {
         viewModelScope.launch {
             aiUsageRepository.getUsageStats().collect { stats ->
@@ -199,6 +271,7 @@ class AISettingsViewModel @Inject constructor(
         viewModelScope.launch {
             val isAvailable = networkUtils.isNetworkAvailable()
             _uiState.update { it.copy(isNetworkAvailable = isAvailable) }
+            refreshNetworkHealthWarning()
         }
     }
 
@@ -219,7 +292,10 @@ class AISettingsViewModel @Inject constructor(
                     apiUrl = defaultConfig.apiUrl,
                     model = defaultConfig.model
                 ),
-                preferredRouteSummary = null
+                preferredRouteSummary = null,
+                networkSpeedTestResult = null,
+                latestSpeedTestWarning = null,
+                networkHealthWarning = null
             )
         }
     }
@@ -241,7 +317,10 @@ class AISettingsViewModel @Inject constructor(
         _uiState.update {
             it.copy(
                 config = it.config.copy(apiUrl = url),
-                preferredRouteSummary = null
+                preferredRouteSummary = null,
+                networkSpeedTestResult = null,
+                latestSpeedTestWarning = null,
+                networkHealthWarning = null
             )
         }
     }
@@ -422,9 +501,16 @@ class AISettingsViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(
                         isTestingNetworkSpeed = false,
-                        networkSpeedTestResult = NetworkSpeedTestUiResult.Error("网络不可用，请检查网络连接")
+                        networkSpeedTestResult = NetworkSpeedTestUiResult.Error("网络不可用，请检查网络连接"),
+                        latestSpeedTestWarning = NetworkHealthWarning(
+                            level = NetworkHealthWarningLevel.Error,
+                            title = "网络不可用",
+                            message = "当前处于离线模式，AI 助手将优先使用本地解析。",
+                            observedAtMillis = System.currentTimeMillis()
+                        )
                     )
                 }
+                refreshNetworkHealthWarning()
                 return@launch
             }
 
@@ -444,6 +530,7 @@ class AISettingsViewModel @Inject constructor(
                 gatewayBaseUrl = gatewayBaseUrl.value
             )
 
+            val latestWarning = summary.toWarning()
             val nextResult = summary.fastest?.let { fastest ->
                 val preferredRoute = PreferredNetworkRoute(
                     targetId = fastest.target.id,
@@ -475,9 +562,11 @@ class AISettingsViewModel @Inject constructor(
             _uiState.update {
                 it.copy(
                     isTestingNetworkSpeed = false,
-                    networkSpeedTestResult = nextResult
+                    networkSpeedTestResult = nextResult,
+                    latestSpeedTestWarning = latestWarning
                 )
             }
+            refreshNetworkHealthWarning()
         }
     }
 
@@ -742,7 +831,14 @@ class AISettingsViewModel @Inject constructor(
             aiConfigRepository.setGatewayBaseUrl(cleaned)
             aiConfigRepository.clearPreferredNetworkRoute()
         }
-        _uiState.update { it.copy(preferredRouteSummary = null) }
+        _uiState.update {
+            it.copy(
+                preferredRouteSummary = null,
+                networkSpeedTestResult = null,
+                latestSpeedTestWarning = null,
+                networkHealthWarning = null
+            )
+        }
     }
 }
 
@@ -756,6 +852,8 @@ data class AISettingsUiState(
     val isTestingNetworkSpeed: Boolean = false,
     val networkSpeedTestResult: NetworkSpeedTestUiResult? = null,
     val preferredRouteSummary: PreferredRouteSummary? = null,
+    val latestSpeedTestWarning: NetworkHealthWarning? = null,
+    val networkHealthWarning: NetworkHealthWarning? = null,
     val usageStats: AIUsageStats = AIUsageStats(),
     val isNetworkAvailable: Boolean = true,
     val isFetchingModels: Boolean = false,
@@ -794,6 +892,18 @@ data class PreferredRouteSummary(
     val label: String,
     val latencyMs: Long,
     val updatedAtMillis: Long
+)
+
+enum class NetworkHealthWarningLevel {
+    Warning,
+    Error
+}
+
+data class NetworkHealthWarning(
+    val level: NetworkHealthWarningLevel,
+    val title: String,
+    val message: String,
+    val observedAtMillis: Long
 )
 
 sealed class InviteBindResult {

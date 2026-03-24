@@ -28,6 +28,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
@@ -205,6 +206,114 @@ class AISettingsConnectionTest {
 
         io.mockk.coVerify { aiConfigRepository.clearPreferredNetworkRoute() }
         assertNull(vm.uiState.value.preferredRouteSummary)
+        assertNull(vm.uiState.value.networkSpeedTestResult)
+    }
+
+    @Test
+    fun init_whenPreferredRouteLatencyIsHigh_exposesNetworkWarning() = runTest {
+        every { aiConfigRepository.getPreferredNetworkRoute() } returns flowOf(
+            PreferredNetworkRoute(
+                targetId = "api",
+                label = "API 节点",
+                latencyMs = 880,
+                updatedAtMillis = 123456L
+            )
+        )
+
+        val vm = AISettingsViewModel(
+            aiConfigRepository = aiConfigRepository,
+            aiService = aiService,
+            aiUsageRepository = aiUsageRepository,
+            networkUtils = networkUtils,
+            inviteGatewayService = inviteGatewayService,
+            deviceIdProvider = deviceIdProvider,
+            networkSpeedTestService = networkSpeedTestService
+        )
+
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals("推荐线路延迟偏高", vm.uiState.value.networkHealthWarning?.title)
+        assertTrue(vm.uiState.value.networkHealthWarning?.message?.contains("880ms") == true)
+    }
+
+    @Test
+    fun runNetworkSpeedTest_whenLatencyIsHigh_setsWarning() = runTest {
+        val fastestTarget = NetworkSpeedTestTarget(
+            id = "gateway",
+            label = "邀请码网关",
+            url = "https://gateway.example/bootstrap",
+            clientType = NetworkSpeedTestClientType.GATEWAY
+        )
+        coEvery { networkSpeedTestService.test(any(), any()) } returns NetworkSpeedTestSummary(
+            targets = listOf(
+                NetworkSpeedTestResult.Success(
+                    target = fastestTarget,
+                    latencyMs = 920,
+                    statusCode = 200
+                )
+            ),
+            fastest = NetworkSpeedTestResult.Success(
+                target = fastestTarget,
+                latencyMs = 920,
+                statusCode = 200
+            ),
+            errorMessage = null
+        )
+
+        val vm = AISettingsViewModel(
+            aiConfigRepository = aiConfigRepository,
+            aiService = aiService,
+            aiUsageRepository = aiUsageRepository,
+            networkUtils = networkUtils,
+            inviteGatewayService = inviteGatewayService,
+            deviceIdProvider = deviceIdProvider,
+            networkSpeedTestService = networkSpeedTestService
+        )
+
+        testDispatcher.scheduler.advanceUntilIdle()
+        vm.runNetworkSpeedTest()
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals("网络延迟较高", vm.uiState.value.networkHealthWarning?.title)
+        assertTrue(vm.uiState.value.networkHealthWarning?.message?.contains("920ms") == true)
+    }
+
+    @Test
+    fun runNetworkSpeedTest_whenAllTargetsFail_setsErrorWarning() = runTest {
+        val target = NetworkSpeedTestTarget(
+            id = "gateway",
+            label = "邀请码网关",
+            url = "https://gateway.example/bootstrap",
+            clientType = NetworkSpeedTestClientType.GATEWAY
+        )
+        coEvery { networkSpeedTestService.test(any(), any()) } returns NetworkSpeedTestSummary(
+            targets = listOf(
+                NetworkSpeedTestResult.Error(
+                    target = target,
+                    message = "连接超时",
+                    failureType = com.example.aiaccounting.data.service.NetworkSpeedTestFailureType.TIMEOUT
+                )
+            ),
+            fastest = null,
+            errorMessage = "网络测速失败"
+        )
+
+        val vm = AISettingsViewModel(
+            aiConfigRepository = aiConfigRepository,
+            aiService = aiService,
+            aiUsageRepository = aiUsageRepository,
+            networkUtils = networkUtils,
+            inviteGatewayService = inviteGatewayService,
+            deviceIdProvider = deviceIdProvider,
+            networkSpeedTestService = networkSpeedTestService
+        )
+
+        testDispatcher.scheduler.advanceUntilIdle()
+        vm.runNetworkSpeedTest()
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertEquals("网络状态异常", vm.uiState.value.networkHealthWarning?.title)
+        assertEquals("连接超时", vm.uiState.value.networkHealthWarning?.message)
     }
 
     @Test
@@ -235,5 +344,7 @@ class AISettingsConnectionTest {
 
         io.mockk.coVerify { aiConfigRepository.clearPreferredNetworkRoute() }
         assertNull(vm.uiState.value.preferredRouteSummary)
+        assertNull(vm.uiState.value.networkSpeedTestResult)
+        assertNull(vm.uiState.value.networkHealthWarning)
     }
 }
