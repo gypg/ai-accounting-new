@@ -4,6 +4,8 @@ import com.example.aiaccounting.data.model.AIConfig
 import com.example.aiaccounting.data.model.AIProvider
 import com.example.aiaccounting.data.model.ChatMessage
 import com.example.aiaccounting.data.model.MessageRole
+import com.example.aiaccounting.data.repository.AIModelPerformanceRepository
+import io.mockk.mockk
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -51,7 +53,8 @@ class AIServiceModelFallbackTest {
 
         val service = AIService(
             client = OkHttpClient(),
-            testClient = OkHttpClient()
+            testClient = OkHttpClient(),
+            modelPerformanceRepository = mockk(relaxed = true)
         )
         val cfg = AIConfig(
             provider = AIProvider.CUSTOM,
@@ -98,7 +101,8 @@ class AIServiceModelFallbackTest {
 
         val service = AIService(
             client = OkHttpClient(),
-            testClient = OkHttpClient()
+            testClient = OkHttpClient(),
+            modelPerformanceRepository = mockk(relaxed = true)
         )
         val cfg = AIConfig(
             provider = AIProvider.CUSTOM,
@@ -162,7 +166,8 @@ class AIServiceModelFallbackTest {
 
         val service = AIService(
             client = OkHttpClient(),
-            testClient = OkHttpClient()
+            testClient = OkHttpClient(),
+            modelPerformanceRepository = mockk(relaxed = true)
         )
         val cfg = AIConfig(
             provider = AIProvider.CUSTOM,
@@ -227,7 +232,8 @@ class AIServiceModelFallbackTest {
             .build()
         val service = AIService(
             client = OkHttpClient(),
-            testClient = timeoutClient
+            testClient = timeoutClient,
+            modelPerformanceRepository = mockk(relaxed = true)
         )
         val cfg = AIConfig(
             provider = AIProvider.CUSTOM,
@@ -270,7 +276,8 @@ class AIServiceModelFallbackTest {
 
         val service = AIService(
             client = OkHttpClient(),
-            testClient = OkHttpClient()
+            testClient = OkHttpClient(),
+            modelPerformanceRepository = mockk(relaxed = true)
         )
         val cfg = AIConfig(
             provider = AIProvider.CUSTOM,
@@ -312,7 +319,8 @@ class AIServiceModelFallbackTest {
             .build()
         val service = AIService(
             client = OkHttpClient(),
-            testClient = timeoutClient
+            testClient = timeoutClient,
+            modelPerformanceRepository = mockk(relaxed = true)
         )
         val cfg = AIConfig(
             provider = AIProvider.CUSTOM,
@@ -356,7 +364,8 @@ class AIServiceModelFallbackTest {
             .build()
         val service = AIService(
             client = timeoutClient,
-            testClient = OkHttpClient()
+            testClient = OkHttpClient(),
+            modelPerformanceRepository = mockk(relaxed = true)
         )
         val cfg = AIConfig(
             provider = AIProvider.CUSTOM,
@@ -380,12 +389,41 @@ class AIServiceModelFallbackTest {
     }
 
     @Test
-    fun chat_whenModelUnavailable_retriesWithRecommendedModel() = kotlinx.coroutines.test.runTest {
+    fun chat_whenFixedModelUnavailable_doesNotFallback() = kotlinx.coroutines.test.runTest {
         server.enqueue(
             MockResponse()
                 .setResponseCode(404)
                 .setBody("model not found")
         )
+
+        val service = AIService(
+            client = OkHttpClient(),
+            testClient = OkHttpClient(),
+            modelPerformanceRepository = mockk(relaxed = true)
+        )
+        val cfg = AIConfig(
+            provider = AIProvider.CUSTOM,
+            apiKey = "k",
+            apiUrl = server.url("/v1").toString().removeSuffix("/"),
+            model = "fixed-model",
+            isEnabled = true
+        )
+
+        val error = runCatching {
+            service.chat(
+                messages = listOf(ChatMessage(role = MessageRole.USER, content = "hi")),
+                config = cfg
+            )
+        }.exceptionOrNull()
+
+        assertTrue(error?.message?.contains("model_unavailable") == true)
+        assertEquals(1, server.requestCount)
+        val onlyReq = server.takeRequest()
+        assertTrue(onlyReq.body.readUtf8().contains("\"model\":\"fixed-model\""))
+    }
+
+    @Test
+    fun chat_whenAutoPrimaryModelUnavailable_retriesWithAlternateModel() = kotlinx.coroutines.test.runTest {
         server.enqueue(
             MockResponse()
                 .setResponseCode(200)
@@ -393,12 +431,17 @@ class AIServiceModelFallbackTest {
                     """
                     {
                       "data": [
-                        {"id": "openai/gpt-oss-120b", "name": "gpt-oss-120b", "description": "rec"},
-                        {"id": "some-other", "name": "other", "description": "alt"}
+                        {"id": "slow-model", "name": "slow-model", "description": "rec"},
+                        {"id": "backup-model", "name": "backup-model", "description": "alt"}
                       ]
                     }
                     """.trimIndent()
                 )
+        )
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(404)
+                .setBody("model not found")
         )
         server.enqueue(
             MockResponse()
@@ -416,13 +459,14 @@ class AIServiceModelFallbackTest {
 
         val service = AIService(
             client = OkHttpClient(),
-            testClient = OkHttpClient()
+            testClient = OkHttpClient(),
+            modelPerformanceRepository = mockk(relaxed = true)
         )
         val cfg = AIConfig(
             provider = AIProvider.CUSTOM,
             apiKey = "k",
             apiUrl = server.url("/v1").toString().removeSuffix("/"),
-            model = "bad-model",
+            model = "",
             isEnabled = true
         )
 
@@ -432,17 +476,12 @@ class AIServiceModelFallbackTest {
         )
 
         assertEquals("ok", result)
-
-        val firstReq = server.takeRequest()
         val modelsReq = server.takeRequest()
-        val secondReq = server.takeRequest()
-
-        val firstBody = firstReq.body.readUtf8()
-        val secondBody = secondReq.body.readUtf8()
-
-        assertTrue(firstBody.contains("\"model\":\"bad-model\""))
-        assertTrue(secondBody.contains("\"model\":\"openai/gpt-oss-120b\""))
+        val firstReq = server.takeRequest()
+        val fallbackReq = server.takeRequest()
         assertTrue(modelsReq.path?.endsWith("/v1/models") == true || modelsReq.path?.endsWith("/models") == true)
+        assertTrue(firstReq.body.readUtf8().contains("\"model\":\"slow-model\""))
+        assertTrue(fallbackReq.body.readUtf8().contains("\"model\":\"backup-model\""))
     }
 
     @Test
@@ -482,7 +521,8 @@ class AIServiceModelFallbackTest {
 
         val service = AIService(
             client = OkHttpClient(),
-            testClient = OkHttpClient()
+            testClient = OkHttpClient(),
+            modelPerformanceRepository = mockk(relaxed = true)
         )
         val cfg = AIConfig(
             provider = AIProvider.CUSTOM,
@@ -570,7 +610,8 @@ class AIServiceModelFallbackTest {
             .build()
         val service = AIService(
             client = OkHttpClient(),
-            testClient = timeoutClient
+            testClient = timeoutClient,
+            modelPerformanceRepository = mockk(relaxed = true)
         )
         val cfg = AIConfig(
             provider = AIProvider.CUSTOM,
@@ -605,7 +646,8 @@ class AIServiceModelFallbackTest {
 
         val service = AIService(
             client = OkHttpClient(),
-            testClient = OkHttpClient()
+            testClient = OkHttpClient(),
+            modelPerformanceRepository = mockk(relaxed = true)
         )
         val cfg = AIConfig(
             provider = AIProvider.CUSTOM,
@@ -633,7 +675,8 @@ class AIServiceModelFallbackTest {
 
         val service = AIService(
             client = OkHttpClient(),
-            testClient = OkHttpClient()
+            testClient = OkHttpClient(),
+            modelPerformanceRepository = mockk(relaxed = true)
         )
         val cfg = AIConfig(
             provider = AIProvider.CUSTOM,

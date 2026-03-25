@@ -30,6 +30,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.aiaccounting.data.model.AIModel
 import com.example.aiaccounting.data.model.AIProvider
+import com.example.aiaccounting.data.repository.AIConfigRepository
 import com.example.aiaccounting.data.repository.AIUsageStats
 import com.example.aiaccounting.ui.viewmodel.AISettingsViewModel
 import com.example.aiaccounting.ui.viewmodel.InviteBindResult
@@ -349,6 +350,18 @@ fun AISettingsScreen(
                         )
                     }
 
+                    uiState.recommendedModelSummary?.takeIf {
+                        uiState.userModelMode == AIConfigRepository.ModelSelectionMode.AUTO ||
+                            uiState.inviteModelMode == AIConfigRepository.ModelSelectionMode.AUTO
+                    }?.let { recommendation ->
+                        Spacer(modifier = Modifier.height(8.dp))
+                        RecommendedModelCard(
+                            modelId = recommendation.modelId,
+                            reason = recommendation.reason,
+                            latencyMs = recommendation.latencyMs
+                        )
+                    }
+
                     uiState.networkSpeedTestResult?.let { result ->
                         Spacer(modifier = Modifier.height(8.dp))
                         NetworkSpeedTestResultCard(
@@ -494,6 +507,46 @@ private fun PreferredRouteCard(
                     text = "基于最近测速推荐，延迟 ${latencyMs}ms",
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSecondaryContainer
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun RecommendedModelCard(
+    modelId: String,
+    reason: String,
+    latencyMs: Long?
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.tertiaryContainer
+        )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Default.AutoAwesome,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.tertiary
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "模型推荐：$modelId",
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer
+                )
+                Text(
+                    text = latencyMs?.let { "$reason，最近平均延迟 ${it}ms" } ?: reason,
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer
                 )
             }
         }

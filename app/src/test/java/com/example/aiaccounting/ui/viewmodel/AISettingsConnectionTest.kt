@@ -2,6 +2,7 @@ package com.example.aiaccounting.ui.viewmodel
 
 import com.example.aiaccounting.data.model.AIConfig
 import com.example.aiaccounting.data.repository.AIConfigRepository
+import com.example.aiaccounting.data.repository.AIModelPerformanceRepository
 import com.example.aiaccounting.data.repository.AIUsageRepository
 import com.example.aiaccounting.data.repository.AIUsageStats
 import com.example.aiaccounting.data.service.AIService
@@ -40,6 +41,7 @@ class AISettingsConnectionTest {
     private lateinit var aiConfigRepository: AIConfigRepository
     private lateinit var aiService: AIService
     private lateinit var aiUsageRepository: AIUsageRepository
+    private lateinit var modelPerformanceRepository: AIModelPerformanceRepository
     private lateinit var networkUtils: NetworkUtils
     private lateinit var inviteGatewayService: InviteGatewayService
     private lateinit var deviceIdProvider: DeviceIdProvider
@@ -52,6 +54,7 @@ class AISettingsConnectionTest {
         aiConfigRepository = mockk(relaxed = true)
         aiService = mockk(relaxed = true)
         aiUsageRepository = mockk(relaxed = true)
+        modelPerformanceRepository = mockk(relaxed = true)
         networkUtils = mockk(relaxed = true)
         inviteGatewayService = mockk(relaxed = true)
         deviceIdProvider = mockk(relaxed = true)
@@ -68,6 +71,7 @@ class AISettingsConnectionTest {
         every { aiConfigRepository.getInviteRpm() } returns flowOf(0)
         every { aiConfigRepository.getInviteCodeMasked() } returns flowOf("")
         every { aiConfigRepository.getPreferredNetworkRoute() } returns flowOf(null)
+        every { modelPerformanceRepository.getRecommendation(any(), any()) } returns flowOf(null)
         coEvery { networkUtils.isNetworkAvailable() } returns true
     }
 
@@ -84,6 +88,7 @@ class AISettingsConnectionTest {
             aiConfigRepository = aiConfigRepository,
             aiService = aiService,
             aiUsageRepository = aiUsageRepository,
+            modelPerformanceRepository = modelPerformanceRepository,
             networkUtils = networkUtils,
             inviteGatewayService = inviteGatewayService,
             deviceIdProvider = deviceIdProvider,
@@ -130,6 +135,7 @@ class AISettingsConnectionTest {
             aiConfigRepository = aiConfigRepository,
             aiService = aiService,
             aiUsageRepository = aiUsageRepository,
+            modelPerformanceRepository = modelPerformanceRepository,
             networkUtils = networkUtils,
             inviteGatewayService = inviteGatewayService,
             deviceIdProvider = deviceIdProvider,
@@ -166,6 +172,7 @@ class AISettingsConnectionTest {
             aiConfigRepository = aiConfigRepository,
             aiService = aiService,
             aiUsageRepository = aiUsageRepository,
+            modelPerformanceRepository = modelPerformanceRepository,
             networkUtils = networkUtils,
             inviteGatewayService = inviteGatewayService,
             deviceIdProvider = deviceIdProvider,
@@ -194,6 +201,7 @@ class AISettingsConnectionTest {
             aiConfigRepository = aiConfigRepository,
             aiService = aiService,
             aiUsageRepository = aiUsageRepository,
+            modelPerformanceRepository = modelPerformanceRepository,
             networkUtils = networkUtils,
             inviteGatewayService = inviteGatewayService,
             deviceIdProvider = deviceIdProvider,
@@ -207,6 +215,43 @@ class AISettingsConnectionTest {
         io.mockk.coVerify { aiConfigRepository.clearPreferredNetworkRoute() }
         assertNull(vm.uiState.value.preferredRouteSummary)
         assertNull(vm.uiState.value.networkSpeedTestResult)
+    }
+
+    @Test
+    fun updateApiUrl_clearsModelRecommendationSummary() = runTest {
+        every { aiConfigRepository.getPreferredNetworkRoute() } returns flowOf(null)
+        every {
+            modelPerformanceRepository.getRecommendation(any(), any())
+        } returns flowOf(
+            com.example.aiaccounting.data.service.RecommendedModelSummary(
+                modelId = "model-a",
+                reason = "根据最近成功率与延迟推荐",
+                source = com.example.aiaccounting.data.service.ModelRecommendationSource.PERFORMANCE,
+                latencyMs = 120,
+                updatedAtMillis = 1234L
+            )
+        )
+        coEvery { modelPerformanceRepository.clearForConfig(any()) } returns Unit
+
+        val vm = AISettingsViewModel(
+            aiConfigRepository = aiConfigRepository,
+            aiService = aiService,
+            aiUsageRepository = aiUsageRepository,
+            modelPerformanceRepository = modelPerformanceRepository,
+            networkUtils = networkUtils,
+            inviteGatewayService = inviteGatewayService,
+            deviceIdProvider = deviceIdProvider,
+            networkSpeedTestService = networkSpeedTestService
+        )
+
+        testDispatcher.scheduler.advanceUntilIdle()
+        vm.fetchRemoteModels()
+        testDispatcher.scheduler.advanceUntilIdle()
+        vm.updateApiUrl("https://changed.example/v1")
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        io.mockk.coVerify { modelPerformanceRepository.clearForConfig(any()) }
+        assertNull(vm.uiState.value.recommendedModelSummary)
     }
 
     @Test
@@ -224,6 +269,7 @@ class AISettingsConnectionTest {
             aiConfigRepository = aiConfigRepository,
             aiService = aiService,
             aiUsageRepository = aiUsageRepository,
+            modelPerformanceRepository = modelPerformanceRepository,
             networkUtils = networkUtils,
             inviteGatewayService = inviteGatewayService,
             deviceIdProvider = deviceIdProvider,
@@ -264,6 +310,7 @@ class AISettingsConnectionTest {
             aiConfigRepository = aiConfigRepository,
             aiService = aiService,
             aiUsageRepository = aiUsageRepository,
+            modelPerformanceRepository = modelPerformanceRepository,
             networkUtils = networkUtils,
             inviteGatewayService = inviteGatewayService,
             deviceIdProvider = deviceIdProvider,
@@ -302,6 +349,7 @@ class AISettingsConnectionTest {
             aiConfigRepository = aiConfigRepository,
             aiService = aiService,
             aiUsageRepository = aiUsageRepository,
+            modelPerformanceRepository = modelPerformanceRepository,
             networkUtils = networkUtils,
             inviteGatewayService = inviteGatewayService,
             deviceIdProvider = deviceIdProvider,
@@ -332,6 +380,7 @@ class AISettingsConnectionTest {
             aiConfigRepository = aiConfigRepository,
             aiService = aiService,
             aiUsageRepository = aiUsageRepository,
+            modelPerformanceRepository = modelPerformanceRepository,
             networkUtils = networkUtils,
             inviteGatewayService = inviteGatewayService,
             deviceIdProvider = deviceIdProvider,

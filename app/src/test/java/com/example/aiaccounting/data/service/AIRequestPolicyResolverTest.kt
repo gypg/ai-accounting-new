@@ -35,14 +35,26 @@ class AIRequestPolicyResolverTest {
     }
 
     @Test
-    fun resolve_returnsTwoAttemptsAndAllowsRetry_forNonStreamChat() {
+    fun resolve_returnsTwoAttemptsAndAllowsFallback_forAutoNonStreamChat() {
+        val policy = resolver.resolve(
+            kind = AIRequestKind.NON_STREAM_CHAT,
+            config = AIConfig(model = "")
+        )
+
+        assertEquals(2, policy.maxAttempts)
+        assertTrue(policy.allowModelFallback)
+        assertTrue(policy.allowRetry)
+    }
+
+    @Test
+    fun resolve_returnsTwoAttemptsWithoutFallback_forFixedNonStreamChat() {
         val policy = resolver.resolve(
             kind = AIRequestKind.NON_STREAM_CHAT,
             config = AIConfig(model = "fixed-model")
         )
 
         assertEquals(2, policy.maxAttempts)
-        assertTrue(policy.allowModelFallback)
+        assertFalse(policy.allowModelFallback)
         assertTrue(policy.allowRetry)
     }
 

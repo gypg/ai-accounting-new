@@ -19,25 +19,50 @@ internal data class AIRequestPolicy(
 internal class AIRequestPolicyResolver {
 
     fun resolve(kind: AIRequestKind, config: AIConfig): AIRequestPolicy {
+        val strategy = if (config.model.isBlank()) {
+            ModelSelectionStrategy.AUTO
+        } else {
+            ModelSelectionStrategy.FIXED
+        }
+        return resolve(kind, strategy)
+    }
+
+    fun resolve(kind: AIRequestKind, strategy: ModelSelectionStrategy): AIRequestPolicy {
         return when (kind) {
-            AIRequestKind.CONNECTION_TEST -> AIRequestPolicy(
-                kind = kind,
-                maxAttempts = 2,
-                allowRetry = true,
-                allowModelFallback = config.model.isBlank()
-            )
+            AIRequestKind.CONNECTION_TEST -> when (strategy) {
+                ModelSelectionStrategy.AUTO -> AIRequestPolicy(
+                    kind = kind,
+                    maxAttempts = 2,
+                    allowRetry = true,
+                    allowModelFallback = true
+                )
+                ModelSelectionStrategy.FIXED -> AIRequestPolicy(
+                    kind = kind,
+                    maxAttempts = 2,
+                    allowRetry = true,
+                    allowModelFallback = false
+                )
+            }
             AIRequestKind.MODEL_FETCH -> AIRequestPolicy(
                 kind = kind,
                 maxAttempts = 1,
                 allowRetry = false,
                 allowModelFallback = false
             )
-            AIRequestKind.NON_STREAM_CHAT -> AIRequestPolicy(
-                kind = kind,
-                maxAttempts = 2,
-                allowRetry = true,
-                allowModelFallback = true
-            )
+            AIRequestKind.NON_STREAM_CHAT -> when (strategy) {
+                ModelSelectionStrategy.AUTO -> AIRequestPolicy(
+                    kind = kind,
+                    maxAttempts = 2,
+                    allowRetry = true,
+                    allowModelFallback = true
+                )
+                ModelSelectionStrategy.FIXED -> AIRequestPolicy(
+                    kind = kind,
+                    maxAttempts = 2,
+                    allowRetry = true,
+                    allowModelFallback = false
+                )
+            }
             AIRequestKind.STREAM_CHAT -> AIRequestPolicy(
                 kind = kind,
                 maxAttempts = 1,

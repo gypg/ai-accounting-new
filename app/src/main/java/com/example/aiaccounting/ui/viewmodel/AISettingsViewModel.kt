@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.aiaccounting.data.model.AIConfig
 import com.example.aiaccounting.data.model.AIProvider
 import com.example.aiaccounting.data.repository.AIConfigRepository
+import com.example.aiaccounting.data.repository.AIModelPerformanceRepository
 import com.example.aiaccounting.data.repository.AIUsageRepository
 import com.example.aiaccounting.data.repository.AIUsageStats
 import com.example.aiaccounting.data.service.AIService
@@ -32,6 +33,7 @@ class AISettingsViewModel @Inject constructor(
     private val aiConfigRepository: AIConfigRepository,
     private val aiService: AIService,
     private val aiUsageRepository: AIUsageRepository,
+    private val modelPerformanceRepository: AIModelPerformanceRepository,
     private val networkUtils: NetworkUtils,
     private val inviteGatewayService: InviteGatewayService,
     private val deviceIdProvider: DeviceIdProvider,
@@ -81,6 +83,8 @@ class AISettingsViewModel @Inject constructor(
             initialValue = null
         )
 
+    private val availableRemoteModels = MutableStateFlow<List<RemoteModel>>(emptyList())
+
     init {
         viewModelScope.launch {
             aiConfigRepository.migrateLegacyApiKeyIfNeeded()
@@ -124,11 +128,20 @@ class AISettingsViewModel @Inject constructor(
 
             combine(
                 baseConfigFlow,
-                aiConfigRepository.getPreferredNetworkRoute()
-            ) { baseResult, preferredRoute ->
-                baseResult.copy(preferredRoute = preferredRoute)
-            }.collect { result ->
+                aiConfigRepository.getPreferredNetworkRoute(),
+                availableRemoteModels
+            ) { baseResult, preferredRoute, remoteModels ->
+                Triple(baseResult.copy(preferredRoute = preferredRoute), preferredRoute, remoteModels)
+            }.collect { (result, _, remoteModels) ->
                 val builtinAvailable = true
+                val recommendation = if (remoteModels.isEmpty()) {
+                    null
+                } else {
+                    modelPerformanceRepository.getRecommendation(
+                        config = result.config,
+                        remoteModelIds = remoteModels.map { it.id }
+                    ).first()
+                }
 
                 if (result.useBuiltin && !builtinAvailable) {
                     // 防止历史状态把用户困在“内置开启但不可用”
@@ -143,6 +156,7 @@ class AISettingsViewModel @Inject constructor(
                             userModelMode = result.userModelMode,
                             inviteModelMode = result.inviteModelMode,
                             preferredRouteSummary = result.preferredRoute?.toSummary(),
+                            recommendedModelSummary = recommendation?.toUiSummary(),
                             isLoading = false,
                             testResult = TestResult.Error("默认配置不可用，请手动配置 API Key")
                         )
@@ -158,6 +172,7 @@ class AISettingsViewModel @Inject constructor(
                             userModelMode = result.userModelMode,
                             inviteModelMode = result.inviteModelMode,
                             preferredRouteSummary = result.preferredRoute?.toSummary(),
+                            recommendedModelSummary = recommendation?.toUiSummary(),
                             isLoading = false
                         )
                     }
@@ -186,6 +201,15 @@ class AISettingsViewModel @Inject constructor(
     private fun PreferredNetworkRoute.toSummary(): PreferredRouteSummary {
         return PreferredRouteSummary(
             label = label,
+            latencyMs = latencyMs,
+            updatedAtMillis = updatedAtMillis
+        )
+    }
+
+    private fun com.example.aiaccounting.data.service.RecommendedModelSummary.toUiSummary(): RecommendedModelUiSummary {
+        return RecommendedModelUiSummary(
+            modelId = modelId,
+            reason = reason,
             latencyMs = latencyMs,
             updatedAtMillis = updatedAtMillis
         )
@@ -284,6 +308,7 @@ class AISettingsViewModel @Inject constructor(
         val defaultConfig = AIConfig.defaultFor(provider)
         viewModelScope.launch {
             aiConfigRepository.clearPreferredNetworkRoute()
+            modelPerformanceRepository.clearForConfig(_uiState.value.config)
         }
         _uiState.update {
             it.copy(
@@ -293,6 +318,7 @@ class AISettingsViewModel @Inject constructor(
                     model = defaultConfig.model
                 ),
                 preferredRouteSummary = null,
+                recommendedModelSummary = null,
                 networkSpeedTestResult = null,
                 latestSpeedTestWarning = null,
                 networkHealthWarning = null
@@ -311,13 +337,16 @@ class AISettingsViewModel @Inject constructor(
 
     fun updateApiUrl(url: String) {
         // Invite-bound config is independent from user config. Updating apiUrl should not clear binding.
+        val currentConfig = _uiState.value.config
         viewModelScope.launch {
             aiConfigRepository.clearPreferredNetworkRoute()
+            modelPerformanceRepository.clearForConfig(currentConfig)
         }
         _uiState.update {
             it.copy(
                 config = it.config.copy(apiUrl = url),
                 preferredRouteSummary = null,
+                recommendedModelSummary = null,
                 networkSpeedTestResult = null,
                 latestSpeedTestWarning = null,
                 networkHealthWarning = null
@@ -655,6 +684,7 @@ class AISettingsViewModel @Inject constructor(
             // 获取模型列表
             val config = _uiState.value.config
             val models = aiService.fetchModels(config)
+            availableRemoteModels.value = models
 
             _uiState.update {
                 it.copy(
@@ -852,6 +882,7 @@ data class AISettingsUiState(
     val isTestingNetworkSpeed: Boolean = false,
     val networkSpeedTestResult: NetworkSpeedTestUiResult? = null,
     val preferredRouteSummary: PreferredRouteSummary? = null,
+    val recommendedModelSummary: RecommendedModelUiSummary? = null,
     val latestSpeedTestWarning: NetworkHealthWarning? = null,
     val networkHealthWarning: NetworkHealthWarning? = null,
     val usageStats: AIUsageStats = AIUsageStats(),
@@ -891,6 +922,13 @@ data class NetworkSpeedTestMeasuredTarget(
 data class PreferredRouteSummary(
     val label: String,
     val latencyMs: Long,
+    val updatedAtMillis: Long
+)
+
+data class RecommendedModelUiSummary(
+    val modelId: String,
+    val reason: String,
+    val latencyMs: Long?,
     val updatedAtMillis: Long
 )
 

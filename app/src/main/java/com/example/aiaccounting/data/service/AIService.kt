@@ -8,15 +8,18 @@ import com.example.aiaccounting.data.model.AIConfig
 import com.example.aiaccounting.data.model.AIProvider
 import com.example.aiaccounting.data.model.ChatMessage
 import com.example.aiaccounting.data.model.MessageRole
+import com.example.aiaccounting.data.repository.AIModelPerformanceRepository
 import com.example.aiaccounting.di.AiOkHttpClient
 import com.example.aiaccounting.di.AiTestOkHttpClient
 import com.example.aiaccounting.utils.OpenAiUrlUtils
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.runBlocking
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -41,15 +44,41 @@ import javax.inject.Singleton
 @Singleton
 class AIService @Inject constructor(
     @AiOkHttpClient private val client: OkHttpClient,
-    @AiTestOkHttpClient private val testClient: OkHttpClient
+    @AiTestOkHttpClient private val testClient: OkHttpClient,
+    private val modelPerformanceRepository: AIModelPerformanceRepository
 ) {
 
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
     private val requestPolicyResolver = AIRequestPolicyResolver()
     private val requestFailureClassifier = AIRequestFailureClassifier()
+    private val modelExecutionPlanner = ModelExecutionPlanner()
     private val retryBackoffMillis = 300L
     private val compressionThresholdBytes = 512
     private val modelCache = ConcurrentHashMap<ModelCacheKey, CachedRemoteModels>()
+
+    private fun modelSelectionStrategy(config: AIConfig): ModelSelectionStrategy {
+        return if (config.model.isBlank()) {
+            ModelSelectionStrategy.AUTO
+        } else {
+            ModelSelectionStrategy.FIXED
+        }
+    }
+
+    private fun recordModelSuccess(config: AIConfig, modelId: String, latencyMs: Long) {
+        runCatching {
+            runBlocking {
+                modelPerformanceRepository.recordSuccess(config, modelId, latencyMs)
+            }
+        }
+    }
+
+    private fun recordModelFailure(config: AIConfig, modelId: String, category: ModelPerformanceFailureCategory) {
+        runCatching {
+            runBlocking {
+                modelPerformanceRepository.recordFailure(config, modelId, category)
+            }
+        }
+    }
 
     /**
      * 发送对话请求（流式）
@@ -324,9 +353,10 @@ class AIService @Inject constructor(
     }
 
     private fun testOpenAIConnection(config: AIConfig, messages: List<ChatMessage>, policy: AIRequestPolicy) {
+        val strategy = modelSelectionStrategy(config)
         val primaryModel = config.model.trim()
 
-        if (primaryModel.isNotBlank()) {
+        if (strategy == ModelSelectionStrategy.FIXED) {
             executeWithRetry(policy) {
                 testOpenAIConnectionOnce(config.copy(model = primaryModel), messages)
             }
@@ -341,7 +371,13 @@ class AIService @Inject constructor(
             throw OpenAIChatFailure.Other("无法获取可用模型列表，请稍后重试")
         }
 
-        val firstModel = pickPreferredModel(candidateModels, exclude = emptySet())
+        val plan = modelExecutionPlanner.plan(
+            strategy = strategy,
+            configuredModelId = primaryModel,
+            remoteModelIds = candidateModels,
+            snapshot = null
+        )
+        val firstModel = plan.primaryModelId
             ?: throw OpenAIChatFailure.Other("无法获取可用模型列表，请稍后重试")
 
         try {
@@ -359,7 +395,7 @@ class AIService @Inject constructor(
             throw OpenAIChatFailure.ModelUnavailable("model_unavailable: no alternative model")
         }
 
-        val secondModel = pickPreferredModel(candidateModels, exclude = setOf(firstModel))
+        val secondModel = plan.fallbackModelIds.firstOrNull()
             ?: throw OpenAIChatFailure.ModelUnavailable("model_unavailable: no alternative model")
 
         executeWithRetry(policy) {
@@ -820,53 +856,73 @@ class AIService @Inject constructor(
         messages: List<ChatMessage>,
         config: AIConfig
     ): String {
-        val policy = requestPolicyResolver.resolve(AIRequestKind.NON_STREAM_CHAT, config)
-        val primaryModel = config.model.trim()
-
-        val remoteModelIds: List<String>?
-        val firstModel = if (primaryModel.isNotBlank()) {
-            remoteModelIds = null
-            primaryModel
-        } else {
-            val ids = try {
+        val strategy = modelSelectionStrategy(config)
+        val policy = requestPolicyResolver.resolve(AIRequestKind.NON_STREAM_CHAT, strategy)
+        val remoteModelIds = if (strategy == ModelSelectionStrategy.AUTO) {
+            try {
                 fetchRemoteModelIds(config)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 throw OpenAIChatFailure.Other("无法获取可用模型列表，请稍后重试")
             }
-            remoteModelIds = ids
-            pickPreferredModel(ids, exclude = emptySet())
-                ?: throw OpenAIChatFailure.Other("无法获取可用模型列表，请稍后重试")
+        } else {
+            emptyList()
         }
+        val snapshot = runCatching {
+            runBlocking {
+                modelPerformanceRepository.getSnapshot(config).first()
+            }
+        }.getOrNull()
+        val plan = modelExecutionPlanner.plan(
+            strategy = strategy,
+            configuredModelId = config.model.trim(),
+            remoteModelIds = remoteModelIds,
+            snapshot = snapshot,
+            nowMillis = System.currentTimeMillis()
+        )
+        val firstModel = plan.primaryModelId
+            ?: throw OpenAIChatFailure.Other("无法获取可用模型列表，请稍后重试")
 
         try {
-            return executeWithRetry(policy) {
+            val startedAt = System.currentTimeMillis()
+            val result = executeWithRetry(policy) {
                 sendOpenAIChatNonStreamOnce(messages, config.copy(model = firstModel))
             }
+            recordModelSuccess(config, firstModel, System.currentTimeMillis() - startedAt)
+            return result
         } catch (e: OpenAIChatFailure.ModelUnavailable) {
-            // Continue to fallback
+            recordModelFailure(config, firstModel, ModelPerformanceFailureCategory.MODEL_UNAVAILABLE)
         } catch (e: OpenAIChatFailure.Timeout) {
-            // Continue to fallback
+            recordModelFailure(config, firstModel, ModelPerformanceFailureCategory.TIMEOUT)
+        } catch (e: Throwable) {
+            recordModelFailure(config, firstModel, ModelPerformanceFailureCategory.OTHER)
+            throw e
         }
 
         if (!policy.allowModelFallback) {
             throw OpenAIChatFailure.ModelUnavailable("model_unavailable: no alternative model")
         }
 
-        val idsForFallback = remoteModelIds ?: try {
-            fetchRemoteModelIds(config)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            throw OpenAIChatFailure.Other("无法获取可用模型列表，请稍后重试")
-        }
-
-        val secondModel = pickPreferredModel(idsForFallback, exclude = setOf(firstModel))
+        val secondModel = plan.fallbackModelIds.firstOrNull()
             ?: throw OpenAIChatFailure.ModelUnavailable("model_unavailable: no alternative model")
 
-        return executeWithRetry(policy) {
-            sendOpenAIChatNonStreamOnce(messages, config.copy(model = secondModel))
+        try {
+            val startedAt = System.currentTimeMillis()
+            val result = executeWithRetry(policy) {
+                sendOpenAIChatNonStreamOnce(messages, config.copy(model = secondModel))
+            }
+            recordModelSuccess(config, secondModel, System.currentTimeMillis() - startedAt)
+            return result
+        } catch (e: OpenAIChatFailure.ModelUnavailable) {
+            recordModelFailure(config, secondModel, ModelPerformanceFailureCategory.MODEL_UNAVAILABLE)
+            throw e
+        } catch (e: OpenAIChatFailure.Timeout) {
+            recordModelFailure(config, secondModel, ModelPerformanceFailureCategory.TIMEOUT)
+            throw e
+        } catch (e: Throwable) {
+            recordModelFailure(config, secondModel, ModelPerformanceFailureCategory.OTHER)
+            throw e
         }
     }
 

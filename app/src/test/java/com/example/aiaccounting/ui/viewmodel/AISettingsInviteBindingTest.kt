@@ -2,6 +2,7 @@ package com.example.aiaccounting.ui.viewmodel
 
 import com.example.aiaccounting.data.model.AIConfig
 import com.example.aiaccounting.data.repository.AIConfigRepository
+import com.example.aiaccounting.data.repository.AIModelPerformanceRepository
 import com.example.aiaccounting.data.repository.AIUsageRepository
 import com.example.aiaccounting.data.repository.AIUsageStats
 import com.example.aiaccounting.data.service.AIService
@@ -34,6 +35,7 @@ class AISettingsInviteBindingTest {
  private lateinit var aiConfigRepository: AIConfigRepository
  private lateinit var aiService: AIService
  private lateinit var aiUsageRepository: AIUsageRepository
+ private lateinit var modelPerformanceRepository: AIModelPerformanceRepository
  private lateinit var networkUtils: NetworkUtils
  private lateinit var inviteGatewayService: InviteGatewayService
  private lateinit var deviceIdProvider: DeviceIdProvider
@@ -45,6 +47,7 @@ class AISettingsInviteBindingTest {
  aiConfigRepository = mockk(relaxed = true)
  aiService = mockk(relaxed = true)
  aiUsageRepository = mockk(relaxed = true)
+ modelPerformanceRepository = mockk(relaxed = true)
  networkUtils = mockk(relaxed = true)
  inviteGatewayService = mockk(relaxed = true)
  deviceIdProvider = mockk(relaxed = true)
@@ -63,6 +66,8 @@ class AISettingsInviteBindingTest {
  every { aiConfigRepository.getInviteApiBaseUrl() } returns flowOf("")
  every { aiConfigRepository.getInviteRpm() } returns flowOf(0)
  every { aiConfigRepository.getInviteCodeMasked() } returns flowOf("")
+ every { aiConfigRepository.getPreferredNetworkRoute() } returns flowOf(null)
+ every { modelPerformanceRepository.getRecommendation(any(), any()) } returns flowOf(null)
  }
 
  @After
@@ -78,6 +83,7 @@ class AISettingsInviteBindingTest {
  aiConfigRepository = aiConfigRepository,
  aiService = aiService,
  aiUsageRepository = aiUsageRepository,
+ modelPerformanceRepository = modelPerformanceRepository,
  networkUtils = networkUtils,
  inviteGatewayService = inviteGatewayService,
  deviceIdProvider = deviceIdProvider
@@ -104,6 +110,7 @@ class AISettingsInviteBindingTest {
  aiConfigRepository = aiConfigRepository,
  aiService = aiService,
  aiUsageRepository = aiUsageRepository,
+ modelPerformanceRepository = modelPerformanceRepository,
  networkUtils = networkUtils,
  inviteGatewayService = inviteGatewayService,
  deviceIdProvider = deviceIdProvider
@@ -138,6 +145,7 @@ class AISettingsInviteBindingTest {
  aiConfigRepository = aiConfigRepository,
  aiService = aiService,
  aiUsageRepository = aiUsageRepository,
+ modelPerformanceRepository = modelPerformanceRepository,
  networkUtils = networkUtils,
  inviteGatewayService = inviteGatewayService,
  deviceIdProvider = deviceIdProvider
@@ -183,6 +191,7 @@ class AISettingsInviteBindingTest {
  aiConfigRepository = aiConfigRepository,
  aiService = aiService,
  aiUsageRepository = aiUsageRepository,
+ modelPerformanceRepository = modelPerformanceRepository,
  networkUtils = networkUtils,
  inviteGatewayService = inviteGatewayService,
  deviceIdProvider = deviceIdProvider
@@ -207,6 +216,7 @@ class AISettingsInviteBindingTest {
  aiConfigRepository = aiConfigRepository,
  aiService = aiService,
  aiUsageRepository = aiUsageRepository,
+ modelPerformanceRepository = modelPerformanceRepository,
  networkUtils = networkUtils,
  inviteGatewayService = inviteGatewayService,
  deviceIdProvider = deviceIdProvider
@@ -236,6 +246,7 @@ class AISettingsInviteBindingTest {
  aiConfigRepository = aiConfigRepository,
  aiService = aiService,
  aiUsageRepository = aiUsageRepository,
+ modelPerformanceRepository = modelPerformanceRepository,
  networkUtils = networkUtils,
  inviteGatewayService = inviteGatewayService,
  deviceIdProvider = deviceIdProvider
@@ -261,6 +272,7 @@ class AISettingsInviteBindingTest {
  aiConfigRepository = aiConfigRepository,
  aiService = aiService,
  aiUsageRepository = aiUsageRepository,
+ modelPerformanceRepository = modelPerformanceRepository,
  networkUtils = networkUtils,
  inviteGatewayService = inviteGatewayService,
  deviceIdProvider = deviceIdProvider
@@ -286,6 +298,7 @@ class AISettingsInviteBindingTest {
  aiConfigRepository = aiConfigRepository,
  aiService = aiService,
  aiUsageRepository = aiUsageRepository,
+ modelPerformanceRepository = modelPerformanceRepository,
  networkUtils = networkUtils,
  inviteGatewayService = inviteGatewayService,
  deviceIdProvider = deviceIdProvider
@@ -311,6 +324,7 @@ class AISettingsInviteBindingTest {
  aiConfigRepository = aiConfigRepository,
  aiService = aiService,
  aiUsageRepository = aiUsageRepository,
+ modelPerformanceRepository = modelPerformanceRepository,
  networkUtils = networkUtils,
  inviteGatewayService = inviteGatewayService,
  deviceIdProvider = deviceIdProvider
@@ -329,6 +343,7 @@ class AISettingsInviteBindingTest {
  aiConfigRepository = aiConfigRepository,
  aiService = aiService,
  aiUsageRepository = aiUsageRepository,
+ modelPerformanceRepository = modelPerformanceRepository,
  networkUtils = networkUtils,
  inviteGatewayService = inviteGatewayService,
  deviceIdProvider = deviceIdProvider
@@ -355,6 +370,7 @@ class AISettingsInviteBindingTest {
  aiConfigRepository = aiConfigRepository,
  aiService = aiService,
  aiUsageRepository = aiUsageRepository,
+ modelPerformanceRepository = modelPerformanceRepository,
  networkUtils = networkUtils,
  inviteGatewayService = inviteGatewayService,
  deviceIdProvider = deviceIdProvider
@@ -380,6 +396,7 @@ class AISettingsInviteBindingTest {
  aiConfigRepository = aiConfigRepository,
  aiService = aiService,
  aiUsageRepository = aiUsageRepository,
+ modelPerformanceRepository = modelPerformanceRepository,
  networkUtils = networkUtils,
  inviteGatewayService = inviteGatewayService,
  deviceIdProvider = deviceIdProvider
@@ -398,6 +415,7 @@ class AISettingsInviteBindingTest {
  aiConfigRepository = aiConfigRepository,
  aiService = aiService,
  aiUsageRepository = aiUsageRepository,
+ modelPerformanceRepository = modelPerformanceRepository,
  networkUtils = networkUtils,
  inviteGatewayService = inviteGatewayService,
  deviceIdProvider = deviceIdProvider

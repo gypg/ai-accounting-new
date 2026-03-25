@@ -2,6 +2,7 @@ package com.example.aiaccounting.ui.viewmodel
 
 import com.example.aiaccounting.data.model.AIConfig
 import com.example.aiaccounting.data.repository.AIConfigRepository
+import com.example.aiaccounting.data.repository.AIModelPerformanceRepository
 import com.example.aiaccounting.data.repository.AIUsageRepository
 import com.example.aiaccounting.data.repository.AIUsageStats
 import com.example.aiaccounting.data.service.AIService
@@ -32,6 +33,7 @@ class AISettingsBuiltinInviteDecoupleTest {
  private lateinit var aiConfigRepository: AIConfigRepository
  private lateinit var aiService: AIService
  private lateinit var aiUsageRepository: AIUsageRepository
+ private lateinit var modelPerformanceRepository: AIModelPerformanceRepository
  private lateinit var networkUtils: NetworkUtils
  private lateinit var inviteGatewayService: InviteGatewayService
  private lateinit var deviceIdProvider: DeviceIdProvider
@@ -43,6 +45,7 @@ class AISettingsBuiltinInviteDecoupleTest {
  aiConfigRepository = mockk(relaxed = true)
  aiService = mockk(relaxed = true)
  aiUsageRepository = mockk(relaxed = true)
+ modelPerformanceRepository = mockk(relaxed = true)
  networkUtils = mockk(relaxed = true)
  inviteGatewayService = mockk(relaxed = true)
  deviceIdProvider = mockk(relaxed = true)
@@ -69,6 +72,8 @@ class AISettingsBuiltinInviteDecoupleTest {
  every { aiConfigRepository.getInviteApiBaseUrl() } returns flowOf("https://new.gateway.example/v1")
  every { aiConfigRepository.getInviteRpm() } returns flowOf(60)
  every { aiConfigRepository.getInviteCodeMasked() } returns flowOf("inv_****test")
+ every { aiConfigRepository.getPreferredNetworkRoute() } returns flowOf(null)
+ every { modelPerformanceRepository.getRecommendation(any(), any()) } returns flowOf(null)
  }
 
  @After
@@ -82,6 +87,7 @@ class AISettingsBuiltinInviteDecoupleTest {
  aiConfigRepository = aiConfigRepository,
  aiService = aiService,
  aiUsageRepository = aiUsageRepository,
+ modelPerformanceRepository = modelPerformanceRepository,
  networkUtils = networkUtils,
  inviteGatewayService = inviteGatewayService,
  deviceIdProvider = deviceIdProvider
@@ -113,6 +119,7 @@ class AISettingsBuiltinInviteDecoupleTest {
  aiConfigRepository = aiConfigRepository,
  aiService = aiService,
  aiUsageRepository = aiUsageRepository,
+ modelPerformanceRepository = modelPerformanceRepository,
  networkUtils = networkUtils,
  inviteGatewayService = inviteGatewayService,
  deviceIdProvider = deviceIdProvider
