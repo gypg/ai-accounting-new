@@ -196,22 +196,23 @@ AI记账是一款面向中国大陆个人用户的智能记账 Android 应用。
 ### 2.4 AI 助手图片识别模块最新状态
 
 #### 模块 1：OCR 质量增强
-- 本地图片 OCR 已增加轻量预处理：缩放、灰度化、对比度增强
-- OCR 结果已增加启发式质量评分，按 `HIGH / MEDIUM / LOW / NONE` 分级
-- 本地会提取账单关键信号：金额、时间、支付方式、商户
-- 非原生多模态模型下，仅 **中高置信度** 图片结果会继续发送到云端 AI
-- 低置信度图片会在本地直接提示用户重拍，避免把噪声 OCR 发送到云端导致误判
+- 模块1A / 1B / 1C / 1D 已全部完成：
+  - 模块1A：本地图片 OCR 轻量预处理、账单信号提取与启发式置信度门控
+  - 模块1B：补齐轻量多 profile 预处理增强（基础增强 / 细节增强 / 文档增强）
+  - 模块1C：以多 profile / 多 pass OCR 集成方式实现多结果比对与最佳结果仲裁
+  - 模块1D：结合图像质量指标、OCR 文本结构和跨 pass 一致性升级本地 confidence 模型
+- 非原生多模态模型下，仍保持仅 **中高置信度** 图片结果会继续发送到云端 AI
+- 低置信度图片仍会在本地直接提示用户重拍，避免把噪声 OCR 发送到云端导致误判
 
 #### 当前实现边界
 - 当前仍基于 ML Kit 中文 OCR + 图像标签能力
-- 暂未引入重型 OCR 引擎替换，也未引入 OpenCV
-- 当前置信度为本地启发式质量分，不是 OCR 引擎原生置信度
+- 已明确不引入 OpenCV 或重型 OCR SDK，而是在现有链路上完成多 profile / 多 pass 增强
+- 当前置信度已不再只看单轮启发式文本质量，而是综合图像质量、文本结构和跨 pass 一致性得到最终 confidence
 
 #### 本模块验证结果
-- 新增 `ReceiptTextHeuristicsTest`，覆盖金额/日期/支付方式/商户提取、质量评分、关键行筛选
-- 新增 `AIAssistantImageMessageHandlerTest`，覆盖低置信度拦截、仅高置信度结果进入提示词、配置错误短路
-- 本地验证：
-  - `./gradlew testDebugUnitTest --tests com.example.aiaccounting.data.service.image.ReceiptTextHeuristicsTest --tests com.example.aiaccounting.ui.viewmodel.AIAssistantImageMessageHandlerTest` ✅
+- 定向验证：
+  - `./gradlew testDebugUnitTest --tests com.example.aiaccounting.data.service.image.ReceiptTextHeuristicsTest --tests com.example.aiaccounting.data.service.image.OcrResultSelectorTest --tests com.example.aiaccounting.ui.viewmodel.AIAssistantImageMessageHandlerTest` ✅
+- 全量回归：
   - `./gradlew testDebugUnitTest --continue` ✅
 
 ### 2.5 四大问题总体完成度对照（按最初交付要求复盘）
@@ -219,17 +220,23 @@ AI记账是一款面向中国大陆个人用户的智能记账 Android 应用。
 > 说明：以下状态区分“当前模块化切片已完成”与“最初整套产品目标已全部完成”。截至 2026-03-23，前者已有明显进展，后者尚未全部收口。
 
 #### 问题1：OCR识别精度问题
-- **当前状态：部分完成（当前模块目标已完成）**
+- **当前状态：已完成（模块1A / 1B / 1C / 1D 已全部收口）**
 - **已完成**：
   - 本地 OCR 轻量预处理：缩放、灰度化、对比度增强
+  - 多 profile 轻量预处理增强：基础增强 / 细节增强 / 文档增强
+  - 多 pass OCR 结果比对与最佳结果仲裁
   - 账单关键信号提取：金额、时间、支付方式、商户
-  - 启发式质量评分与 `HIGH / MEDIUM / LOW / NONE` 分级
+  - 综合图像质量、文本结构与跨 pass 一致性的增强版 confidence 模型
   - 非原生多模态模型下仅中高置信度结果送云端
   - 低置信度结果本地拦截并提示重拍
-- **未完成/未落地为正式能力**：
-  - 多 OCR 引擎比对机制
-  - 更重的图像预处理链路（如倾斜校正、OpenCV 级增强）
-  - OCR 引擎原生置信度体系与模型级优化
+- **暂不采用**：
+  - OpenCV 级重型图像处理
+  - 新增重型 OCR 引擎依赖
+- **验证**：
+  - `ReceiptTextHeuristicsTest`
+  - `OcrResultSelectorTest`
+  - `AIAssistantImageMessageHandlerTest`
+  - `./gradlew testDebugUnitTest --continue`
 
 #### 问题2：自动优选模型导致超时
 - **当前状态：已完成（连接测试链路 + 运行时性能调度体系已落地）**

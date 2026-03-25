@@ -2,14 +2,26 @@ package com.example.aiaccounting.data.service
 
 import android.content.Context
 import android.net.Uri
+import com.example.aiaccounting.data.service.image.ImageQualityMetrics
+import com.example.aiaccounting.data.service.image.OcrAgreementLevel
+import com.example.aiaccounting.data.service.image.OcrPassAnalysis
+import com.example.aiaccounting.data.service.image.OcrPreprocessedVariant
+import com.example.aiaccounting.data.service.image.OcrPreprocessingProfile
 import com.example.aiaccounting.data.service.image.OcrPreprocessingUtils
+import com.example.aiaccounting.data.service.image.OcrResultSelector
 import com.example.aiaccounting.data.service.image.ReceiptTextHeuristics
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.label.ImageLabeling
 import com.google.mlkit.vision.label.defaults.ImageLabelerOptions
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
-import kotlinx.coroutines.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -51,7 +63,10 @@ class ImageProcessingService @Inject constructor() {
         val receiptSignals: ReceiptSignals,
         val qualityScore: Int,
         val confidence: OcrConfidence,
-        val hasContent: Boolean
+        val hasContent: Boolean,
+        val agreementLevel: OcrAgreementLevel = OcrAgreementLevel.NONE,
+        val selectedProfile: OcrPreprocessingProfile = OcrPreprocessingProfile.BASE,
+        val imageQualityMetrics: ImageQualityMetrics = ImageQualityMetrics()
     )
 
     /**
@@ -60,33 +75,58 @@ class ImageProcessingService @Inject constructor() {
     suspend fun analyzeImage(uri: Uri, context: Context, timeoutMs: Long = 5000): ImageAnalysisResult {
         return try {
             withTimeout(timeoutMs) {
-                // 并行执行OCR和标签识别
-                val textDeferred = async { extractTextFromImage(uri, context) }
                 val labelsDeferred = async { extractLabelsFromImage(uri, context) }
+                val passDeferred = async { extractBestPassAnalysis(uri, context) }
 
-                val rawText = textDeferred.await()
                 val labels = labelsDeferred.await().take(5)
-                val keyLines = ReceiptTextHeuristics.extractKeyLines(rawText)
-                val signals = ReceiptTextHeuristics.extractReceiptSignals(rawText)
-                val compactText = trimTextForPrompt(keyLines, rawText)
-                val qualityScore = ReceiptTextHeuristics.calculateQualityScore(
-                    rawText = rawText,
-                    keyLines = keyLines,
+                val passSelection = passDeferred.await()
+                if (passSelection == null) {
+                    val hasLabelContent = labels.isNotEmpty()
+                    return@withTimeout if (hasLabelContent) {
+                        ImageAnalysisResult(
+                            rawText = "",
+                            text = "",
+                            keyLines = emptyList(),
+                            labels = labels,
+                            receiptSignals = ReceiptSignals(),
+                            qualityScore = ReceiptTextHeuristics.calculateQualityScore(
+                                rawText = "",
+                                keyLines = emptyList(),
+                                labels = labels,
+                                signals = ReceiptSignals()
+                            ),
+                            confidence = if (labels.isNotEmpty()) OcrConfidence.LOW else OcrConfidence.NONE,
+                            hasContent = true
+                        )
+                    } else {
+                        emptyResult()
+                    }
+                }
+
+                val best = passSelection.best
+                val finalScore = ReceiptTextHeuristics.calculateQualityScore(
+                    rawText = best.rawText,
+                    keyLines = best.keyLines,
                     labels = labels,
-                    signals = signals
+                    signals = best.receiptSignals,
+                    imageQualityMetrics = best.imageQualityMetrics,
+                    agreementLevel = passSelection.agreementLevel
                 )
-                val confidence = ReceiptTextHeuristics.toConfidence(qualityScore)
-                val hasContent = rawText.isNotBlank() || labels.isNotEmpty()
+                val finalConfidence = ReceiptTextHeuristics.toConfidence(finalScore)
+                val hasContent = best.rawText.isNotBlank() || labels.isNotEmpty()
 
                 ImageAnalysisResult(
-                    rawText = rawText,
-                    text = compactText,
-                    keyLines = keyLines,
+                    rawText = best.rawText,
+                    text = trimTextForPrompt(best.keyLines, best.rawText),
+                    keyLines = best.keyLines,
                     labels = labels,
-                    receiptSignals = signals,
-                    qualityScore = qualityScore,
-                    confidence = confidence,
-                    hasContent = hasContent
+                    receiptSignals = best.receiptSignals,
+                    qualityScore = finalScore,
+                    confidence = finalConfidence,
+                    hasContent = hasContent,
+                    agreementLevel = passSelection.agreementLevel,
+                    selectedProfile = best.profile,
+                    imageQualityMetrics = best.imageQualityMetrics
                 )
             }
         } catch (e: TimeoutCancellationException) {
@@ -108,7 +148,6 @@ class ImageProcessingService @Inject constructor() {
     ): List<ImageAnalysisResult> = withContext(Dispatchers.IO) {
         try {
             withTimeout(timeoutMs) {
-                // 并行处理所有图片
                 val deferredResults = uris.map { uri ->
                     async { analyzeImage(uri, context, 5000) }
                 }
@@ -124,34 +163,6 @@ class ImageProcessingService @Inject constructor() {
     }
 
     /**
-     * OCR文字识别 - 优化版
-     */
-    private suspend fun extractTextFromImage(uri: Uri, context: Context): String {
-        return try {
-            val preprocessedBytes = OcrPreprocessingUtils.preprocessImage(context, uri)
-            val image = preprocessedBytes?.let { InputImage.fromByteArray(it, 0, it.size, 0, android.graphics.ImageFormat.JPEG) }
-                ?: InputImage.fromFilePath(context, uri)
-            val recognizer = TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build())
-
-            val result = suspendCancellableCoroutine { continuation ->
-                recognizer.process(image)
-                    .addOnSuccessListener { visionText ->
-                        val text = visionText.text.trim()
-                        recognizer.close()
-                        continuation.resume(text)
-                    }
-                    .addOnFailureListener { e ->
-                        recognizer.close()
-                        continuation.resumeWithException(e)
-                    }
-            }
-            result
-        } catch (e: Exception) {
-            ""
-        }
-    }
-
-    /**
      * 图像标签识别 - 优化版
      */
     private suspend fun extractLabelsFromImage(uri: Uri, context: Context): List<String> {
@@ -159,7 +170,7 @@ class ImageProcessingService @Inject constructor() {
             val image = InputImage.fromFilePath(context, uri)
             val labeler = ImageLabeling.getClient(
                 ImageLabelerOptions.Builder()
-                    .setConfidenceThreshold(0.6f) // 提高阈值，减少标签数量
+                    .setConfidenceThreshold(0.6f)
                     .build()
             )
 
@@ -181,6 +192,124 @@ class ImageProcessingService @Inject constructor() {
             result
         } catch (e: Exception) {
             emptyList()
+        }
+    }
+
+    private suspend fun extractBestPassAnalysis(uri: Uri, context: Context): com.example.aiaccounting.data.service.image.OcrSelectionResult? {
+        val variants = OcrPreprocessingUtils.preprocessVariants(context, uri)
+        val analyses = if (variants.isNotEmpty()) {
+            variants.mapNotNull { variant -> analyzePass(variant) }
+        } else {
+            listOfNotNull(analyzeOriginalPass(uri, context))
+        }
+
+        if (analyses.isEmpty()) return null
+
+        val initialSelection = OcrResultSelector.selectBestCandidate(analyses)
+        val rescoredAnalyses = analyses.map { candidate ->
+            candidate.copy(
+                qualityScore = ReceiptTextHeuristics.calculateQualityScore(
+                    rawText = candidate.rawText,
+                    keyLines = candidate.keyLines,
+                    labels = emptyList(),
+                    signals = candidate.receiptSignals,
+                    imageQualityMetrics = candidate.imageQualityMetrics,
+                    agreementLevel = initialSelection.agreementLevel
+                ),
+                confidence = ReceiptTextHeuristics.toConfidence(
+                    ReceiptTextHeuristics.calculateQualityScore(
+                        rawText = candidate.rawText,
+                        keyLines = candidate.keyLines,
+                        labels = emptyList(),
+                        signals = candidate.receiptSignals,
+                        imageQualityMetrics = candidate.imageQualityMetrics,
+                        agreementLevel = initialSelection.agreementLevel
+                    )
+                )
+            )
+        }
+        return OcrResultSelector.selectBestCandidate(rescoredAnalyses)
+    }
+
+    private suspend fun analyzePass(variant: OcrPreprocessedVariant): OcrPassAnalysis? {
+        val rawText = extractTextFromBitmap(variant.bitmap)
+        if (rawText.isBlank()) return null
+
+        val keyLines = ReceiptTextHeuristics.extractKeyLines(rawText)
+        val signals = ReceiptTextHeuristics.extractReceiptSignals(rawText)
+        val qualityScore = ReceiptTextHeuristics.calculateQualityScore(
+            rawText = rawText,
+            keyLines = keyLines,
+            labels = emptyList(),
+            signals = signals,
+            imageQualityMetrics = variant.imageQualityMetrics
+        )
+
+        return OcrPassAnalysis(
+            profile = variant.profile,
+            rawText = rawText,
+            keyLines = keyLines,
+            receiptSignals = signals,
+            qualityScore = qualityScore,
+            confidence = ReceiptTextHeuristics.toConfidence(qualityScore),
+            imageQualityMetrics = variant.imageQualityMetrics
+        )
+    }
+
+    private suspend fun analyzeOriginalPass(uri: Uri, context: Context): OcrPassAnalysis? {
+        val rawText = extractTextFromFile(uri, context)
+        if (rawText.isBlank()) return null
+
+        val keyLines = ReceiptTextHeuristics.extractKeyLines(rawText)
+        val signals = ReceiptTextHeuristics.extractReceiptSignals(rawText)
+        val qualityScore = ReceiptTextHeuristics.calculateQualityScore(
+            rawText = rawText,
+            keyLines = keyLines,
+            labels = emptyList(),
+            signals = signals
+        )
+
+        return OcrPassAnalysis(
+            profile = OcrPreprocessingProfile.BASE,
+            rawText = rawText,
+            keyLines = keyLines,
+            receiptSignals = signals,
+            qualityScore = qualityScore,
+            confidence = ReceiptTextHeuristics.toConfidence(qualityScore),
+            imageQualityMetrics = ImageQualityMetrics()
+        )
+    }
+
+    private suspend fun extractTextFromBitmap(bitmap: android.graphics.Bitmap): String {
+        return try {
+            val image = InputImage.fromBitmap(bitmap, 0)
+            processTextRecognition(image)
+        } catch (e: Exception) {
+            ""
+        }
+    }
+    private suspend fun extractTextFromFile(uri: Uri, context: Context): String {
+        return try {
+            val image = InputImage.fromFilePath(context, uri)
+            processTextRecognition(image)
+        } catch (e: Exception) {
+            ""
+        }
+    }
+
+    private suspend fun processTextRecognition(image: InputImage): String {
+        val recognizer = TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build())
+        return suspendCancellableCoroutine { continuation ->
+            recognizer.process(image)
+                .addOnSuccessListener { visionText ->
+                    val text = visionText.text.trim()
+                    recognizer.close()
+                    continuation.resume(text)
+                }
+                .addOnFailureListener { e ->
+                    recognizer.close()
+                    continuation.resumeWithException(e)
+                }
         }
     }
 
@@ -206,6 +335,10 @@ class ImageProcessingService @Inject constructor() {
             results.forEachIndexed { index, result ->
                 appendLine("【图${index + 1}】")
                 appendLine("识别置信度：${describeConfidence(result.confidence)}（${result.qualityScore}分）")
+                appendLine("预处理方案：${describeProfile(result.selectedProfile)}")
+                if (result.agreementLevel != OcrAgreementLevel.NONE) {
+                    appendLine("多轮识别一致性：${describeAgreement(result.agreementLevel)}")
+                }
 
                 if (result.labels.isNotEmpty()) {
                     appendLine("类型：${result.labels.joinToString(", ")}")
@@ -236,6 +369,8 @@ class ImageProcessingService @Inject constructor() {
 
                 if (result.confidence == OcrConfidence.LOW || result.confidence == OcrConfidence.NONE) {
                     appendLine("注意：该图片识别结果不稳定，请谨慎推断，不要臆造缺失字段。")
+                } else if (result.confidence == OcrConfidence.MEDIUM && result.agreementLevel == OcrAgreementLevel.NONE) {
+                    appendLine("注意：该图片已通过本地门控，但多轮识别一致性较弱，请对不确定字段保守处理。")
                 }
 
                 appendLine()
@@ -262,6 +397,22 @@ class ImageProcessingService @Inject constructor() {
             OcrConfidence.MEDIUM -> "中"
             OcrConfidence.LOW -> "低"
             OcrConfidence.NONE -> "无"
+        }
+    }
+
+    private fun describeAgreement(agreementLevel: OcrAgreementLevel): String {
+        return when (agreementLevel) {
+            OcrAgreementLevel.STRONG -> "强"
+            OcrAgreementLevel.WEAK -> "弱"
+            OcrAgreementLevel.NONE -> "无"
+        }
+    }
+
+    private fun describeProfile(profile: OcrPreprocessingProfile): String {
+        return when (profile) {
+            OcrPreprocessingProfile.BASE -> "基础增强"
+            OcrPreprocessingProfile.DETAIL -> "细节增强"
+            OcrPreprocessingProfile.DOCUMENT -> "文档增强"
         }
     }
 

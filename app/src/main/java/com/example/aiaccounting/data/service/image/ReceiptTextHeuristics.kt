@@ -28,7 +28,9 @@ internal object ReceiptTextHeuristics {
                 match.groupValues.getOrNull(1)?.takeIf { it.isNotBlank() }
                     ?: match.groupValues.getOrNull(2)?.takeIf { it.isNotBlank() }
             }
-            .filter { value -> value.isNotBlank() && value != "0" }
+            .filter { value ->
+                value.isNotBlank() && value != "0" && value != "0.0" && value != "0.00"
+            }
             .distinct()
             .take(5)
             .toList()
@@ -79,7 +81,9 @@ internal object ReceiptTextHeuristics {
         rawText: String,
         keyLines: List<String>,
         labels: List<String>,
-        signals: ImageProcessingService.ReceiptSignals
+        signals: ImageProcessingService.ReceiptSignals,
+        imageQualityMetrics: ImageQualityMetrics = ImageQualityMetrics(),
+        agreementLevel: OcrAgreementLevel = OcrAgreementLevel.NONE
     ): Int {
         if (rawText.isBlank() && labels.isEmpty()) return 0
 
@@ -95,6 +99,12 @@ internal object ReceiptTextHeuristics {
         score += min(signals.dates.size * 10, 10)
         score += min(signals.paymentMethods.size * 10, 10)
         score += min(signals.merchants.size * 12, 12)
+        score += scoreImageQuality(imageQualityMetrics)
+        score += when (agreementLevel) {
+            OcrAgreementLevel.STRONG -> 12
+            OcrAgreementLevel.WEAK -> 5
+            OcrAgreementLevel.NONE -> 0
+        }
 
         val noisyShortLines = normalizedText.lines().count { line -> line.trim().length in 1..2 }
         score -= min(noisyShortLines * 5, 20)
@@ -104,6 +114,7 @@ internal object ReceiptTextHeuristics {
             trimmed.isNotBlank() && trimmed.none { it.isLetterOrDigit() }
         }
         score -= min(suspiciousOnlySymbols * 6, 18)
+        score -= garbageLinePenalty(normalizedText)
 
         val boundedScore = max(0, min(score, 100))
         return if (boundedScore == 0 && normalizedText.isNotBlank()) 5 else boundedScore
@@ -116,5 +127,29 @@ internal object ReceiptTextHeuristics {
             score > 0 -> ImageProcessingService.OcrConfidence.LOW
             else -> ImageProcessingService.OcrConfidence.NONE
         }
+    }
+
+    private fun scoreImageQuality(metrics: ImageQualityMetrics): Int {
+        if (metrics.width == 0 || metrics.height == 0) return 0
+        var score = 0
+
+        if (metrics.contrastRange >= 100) score += 8 else if (metrics.contrastRange < 30) score -= 10
+        if (metrics.averageBrightness in 90..210) score += 6 else score -= 6
+        if (metrics.nearWhiteRatio >= 85) score -= 8
+        if (metrics.nearBlackRatio >= 85) score -= 8
+        if (metrics.width >= 720 && metrics.height >= 720) score += 5 else score -= 4
+
+        return score
+    }
+
+    private fun garbageLinePenalty(text: String): Int {
+        val lines = text.lines().map { it.trim() }.filter { it.isNotBlank() }
+        if (lines.isEmpty()) return 0
+
+        val garbageLines = lines.count { line ->
+            val usefulChars = line.count { it.isLetterOrDigit() || it == '¥' || it == '￥' }
+            usefulChars * 2 < line.length
+        }
+        return min(garbageLines * 4, 16)
     }
 }

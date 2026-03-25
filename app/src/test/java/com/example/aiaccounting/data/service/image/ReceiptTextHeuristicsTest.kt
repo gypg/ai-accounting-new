@@ -80,4 +80,65 @@ class ReceiptTextHeuristicsTest {
         assertFalse(keyLines.contains("a"))
         assertFalse(keyLines.contains("x"))
     }
+
+    @Test
+    fun toConfidence_mapsThresholdBoundariesCorrectly() {
+        assertEquals(ImageProcessingService.OcrConfidence.NONE, ReceiptTextHeuristics.toConfidence(0))
+        assertEquals(ImageProcessingService.OcrConfidence.LOW, ReceiptTextHeuristics.toConfidence(1))
+        assertEquals(ImageProcessingService.OcrConfidence.LOW, ReceiptTextHeuristics.toConfidence(39))
+        assertEquals(ImageProcessingService.OcrConfidence.MEDIUM, ReceiptTextHeuristics.toConfidence(40))
+        assertEquals(ImageProcessingService.OcrConfidence.MEDIUM, ReceiptTextHeuristics.toConfidence(69))
+        assertEquals(ImageProcessingService.OcrConfidence.HIGH, ReceiptTextHeuristics.toConfidence(70))
+    }
+
+    @Test
+    fun calculateQualityScore_rewardsStrongAgreementAndHealthyImageMetrics() {
+        val text = """
+            霸王茶姬
+            2026-03-23 18:22
+            总计 ￥45.00
+            微信支付
+        """.trimIndent()
+        val score = ReceiptTextHeuristics.calculateQualityScore(
+            rawText = text,
+            keyLines = listOf("霸王茶姬", "总计 ￥45.00", "微信支付"),
+            labels = listOf("Receipt"),
+            signals = ReceiptTextHeuristics.extractReceiptSignals(text),
+            imageQualityMetrics = ImageQualityMetrics(
+                averageBrightness = 164,
+                contrastRange = 148,
+                nearWhiteRatio = 12,
+                nearBlackRatio = 8,
+                width = 1280,
+                height = 960
+            ),
+            agreementLevel = OcrAgreementLevel.STRONG
+        )
+
+        assertTrue(score >= 80)
+        assertEquals(ImageProcessingService.OcrConfidence.HIGH, ReceiptTextHeuristics.toConfidence(score))
+    }
+
+    @Test
+    fun calculateQualityScore_penalizesPoorImageMetricsWithoutDroppingToZero() {
+        val text = "模糊\n总计?\n45"
+        val score = ReceiptTextHeuristics.calculateQualityScore(
+            rawText = text,
+            keyLines = listOf("模糊", "总计?", "45"),
+            labels = emptyList(),
+            signals = ReceiptTextHeuristics.extractReceiptSignals(text),
+            imageQualityMetrics = ImageQualityMetrics(
+                averageBrightness = 248,
+                contrastRange = 10,
+                nearWhiteRatio = 92,
+                nearBlackRatio = 0,
+                width = 320,
+                height = 180
+            ),
+            agreementLevel = OcrAgreementLevel.NONE
+        )
+
+        assertTrue(score in 1..39)
+        assertEquals(ImageProcessingService.OcrConfidence.LOW, ReceiptTextHeuristics.toConfidence(score))
+    }
 }

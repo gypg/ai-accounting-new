@@ -9,9 +9,12 @@ import com.example.aiaccounting.data.model.ButlerPersonality
 import com.example.aiaccounting.data.repository.AIUsageRepository
 import com.example.aiaccounting.data.service.AIService
 import com.example.aiaccounting.data.service.ImageProcessingService
+import com.example.aiaccounting.data.service.image.OcrAgreementLevel
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -98,7 +101,8 @@ class AIAssistantImageMessageHandlerTest {
                 ),
                 qualityScore = 88,
                 confidence = ImageProcessingService.OcrConfidence.HIGH,
-                hasContent = true
+                hasContent = true,
+                agreementLevel = OcrAgreementLevel.STRONG
             ),
             ImageProcessingService.ImageAnalysisResult(
                 rawText = "a\n1\n?",
@@ -116,7 +120,7 @@ class AIAssistantImageMessageHandlerTest {
             imageProcessingService.analyzeMultipleImages(listOf(firstUri, secondUri), context, timeoutMs = 8000)
         } returns results
         every {
-            imageProcessingService.generateCompactPrompt(listOf(results.first()), "帮我记账")
+            imageProcessingService.generateCompactPrompt(any(), eq("帮我记账"))
         } returns "高置信度提示词"
 
         val result = handler.buildImagePrompt(
@@ -158,5 +162,36 @@ class AIAssistantImageMessageHandlerTest {
 
         assertTrue(result is ImageMessageProcessingResult.Error)
         assertTrue((result as ImageMessageProcessingResult.Error).message.contains("API 密钥"))
+    }
+
+    @Test
+    fun processImageMessage_shortCircuitsWhenNetworkUnavailable() = runTest {
+        val aiService = mockk<AIService>(relaxed = true)
+        val imageProcessingService = mockk<ImageProcessingService>(relaxed = true)
+        val aiUsageRepository = mockk<AIUsageRepository>(relaxed = true)
+        val handler = AIAssistantImageMessageHandler(aiService, imageProcessingService, aiUsageRepository)
+
+        val result = handler.processImageMessage(
+            message = "帮我记账",
+            imageUris = listOf(mockk()),
+            context = mockk(),
+            currentButler = Butler(
+                id = "cat",
+                name = "小财娘",
+                title = "可爱管家",
+                avatarResId = 0,
+                description = "",
+                systemPrompt = "你是助手",
+                personality = ButlerPersonality.CUTE,
+                specialties = emptyList()
+            ),
+            config = AIConfig(provider = AIProvider.CUSTOM, apiKey = "key", apiUrl = "https://example.com", isEnabled = true),
+            isNetworkAvailable = false
+        )
+
+        assertTrue(result is ImageMessageProcessingResult.Error)
+        assertTrue((result as ImageMessageProcessingResult.Error).message.contains("网络不可用"))
+        coVerify(exactly = 0) { imageProcessingService.analyzeMultipleImages(any(), any(), any()) }
+        verify(exactly = 0) { aiService.isImageSupported(any()) }
     }
 }
