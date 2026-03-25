@@ -15,6 +15,7 @@ import com.example.aiaccounting.data.service.NetworkSpeedTestService
 import com.example.aiaccounting.data.service.NetworkSpeedTestSummary
 import com.example.aiaccounting.data.service.PreferredNetworkRoute
 import com.example.aiaccounting.data.service.RemoteModel
+import com.example.aiaccounting.utils.OpenAiUrlUtils
 import com.example.aiaccounting.utils.DeviceIdProvider
 import com.example.aiaccounting.utils.NetworkUtils
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -26,6 +27,13 @@ private const val DEFAULT_GATEWAY_BASE_URL = "https://api.gdmon.dpdns.org"
 private const val NETWORK_WARNING_LATENCY_THRESHOLD_MS = 800L
 private val LEGACY_GATEWAY_HOST_KEYWORDS = listOf(
     "workers.dev"
+)
+
+private data class Quadruple<A, B, C, D>(
+    val first: A,
+    val second: B,
+    val third: C,
+    val fourth: D
 )
 
 @HiltViewModel
@@ -107,6 +115,15 @@ class AISettingsViewModel @Inject constructor(
         val preferredRoute: PreferredNetworkRoute?
     )
 
+    private fun matchesCurrentPreferredRoute(route: PreferredNetworkRoute, config: AIConfig, gatewayBaseUrlValue: String): Boolean {
+        val expectedEndpoint = when (route.targetId) {
+            "api" -> config.apiUrl.trim().takeIf { it.isNotBlank() }?.let { OpenAiUrlUtils.models(it) }
+            "gateway" -> gatewayBaseUrlValue.trim().takeIf { it.isNotBlank() }?.let { com.example.aiaccounting.utils.UrlUtils.join(it, "bootstrap") }
+            else -> null
+        }
+        return expectedEndpoint != null && expectedEndpoint == route.endpointUrl
+    }
+
     private fun loadAIConfig() {
         viewModelScope.launch {
             val baseConfigFlow = combine(
@@ -129,10 +146,23 @@ class AISettingsViewModel @Inject constructor(
             combine(
                 baseConfigFlow,
                 aiConfigRepository.getPreferredNetworkRoute(),
-                availableRemoteModels
-            ) { baseResult, preferredRoute, remoteModels ->
-                Triple(baseResult.copy(preferredRoute = preferredRoute), preferredRoute, remoteModels)
-            }.collect { (result, _, remoteModels) ->
+                availableRemoteModels,
+                gatewayBaseUrl
+            ) { baseResult, preferredRoute, remoteModels, currentGatewayBaseUrl ->
+                val validatedPreferredRoute = preferredRoute?.takeIf {
+                    matchesCurrentPreferredRoute(
+                        route = it,
+                        config = baseResult.config,
+                        gatewayBaseUrlValue = currentGatewayBaseUrl
+                    )
+                }
+                if (preferredRoute != null && validatedPreferredRoute == null) {
+                    viewModelScope.launch {
+                        aiConfigRepository.clearPreferredNetworkRoute()
+                    }
+                }
+                Quadruple(baseResult.copy(preferredRoute = validatedPreferredRoute), remoteModels, currentGatewayBaseUrl, validatedPreferredRoute)
+            }.collect { (result, remoteModels, _, _) ->
                 val builtinAvailable = true
                 val recommendation = if (remoteModels.isEmpty()) {
                     null
@@ -565,7 +595,8 @@ class AISettingsViewModel @Inject constructor(
                     targetId = fastest.target.id,
                     label = fastest.target.label,
                     latencyMs = fastest.latencyMs,
-                    updatedAtMillis = System.currentTimeMillis()
+                    updatedAtMillis = System.currentTimeMillis(),
+                    endpointUrl = fastest.target.url
                 )
                 aiConfigRepository.savePreferredNetworkRoute(preferredRoute)
                 NetworkSpeedTestUiResult.Success(

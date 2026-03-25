@@ -36,6 +36,7 @@ data class AIConfig(
         const val KEY_PREFERRED_ROUTE_LABEL = "ai_preferred_route_label"
         const val KEY_PREFERRED_ROUTE_LATENCY_MS = "ai_preferred_route_latency_ms"
         const val KEY_PREFERRED_ROUTE_UPDATED_AT = "ai_preferred_route_updated_at"
+        const val KEY_PREFERRED_ROUTE_ENDPOINT_URL = "ai_preferred_route_endpoint_url"
 
         // 内置默认配置 - 预置的AI服务
         // 红月API - 无需用户手动配置，开箱即用

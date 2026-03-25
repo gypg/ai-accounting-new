@@ -61,7 +61,7 @@ class AISettingsConnectionTest {
         networkSpeedTestService = mockk(relaxed = true)
 
         every { aiConfigRepository.getUseBuiltin() } returns flowOf(false)
-        every { aiConfigRepository.getAIConfig() } returns flowOf(AIConfig(isEnabled = true, apiKey = "k", apiUrl = "https://example.com"))
+        every { aiConfigRepository.getAIConfig() } returns flowOf(AIConfig(isEnabled = true, apiKey = "k", apiUrl = "https://example.com/v1"))
         every { aiConfigRepository.getInviteBound() } returns flowOf(false)
         every { aiConfigRepository.getModelSelectionMode() } returns flowOf(AIConfigRepository.ModelSelectionMode.AUTO)
         every { aiConfigRepository.getInviteModelSelectionMode() } returns flowOf(AIConfigRepository.ModelSelectionMode.AUTO)
@@ -151,7 +151,60 @@ class AISettingsConnectionTest {
                 match {
                     it.targetId == "gateway" &&
                         it.label == "邀请码网关" &&
-                        it.latencyMs == 123L
+                        it.latencyMs == 123L &&
+                        it.endpointUrl == "https://gateway.example/bootstrap"
+                }
+            )
+        }
+    }
+
+    @Test
+    fun runNetworkSpeedTest_whenSuccessful_persistsPreferredRouteWithEndpointUrl() = runTest {
+        val fastestTarget = NetworkSpeedTestTarget(
+            id = "gateway",
+            label = "邀请码网关",
+            url = "https://gateway.example/bootstrap",
+            clientType = NetworkSpeedTestClientType.GATEWAY
+        )
+        coEvery { networkSpeedTestService.test(any(), any()) } returns NetworkSpeedTestSummary(
+            targets = listOf(
+                NetworkSpeedTestResult.Success(
+                    target = fastestTarget,
+                    latencyMs = 123,
+                    statusCode = 200
+                )
+            ),
+            fastest = NetworkSpeedTestResult.Success(
+                target = fastestTarget,
+                latencyMs = 123,
+                statusCode = 200
+            ),
+            errorMessage = null
+        )
+        coEvery { aiConfigRepository.savePreferredNetworkRoute(any()) } returns Unit
+
+        val vm = AISettingsViewModel(
+            aiConfigRepository = aiConfigRepository,
+            aiService = aiService,
+            aiUsageRepository = aiUsageRepository,
+            modelPerformanceRepository = modelPerformanceRepository,
+            networkUtils = networkUtils,
+            inviteGatewayService = inviteGatewayService,
+            deviceIdProvider = deviceIdProvider,
+            networkSpeedTestService = networkSpeedTestService
+        )
+
+        testDispatcher.scheduler.advanceUntilIdle()
+        vm.runNetworkSpeedTest()
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        io.mockk.coVerify {
+            aiConfigRepository.savePreferredNetworkRoute(
+                match {
+                    it.targetId == "gateway" &&
+                        it.label == "邀请码网关" &&
+                        it.latencyMs == 123L &&
+                        it.endpointUrl == "https://gateway.example/bootstrap"
                 }
             )
         }
@@ -164,7 +217,8 @@ class AISettingsConnectionTest {
                 targetId = "api",
                 label = "API 节点",
                 latencyMs = 88,
-                updatedAtMillis = 123456L
+                updatedAtMillis = 123456L,
+                endpointUrl = "https://example.com/v1/models"
             )
         )
 
@@ -186,13 +240,44 @@ class AISettingsConnectionTest {
     }
 
     @Test
+    fun init_whenPreferredRouteEndpointDoesNotMatchCurrentConfig_clearsAndHidesIt() = runTest {
+        every { aiConfigRepository.getPreferredNetworkRoute() } returns flowOf(
+            PreferredNetworkRoute(
+                targetId = "api",
+                label = "API 节点",
+                latencyMs = 88,
+                updatedAtMillis = 123456L,
+                endpointUrl = "https://old.example.com/models"
+            )
+        )
+        coEvery { aiConfigRepository.clearPreferredNetworkRoute() } returns Unit
+
+        val vm = AISettingsViewModel(
+            aiConfigRepository = aiConfigRepository,
+            aiService = aiService,
+            aiUsageRepository = aiUsageRepository,
+            modelPerformanceRepository = modelPerformanceRepository,
+            networkUtils = networkUtils,
+            inviteGatewayService = inviteGatewayService,
+            deviceIdProvider = deviceIdProvider,
+            networkSpeedTestService = networkSpeedTestService
+        )
+
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertNull(vm.uiState.value.preferredRouteSummary)
+        io.mockk.coVerify { aiConfigRepository.clearPreferredNetworkRoute() }
+    }
+
+    @Test
     fun updateApiUrl_clearsPreferredRouteSummary() = runTest {
         every { aiConfigRepository.getPreferredNetworkRoute() } returns flowOf(
             PreferredNetworkRoute(
                 targetId = "api",
                 label = "API 节点",
                 latencyMs = 66,
-                updatedAtMillis = 999L
+                updatedAtMillis = 999L,
+                endpointUrl = "https://changed.example/v1/models"
             )
         )
         coEvery { aiConfigRepository.clearPreferredNetworkRoute() } returns Unit
@@ -261,7 +346,8 @@ class AISettingsConnectionTest {
                 targetId = "api",
                 label = "API 节点",
                 latencyMs = 880,
-                updatedAtMillis = 123456L
+                updatedAtMillis = 123456L,
+                endpointUrl = "https://example.com/v1/models"
             )
         )
 
@@ -371,7 +457,8 @@ class AISettingsConnectionTest {
                 targetId = "gateway",
                 label = "邀请码网关",
                 latencyMs = 45,
-                updatedAtMillis = 999L
+                updatedAtMillis = 999L,
+                endpointUrl = "https://new.gateway.example/bootstrap"
             )
         )
         coEvery { aiConfigRepository.clearPreferredNetworkRoute() } returns Unit

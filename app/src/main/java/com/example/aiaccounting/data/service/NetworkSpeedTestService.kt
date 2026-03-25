@@ -147,7 +147,7 @@ class NetworkSpeedTestService @Inject constructor(
             is SocketTimeoutException -> "${target.label} 连接超时"
             is UnknownHostException -> "${target.label} 域名解析失败"
             is ConnectException -> "${target.label} 无法建立连接"
-            else -> error.message?.takeIf { it.isNotBlank() } ?: "${target.label} 测速失败"
+            else -> "${target.label} 测速失败，请稍后重试"
         }
     }
 }
@@ -162,7 +162,8 @@ data class PreferredNetworkRoute(
     val targetId: String,
     val label: String,
     val latencyMs: Long,
-    val updatedAtMillis: Long
+    val updatedAtMillis: Long,
+    val endpointUrl: String
 )
 
 data class NetworkSpeedTestTarget(

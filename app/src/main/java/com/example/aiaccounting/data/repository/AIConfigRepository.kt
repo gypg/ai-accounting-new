@@ -389,15 +389,17 @@ class AIConfigRepository @Inject constructor(
             val label = preferences[stringPreferencesKey(AIConfig.KEY_PREFERRED_ROUTE_LABEL)].orEmpty().trim()
             val latencyMs = preferences[longPreferencesKey(AIConfig.KEY_PREFERRED_ROUTE_LATENCY_MS)]
             val updatedAtMillis = preferences[longPreferencesKey(AIConfig.KEY_PREFERRED_ROUTE_UPDATED_AT)]
+            val endpointUrl = preferences[stringPreferencesKey(AIConfig.KEY_PREFERRED_ROUTE_ENDPOINT_URL)].orEmpty().trim()
 
-            if (targetId.isBlank() || label.isBlank() || latencyMs == null || updatedAtMillis == null) {
+            if (targetId.isBlank() || label.isBlank() || latencyMs == null || updatedAtMillis == null || endpointUrl.isBlank()) {
                 null
             } else {
                 PreferredNetworkRoute(
                     targetId = targetId,
                     label = label,
                     latencyMs = latencyMs,
-                    updatedAtMillis = updatedAtMillis
+                    updatedAtMillis = updatedAtMillis,
+                    endpointUrl = endpointUrl
                 )
             }
         }
@@ -409,6 +411,7 @@ class AIConfigRepository @Inject constructor(
             preferences[stringPreferencesKey(AIConfig.KEY_PREFERRED_ROUTE_LABEL)] = route.label
             preferences[longPreferencesKey(AIConfig.KEY_PREFERRED_ROUTE_LATENCY_MS)] = route.latencyMs
             preferences[longPreferencesKey(AIConfig.KEY_PREFERRED_ROUTE_UPDATED_AT)] = route.updatedAtMillis
+            preferences[stringPreferencesKey(AIConfig.KEY_PREFERRED_ROUTE_ENDPOINT_URL)] = route.endpointUrl
         }
     }
 
@@ -418,6 +421,7 @@ class AIConfigRepository @Inject constructor(
             preferences.remove(stringPreferencesKey(AIConfig.KEY_PREFERRED_ROUTE_LABEL))
             preferences.remove(longPreferencesKey(AIConfig.KEY_PREFERRED_ROUTE_LATENCY_MS))
             preferences.remove(longPreferencesKey(AIConfig.KEY_PREFERRED_ROUTE_UPDATED_AT))
+            preferences.remove(stringPreferencesKey(AIConfig.KEY_PREFERRED_ROUTE_ENDPOINT_URL))
         }
     }
 
@@ -432,6 +436,7 @@ class AIConfigRepository @Inject constructor(
             preferences.remove(stringPreferencesKey(AIConfig.KEY_PREFERRED_ROUTE_LABEL))
             preferences.remove(longPreferencesKey(AIConfig.KEY_PREFERRED_ROUTE_LATENCY_MS))
             preferences.remove(longPreferencesKey(AIConfig.KEY_PREFERRED_ROUTE_UPDATED_AT))
+            preferences.remove(stringPreferencesKey(AIConfig.KEY_PREFERRED_ROUTE_ENDPOINT_URL))
             // 解绑后回到安全默认：AI 关闭，避免遗留开启状态造成行为不一致
             preferences[booleanPreferencesKey(AIConfig.KEY_ENABLED)] = false
         }
