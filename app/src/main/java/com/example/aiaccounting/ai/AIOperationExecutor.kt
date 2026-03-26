@@ -6,6 +6,7 @@ import com.example.aiaccounting.data.repository.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.Locale
+import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -18,14 +19,43 @@ class AIOperationExecutor @Inject constructor(
     private val transactionRepository: TransactionRepository,
     private val accountRepository: AccountRepository,
     private val categoryRepository: CategoryRepository,
-    private val budgetRepository: BudgetRepository
+    private val budgetRepository: BudgetRepository,
+    private val aiOperationTraceRepository: AIOperationTraceRepository
 ) {
     
     sealed class AIOperationResult {
         data class Success(val message: String) : AIOperationResult()
         data class Error(val error: String) : AIOperationResult()
     }
-    
+
+    private suspend fun writeTrace(
+        traceContext: AITraceContext,
+        actionType: String,
+        entityType: String,
+        entityId: String? = null,
+        relatedTransactionId: Long? = null,
+        summary: String,
+        details: String? = null,
+        success: Boolean,
+        errorMessage: String? = null
+    ) {
+        aiOperationTraceRepository.insertTrace(
+            AIOperationTrace(
+                id = UUID.randomUUID().toString(),
+                traceId = traceContext.traceId,
+                sourceType = traceContext.sourceType,
+                actionType = actionType,
+                entityType = entityType,
+                entityId = entityId,
+                relatedTransactionId = relatedTransactionId,
+                summary = summary,
+                details = details,
+                success = success,
+                errorMessage = errorMessage
+            )
+        )
+    }
+
     /**
      * 执行AI操作
      */
@@ -87,7 +117,9 @@ class AIOperationExecutor @Inject constructor(
             categoryId = categoryId,
             accountId = accountId,
             date = op.date,
-            note = op.note ?: ""
+            note = op.note ?: "",
+            aiSourceType = op.traceContext.sourceType,
+            aiTraceId = op.traceContext.traceId
         )
         
         return try {
@@ -106,16 +138,44 @@ class AIOperationExecutor @Inject constructor(
                 val updatedAccount = account.copy(balance = newBalance)
                 accountRepository.updateAccount(updatedAccount)
                 Log.d("AIOperationExecutor", "账户余额更新成功")
-                
+                writeTrace(
+                    traceContext = op.traceContext,
+                    actionType = "ADD_TRANSACTION",
+                    entityType = "transaction",
+                    entityId = transactionId.toString(),
+                    relatedTransactionId = transactionId,
+                    summary = "AI 添加交易",
+                    details = "amount=${op.amount}, type=${op.type}, accountId=$accountId, categoryId=$categoryId",
+                    success = true
+                )
+
                 AIOperationResult.Success("已添加${if (op.type == TransactionType.INCOME) "收入" else "支出"}记录: ${op.amount}元")
             } else {
                 // 交易插入失败，返回错误
                 Log.e("AIOperationExecutor", "交易记录插入失败: transactionId=$transactionId")
+                writeTrace(
+                    traceContext = op.traceContext,
+                    actionType = "ADD_TRANSACTION",
+                    entityType = "transaction",
+                    summary = "AI 添加交易失败",
+                    details = "amount=${op.amount}, type=${op.type}, accountId=$accountId, categoryId=$categoryId",
+                    success = false,
+                    errorMessage = "保存交易记录失败"
+                )
                 AIOperationResult.Error("保存交易记录失败")
             }
         } catch (e: Exception) {
             // 捕获异常，确保错误被正确处理
             Log.e("AIOperationExecutor", "保存交易记录异常: ${e.message}", e)
+            writeTrace(
+                traceContext = op.traceContext,
+                actionType = "ADD_TRANSACTION",
+                entityType = "transaction",
+                summary = "AI 添加交易异常",
+                details = "amount=${op.amount}, type=${op.type}, accountId=$accountId, categoryId=$categoryId",
+                success = false,
+                errorMessage = e.message
+            )
             AIOperationResult.Error("保存交易记录失败: ${e.message}")
         }
     }
@@ -144,7 +204,9 @@ class AIOperationExecutor @Inject constructor(
             type = op.type ?: oldTransaction.type,
             categoryId = op.categoryId ?: oldTransaction.categoryId,
             accountId = op.accountId ?: oldTransaction.accountId,
-            note = op.note ?: oldTransaction.note
+            note = op.note ?: oldTransaction.note,
+            aiSourceType = op.traceContext.sourceType,
+            aiTraceId = op.traceContext.traceId
         )
         transactionRepository.updateTransaction(updated)
         
@@ -159,6 +221,16 @@ class AIOperationExecutor @Inject constructor(
             accountRepository.updateAccount(newAccount.copy(balance = newBalance))
         }
         
+        writeTrace(
+            traceContext = op.traceContext,
+            actionType = "UPDATE_TRANSACTION",
+            entityType = "transaction",
+            entityId = updated.id.toString(),
+            relatedTransactionId = updated.id,
+            summary = "AI 更新交易",
+            details = "amount=${updated.amount}, type=${updated.type}, accountId=${updated.accountId}, categoryId=${updated.categoryId}",
+            success = true
+        )
         return AIOperationResult.Success("已更新交易记录")
     }
     
@@ -181,6 +253,16 @@ class AIOperationExecutor @Inject constructor(
         }
         
         transactionRepository.deleteTransaction(transaction)
+        writeTrace(
+            traceContext = op.traceContext,
+            actionType = "DELETE_TRANSACTION",
+            entityType = "transaction",
+            entityId = transaction.id.toString(),
+            relatedTransactionId = transaction.id,
+            summary = "AI 删除交易",
+            details = "amount=${transaction.amount}, type=${transaction.type}, accountId=${transaction.accountId}, categoryId=${transaction.categoryId}",
+            success = true
+        )
         return AIOperationResult.Success("已删除交易记录")
     }
     
@@ -204,7 +286,16 @@ class AIOperationExecutor @Inject constructor(
             icon = op.icon,
             isDefault = op.isDefault
         )
-        accountRepository.insertAccount(account)
+        val accountId = accountRepository.insertAccount(account)
+        writeTrace(
+            traceContext = op.traceContext,
+            actionType = "ADD_ACCOUNT",
+            entityType = "account",
+            entityId = accountId.toString(),
+            summary = "AI 创建账户",
+            details = "name=${op.name}, type=${op.type}, balance=${op.balance}",
+            success = true
+        )
         return AIOperationResult.Success("已添加账户: ${op.name}")
     }
     
@@ -217,12 +308,30 @@ class AIOperationExecutor @Inject constructor(
             icon = op.icon ?: account.icon
         )
         accountRepository.updateAccount(updated)
+        writeTrace(
+            traceContext = op.traceContext,
+            actionType = "UPDATE_ACCOUNT",
+            entityType = "account",
+            entityId = updated.id.toString(),
+            summary = "AI 更新账户",
+            details = "name=${updated.name}, balance=${updated.balance}",
+            success = true
+        )
         return AIOperationResult.Success("已更新账户: ${updated.name}")
     }
     
     private suspend fun deleteAccount(op: AIOperation.DeleteAccount): AIOperationResult {
         val account = accountRepository.getAccountById(op.id) ?: return AIOperationResult.Error("未找到该账户")
         accountRepository.deleteAccount(account)
+        writeTrace(
+            traceContext = op.traceContext,
+            actionType = "DELETE_ACCOUNT",
+            entityType = "account",
+            entityId = account.id.toString(),
+            summary = "AI 删除账户",
+            details = "name=${account.name}, balance=${account.balance}",
+            success = true
+        )
         return AIOperationResult.Success("已删除账户: ${account.name}")
     }
     
@@ -243,12 +352,22 @@ class AIOperationExecutor @Inject constructor(
             icon = op.icon.takeIf { it != "📁" } ?: smartIcon,
             parentId = parentId
         )
-        categoryRepository.insertCategory(category)
+        val categoryId = categoryRepository.insertCategory(category)
 
         val parentInfo = if (parentId != null) {
             val parent = categoryRepository.getCategoryById(parentId)
             "（归属于「${parent?.name ?: "未知"}」）"
         } else ""
+
+        writeTrace(
+            traceContext = op.traceContext,
+            actionType = "ADD_CATEGORY",
+            entityType = "category",
+            entityId = categoryId.toString(),
+            summary = "AI 创建分类",
+            details = "name=${op.name}, type=${op.type}, parentId=$parentId",
+            success = true
+        )
 
         return AIOperationResult.Success("已添加分类: ${op.name}$parentInfo")
     }
@@ -497,12 +616,30 @@ class AIOperationExecutor @Inject constructor(
             icon = op.icon ?: category.icon
         )
         categoryRepository.updateCategory(updated)
+        writeTrace(
+            traceContext = op.traceContext,
+            actionType = "UPDATE_CATEGORY",
+            entityType = "category",
+            entityId = updated.id.toString(),
+            summary = "AI 更新分类",
+            details = "name=${updated.name}, type=${updated.type}",
+            success = true
+        )
         return AIOperationResult.Success("已更新分类: ${updated.name}")
     }
     
     private suspend fun deleteCategory(op: AIOperation.DeleteCategory): AIOperationResult {
         val category = categoryRepository.getCategoryById(op.id) ?: return AIOperationResult.Error("未找到该分类")
         categoryRepository.deleteCategory(category)
+        writeTrace(
+            traceContext = op.traceContext,
+            actionType = "DELETE_CATEGORY",
+            entityType = "category",
+            entityId = category.id.toString(),
+            summary = "AI 删除分类",
+            details = "name=${category.name}, type=${category.type}",
+            success = true
+        )
         return AIOperationResult.Success("已删除分类: ${category.name}")
     }
     
@@ -569,6 +706,14 @@ class AIOperationExecutor @Inject constructor(
 }
 
 /**
+ * AI 留痕上下文
+ */
+data class AITraceContext(
+    val sourceType: String = "AI_LOCAL",
+    val traceId: String = UUID.randomUUID().toString()
+)
+
+/**
  * AI操作指令密封类
  */
 sealed class AIOperation {
@@ -580,9 +725,10 @@ sealed class AIOperation {
         val accountId: Long? = null,
         val date: Long = System.currentTimeMillis(),
         val note: String? = null,
-        val description: String? = null
+        val description: String? = null,
+        val traceContext: AITraceContext = AITraceContext()
     ) : AIOperation()
-    
+
     data class UpdateTransaction(
         val id: Long,
         val amount: Double? = null,
@@ -590,11 +736,15 @@ sealed class AIOperation {
         val categoryId: Long? = null,
         val accountId: Long? = null,
         val note: String? = null,
-        val description: String? = null
+        val description: String? = null,
+        val traceContext: AITraceContext = AITraceContext()
     ) : AIOperation()
-    
-    data class DeleteTransaction(val id: Long) : AIOperation()
-    
+
+    data class DeleteTransaction(
+        val id: Long,
+        val traceContext: AITraceContext = AITraceContext()
+    ) : AIOperation()
+
     // 账户操作
     data class AddAccount(
         val name: String,
@@ -602,36 +752,46 @@ sealed class AIOperation {
         val balance: Double = 0.0,
         val color: String = "#2196F3",
         val icon: String = "💰",
-        val isDefault: Boolean = false
+        val isDefault: Boolean = false,
+        val traceContext: AITraceContext = AITraceContext()
     ) : AIOperation()
-    
+
     data class UpdateAccount(
         val id: Long,
         val name: String? = null,
         val balance: Double? = null,
         val color: String? = null,
-        val icon: String? = null
+        val icon: String? = null,
+        val traceContext: AITraceContext = AITraceContext()
     ) : AIOperation()
-    
-    data class DeleteAccount(val id: Long) : AIOperation()
-    
+
+    data class DeleteAccount(
+        val id: Long,
+        val traceContext: AITraceContext = AITraceContext()
+    ) : AIOperation()
+
     // 分类操作
     data class AddCategory(
         val name: String,
         val type: TransactionType,
         val color: String = "#2196F3",
         val icon: String = "📁",
-        val parentId: Long? = null
+        val parentId: Long? = null,
+        val traceContext: AITraceContext = AITraceContext()
     ) : AIOperation()
-    
+
     data class UpdateCategory(
         val id: Long,
         val name: String? = null,
         val color: String? = null,
-        val icon: String? = null
+        val icon: String? = null,
+        val traceContext: AITraceContext = AITraceContext()
     ) : AIOperation()
-    
-    data class DeleteCategory(val id: Long) : AIOperation()
+
+    data class DeleteCategory(
+        val id: Long,
+        val traceContext: AITraceContext = AITraceContext()
+    ) : AIOperation()
     
     // 预算操作
     data class AddBudget(

@@ -98,6 +98,15 @@ class TransactionListViewModel @Inject constructor(
             else -> filtered
         }
 
+        // 按来源筛选
+        filtered = when (state.sourceFilter) {
+            "ai" -> filtered.filter { it.aiSourceType == "AI_LOCAL" || it.aiSourceType == "AI_REMOTE" }
+            "manual" -> filtered.filter { it.aiSourceType == "MANUAL" || it.aiSourceType.isBlank() }
+            "remote_ai" -> filtered.filter { it.aiSourceType == "AI_REMOTE" }
+            "local_ai" -> filtered.filter { it.aiSourceType == "AI_LOCAL" }
+            else -> filtered
+        }
+
         // 排序
         filtered = when (state.sortBy) {
             "amount" -> filtered.sortedByDescending { it.amount }
@@ -167,6 +176,10 @@ class TransactionListViewModel @Inject constructor(
         _uiState.update { it.copy(sortBy = sortBy) }
     }
 
+    fun setSourceFilter(sourceFilter: String) {
+        _uiState.update { it.copy(sourceFilter = sourceFilter) }
+    }
+
     /**
      * 获取分类名称（从缓存的分类 Map 中查找）
      */
@@ -180,6 +193,7 @@ data class TransactionListUiState(
     val selectedMonth: Int = Calendar.getInstance().get(Calendar.MONTH) + 1,
     val selectedDate: Int? = null,
     val filterType: String = "all",
+    val sourceFilter: String = "all",
     val sortBy: String = "time",
     val isLoading: Boolean = false,
     val error: String? = null

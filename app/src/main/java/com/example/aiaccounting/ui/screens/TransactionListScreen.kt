@@ -105,6 +105,8 @@ fun TransactionListScreen(
                 FilterPanel(
                     selectedType = uiState.filterType,
                     onTypeSelected = { viewModel.setFilterType(it) },
+                    sourceFilter = uiState.sourceFilter,
+                    onSourceFilterChanged = { viewModel.setSourceFilter(it) },
                     sortBy = uiState.sortBy,
                     onSortByChanged = { viewModel.setSortBy(it) },
                     onExportClick = onNavigateToExport
@@ -344,6 +346,8 @@ fun MonthSelectorCard(
 fun FilterPanel(
     selectedType: String,
     onTypeSelected: (String) -> Unit,
+    sourceFilter: String,
+    onSourceFilterChanged: (String) -> Unit,
     sortBy: String,
     onSortByChanged: (String) -> Unit,
     onExportClick: () -> Unit
@@ -383,6 +387,34 @@ fun FilterPanel(
                     label = "支出",
                     selected = selectedType == "expense",
                     onClick = { onTypeSelected("expense") }
+                )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Text(
+                text = "来源",
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                FilterChip(
+                    label = "全部",
+                    selected = sourceFilter == "all",
+                    onClick = { onSourceFilterChanged("all") }
+                )
+                FilterChip(
+                    label = "AI",
+                    selected = sourceFilter == "ai",
+                    onClick = { onSourceFilterChanged("ai") }
+                )
+                FilterChip(
+                    label = "手动",
+                    selected = sourceFilter == "manual",
+                    onClick = { onSourceFilterChanged("manual") }
                 )
             }
 
@@ -458,12 +490,19 @@ fun TransactionItem(
         ) {
             // 左侧信息
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = transaction.note ?: "无备注",
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium,
-                    maxLines = 1
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = transaction.note.ifBlank { "无备注" },
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+                    TransactionSourceBadge(transaction.aiSourceType)
+                }
                 Spacer(modifier = Modifier.height(4.dp))
                 Row {
                     Text(
@@ -510,6 +549,27 @@ fun TransactionItem(
                 color = if (transaction.type == TransactionType.INCOME) Color(0xFF4CAF50) else Color(0xFFF44336)
             )
         }
+    }
+}
+
+@Composable
+fun TransactionSourceBadge(sourceType: String) {
+    val (label, color) = when (sourceType) {
+        "AI_REMOTE" -> "AI云端" to MaterialTheme.colorScheme.primary
+        "AI_LOCAL" -> "AI本地" to Color(0xFF7B61FF)
+        else -> return
+    }
+
+    Surface(
+        shape = RoundedCornerShape(999.dp),
+        color = color.copy(alpha = 0.12f)
+    ) {
+        Text(
+            text = label,
+            fontSize = 10.sp,
+            color = color,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+        )
     }
 }
 

@@ -40,41 +40,67 @@ class AIReasoningEngineTest {
     )
 
     @Test
-    fun reason_returnsRequestClarification_forIncompleteTransactionMessageWithoutAmount() = runTest {
+    fun reason_returnsGeneralConversation_forGreeting() = runTest {
         stubNonIdentityAndNonModification()
 
         val result = engine.reason(
-            context = AIReasoningEngine.ReasoningContext(userMessage = "帮我记一笔午饭"),
+            context = AIReasoningEngine.ReasoningContext(userMessage = "你好"),
             currentButlerId = "xiaocainiang"
         )
 
-        assertEquals(AIReasoningEngine.UserIntent.RECORD_TRANSACTION, result.intent)
-        assertTrue(result.actions.single() is AIReasoningEngine.AIAction.RequestClarification)
-        assertEquals(
-            "请问这笔交易的金额是多少呢？",
-            (result.actions.single() as AIReasoningEngine.AIAction.RequestClarification).question
+        assertEquals(AIReasoningEngine.UserIntent.GENERAL_CONVERSATION, result.intent)
+        assertTrue(result.actions.single() is AIReasoningEngine.AIAction.GenerateResponse)
+        assertTrue(
+            (result.actions.single() as AIReasoningEngine.AIAction.GenerateResponse)
+                .responseContent.isNotBlank()
         )
     }
 
     @Test
-    fun reason_doesNotMergeClarificationMessageTwice_whenMessageAlreadyContainsOriginalRequest() = runTest {
+    fun reason_returnsGeneralConversation_forCapabilityQuestion() = runTest {
         stubNonIdentityAndNonModification()
 
         val result = engine.reason(
-            context = AIReasoningEngine.ReasoningContext(
-                userMessage = "帮我记一笔午饭 支出 今天 25 元",
-                conversationHistory = listOf(
-                    "帮我记一笔午饭 支出 今天",
-                    "请问这笔交易的金额是多少呢？"
-                )
-            ),
+            context = AIReasoningEngine.ReasoningContext(userMessage = "你能做什么"),
             currentButlerId = "xiaocainiang"
         )
 
-        assertEquals(AIReasoningEngine.UserIntent.RECORD_TRANSACTION, result.intent)
-        assertTrue(result.actions.single() is AIReasoningEngine.AIAction.RecordTransaction)
-        val action = result.actions.single() as AIReasoningEngine.AIAction.RecordTransaction
-        assertEquals(25.0, action.amount, 0.001)
+        assertEquals(AIReasoningEngine.UserIntent.GENERAL_CONVERSATION, result.intent)
+        assertTrue(result.actions.single() is AIReasoningEngine.AIAction.GenerateResponse)
+        assertTrue(
+            (result.actions.single() as AIReasoningEngine.AIAction.GenerateResponse)
+                .responseContent.contains("记账") ||
+                (result.actions.single() as AIReasoningEngine.AIAction.GenerateResponse)
+                    .responseContent.contains("查账")
+        )
+    }
+
+
+    @Test
+    fun reason_returnsGeneralConversation_whenMessageContainsReminderWordButNoAccountingIntent() = runTest {
+        stubNonIdentityAndNonModification()
+
+        val result = engine.reason(
+            context = AIReasoningEngine.ReasoningContext(userMessage = "记得明天提醒我开会"),
+            currentButlerId = "xiaocainiang"
+        )
+
+        assertEquals(AIReasoningEngine.UserIntent.GENERAL_CONVERSATION, result.intent)
+        assertTrue(result.actions.single() is AIReasoningEngine.AIAction.GenerateResponse)
+    }
+
+
+    @Test
+    fun reason_returnsGeneralConversation_whenReminderMentionsBookkeepingLater() = runTest {
+        stubNonIdentityAndNonModification()
+
+        val result = engine.reason(
+            context = AIReasoningEngine.ReasoningContext(userMessage = "提醒我晚上记账 25 元"),
+            currentButlerId = "xiaocainiang"
+        )
+
+        assertEquals(AIReasoningEngine.UserIntent.GENERAL_CONVERSATION, result.intent)
+        assertTrue(result.actions.single() is AIReasoningEngine.AIAction.GenerateResponse)
     }
 
     @Test
@@ -171,6 +197,27 @@ class AIReasoningEngineTest {
         )
     }
 
+
+
+    @Test
+    fun reason_returnsTransferRecordTransaction_whenMessageDescribesTransfer() = runTest {
+        stubNonIdentityAndNonModification()
+        coEvery { accountRepository.getAllAccountsList() } returns listOf(
+            Account(id = 1, name = "微信", type = AccountType.WECHAT),
+            Account(id = 2, name = "支付宝", type = AccountType.ALIPAY)
+        )
+
+        val result = engine.reason(
+            context = AIReasoningEngine.ReasoningContext(userMessage = "从微信转账100到支付宝 今天"),
+            currentButlerId = "xiaocainiang"
+        )
+
+        assertEquals(AIReasoningEngine.UserIntent.RECORD_TRANSACTION, result.intent)
+        assertTrue(result.actions.single() is AIReasoningEngine.AIAction.RecordTransaction)
+        val action = result.actions.single() as AIReasoningEngine.AIAction.RecordTransaction
+        assertEquals(TransactionType.TRANSFER, action.type)
+        assertEquals("微信", action.accountHint)
+    }
 
     private suspend fun stubNonIdentityAndNonModification() {
         coEvery { transactionRepository.getRecentTransactionsList(any()) } returns emptyList()

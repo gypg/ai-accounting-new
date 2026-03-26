@@ -215,8 +215,9 @@ class TransactionViewModel @Inject constructor(
             try {
                 _uiState.update { it.copy(isLoading = true, error = null) }
                 val tagsString = selectedTags.joinToString(",") { it.name }
-                val transaction = Transaction(
-                    id = transactionId,
+                val transaction = transactionRepository.getTransactionById(transactionId)
+                    ?: throw IllegalArgumentException("Transaction not found: $transactionId")
+                val updatedTransaction = transaction.copy(
                     accountId = accountId,
                     categoryId = categoryId,
                     type = type,
@@ -225,7 +226,7 @@ class TransactionViewModel @Inject constructor(
                     note = note,
                     tags = tagsString
                 )
-                transactionRepository.updateTransaction(transaction)
+                transactionRepository.updateTransaction(updatedTransaction)
                 tagRepository.setTransactionTags(transactionId, selectedTags.map { it.id })
                 _uiState.update { it.copy(isLoading = false, showEditDialog = false) }
                 loadMonthSummary()

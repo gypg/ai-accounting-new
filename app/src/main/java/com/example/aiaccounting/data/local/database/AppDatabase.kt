@@ -19,6 +19,7 @@ import com.example.aiaccounting.data.local.dao.ChatMessageDao
 import com.example.aiaccounting.data.local.dao.ChatMemoryDao
 import com.example.aiaccounting.data.local.dao.TagDao
 import com.example.aiaccounting.data.local.dao.CustomButlerDao
+import com.example.aiaccounting.data.local.dao.AIOperationTraceDao
 import com.example.aiaccounting.data.local.entity.Account
 import com.example.aiaccounting.data.local.entity.Category
 import com.example.aiaccounting.data.local.entity.Transaction
@@ -31,6 +32,7 @@ import com.example.aiaccounting.data.local.entity.ChatMemory
 import com.example.aiaccounting.data.local.entity.Tag
 import com.example.aiaccounting.data.local.entity.TransactionTag
 import com.example.aiaccounting.data.local.entity.CustomButlerEntity
+import com.example.aiaccounting.data.local.entity.AIOperationTrace
 import com.example.aiaccounting.security.SecurityManager
 import com.example.aiaccounting.data.storage.StorageManager
 import com.example.aiaccounting.data.storage.ExternalSharedPreferences
@@ -55,9 +57,10 @@ import javax.inject.Singleton
         com.example.aiaccounting.data.local.entity.AIPermissionLog::class,
         Tag::class,
         TransactionTag::class,
-        com.example.aiaccounting.data.local.entity.CustomButlerEntity::class
+        com.example.aiaccounting.data.local.entity.CustomButlerEntity::class,
+        AIOperationTrace::class
     ],
-    version = 7,
+    version = 8,
     exportSchema = true
 )
 @TypeConverters(Converters::class)
@@ -73,6 +76,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun chatMessageDao(): ChatMessageDao
     abstract fun chatMemoryDao(): ChatMemoryDao
     abstract fun aiPermissionLogDao(): com.example.aiaccounting.data.local.dao.AIPermissionLogDao
+    abstract fun aiOperationTraceDao(): AIOperationTraceDao
     abstract fun tagDao(): TagDao
     abstract fun customButlerDao(): CustomButlerDao
 
@@ -139,6 +143,64 @@ abstract class AppDatabase : RoomDatabase() {
                     )
                     """.trimIndent()
                 )
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `ai_permission_logs` (
+                        `id` TEXT NOT NULL,
+                        `timestamp` INTEGER NOT NULL,
+                        `operationType` TEXT NOT NULL,
+                        `permissionLevel` TEXT NOT NULL,
+                        `riskScore` REAL NOT NULL,
+                        `confidence` REAL NOT NULL,
+                        `granted` INTEGER NOT NULL,
+                        `reason` TEXT NOT NULL,
+                        `requiresHumanIntervention` INTEGER NOT NULL,
+                        `interventionReason` TEXT,
+                        `humanApproved` INTEGER,
+                        `humanApprovalReason` TEXT,
+                        `humanApprovalTime` INTEGER,
+                        `executed` INTEGER NOT NULL,
+                        `executionSuccess` INTEGER,
+                        `executionResult` TEXT,
+                        `userId` TEXT NOT NULL,
+                        `deviceTrusted` INTEGER NOT NULL,
+                        `networkSecure` INTEGER NOT NULL,
+                        `operationDetails` TEXT,
+                        PRIMARY KEY(`id`)
+                    )
+                    """.trimIndent()
+                )
+            }
+        }
+
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `transactions` ADD COLUMN `aiSourceType` TEXT NOT NULL DEFAULT 'MANUAL'")
+                db.execSQL("ALTER TABLE `transactions` ADD COLUMN `aiTraceId` TEXT")
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `ai_operation_traces` (
+                        `id` TEXT NOT NULL,
+                        `traceId` TEXT NOT NULL,
+                        `timestamp` INTEGER NOT NULL,
+                        `sourceType` TEXT NOT NULL,
+                        `actionType` TEXT NOT NULL,
+                        `entityType` TEXT NOT NULL,
+                        `entityId` TEXT,
+                        `relatedTransactionId` INTEGER,
+                        `summary` TEXT NOT NULL,
+                        `details` TEXT,
+                        `success` INTEGER NOT NULL,
+                        `errorMessage` TEXT,
+                        PRIMARY KEY(`id`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_ai_operation_traces_traceId` ON `ai_operation_traces` (`traceId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_ai_operation_traces_entityType_entityId` ON `ai_operation_traces` (`entityType`, `entityId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_ai_operation_traces_sourceType` ON `ai_operation_traces` (`sourceType`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_ai_operation_traces_actionType` ON `ai_operation_traces` (`actionType`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_ai_operation_traces_timestamp` ON `ai_operation_traces` (`timestamp`)")
             }
         }
     }
@@ -181,7 +243,7 @@ class DatabaseFactory @Inject constructor(
         )
             .openHelperFactory(factory)
             .fallbackToDestructiveMigrationFrom(1, 2, 3)
-            .addMigrations(AppDatabase.MIGRATION_4_5, AppDatabase.MIGRATION_5_6, AppDatabase.MIGRATION_6_7)
+            .addMigrations(AppDatabase.MIGRATION_4_5, AppDatabase.MIGRATION_5_6, AppDatabase.MIGRATION_6_7, AppDatabase.MIGRATION_7_8)
             .addCallback(DatabaseCallback())
             .build()
 

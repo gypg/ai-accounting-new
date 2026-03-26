@@ -4,6 +4,7 @@ import android.util.Log
 import com.example.aiaccounting.ai.AIOperation
 import com.example.aiaccounting.ai.AIOperationExecutor
 import com.example.aiaccounting.ai.AIOperationExecutor.AIOperationResult
+import com.example.aiaccounting.ai.AITraceContext
 import com.example.aiaccounting.data.local.entity.AccountType
 import com.example.aiaccounting.data.local.entity.TransactionType
 import com.example.aiaccounting.data.repository.AccountRepository
@@ -22,10 +23,19 @@ class AILocalProcessor @Inject constructor(
     private val aiOperationExecutor: AIOperationExecutor
 ) {
 
-    suspend fun processMessage(message: String, isNetworkAvailable: Boolean, isAIConfigured: Boolean): String {
+    suspend fun processMessage(
+        message: String,
+        isNetworkAvailable: Boolean,
+        isAIConfigured: Boolean,
+        currentButlerId: String = "xiaocainiang"
+    ): String {
         val lowerMessage = message.lowercase()
 
-        if (containsAny(lowerMessage, listOf("记", "花了", "收入", "支出", "消费", "买", "卖"))) {
+        if (isReminderLikeConversation(lowerMessage)) {
+            return handleGeneralConversation(message, isNetworkAvailable, isAIConfigured, currentButlerId)
+        }
+
+        if (isTransactionCommand(lowerMessage)) {
             return handleTransactionCommand(message, lowerMessage)
         }
         if (containsAny(lowerMessage, listOf("查", "看", "多少", "余额", "资产", "统计"))) {
@@ -43,7 +53,7 @@ class AILocalProcessor @Inject constructor(
         if (containsAny(lowerMessage, listOf("导出", "备份", "下载"))) {
             return handleExportCommand()
         }
-        return handleGeneralConversation(message, isNetworkAvailable, isAIConfigured)
+        return handleGeneralConversation(message, isNetworkAvailable, isAIConfigured, currentButlerId)
     }
 
     suspend fun ensureBasicCategoriesExist() {
@@ -82,6 +92,30 @@ class AILocalProcessor @Inject constructor(
         }
     }
 
+    private fun isTransactionCommand(lowerMessage: String): Boolean {
+        val explicitTransactionPhrases = listOf(
+            "记账", "记个账", "记一笔", "记一下", "记下", "记录一笔",
+            "花了", "收入", "支出", "消费", "买了", "买菜", "买饭", "转账", "工资", "奖金", "报销"
+        )
+        if (explicitTransactionPhrases.any { lowerMessage.contains(it) }) {
+            return true
+        }
+
+        val hasTransactionVerb = listOf(
+            "记", "花", "买", "卖", "付", "收", "赚", "报销", "转账", "消费"
+        ).any { lowerMessage.contains(it) }
+        val hasAmount = extractAmount(lowerMessage) != null
+        val looksLikeReminderOnly = isReminderLikeConversation(lowerMessage) && !hasAmount
+
+        return hasTransactionVerb && hasAmount && !looksLikeReminderOnly
+    }
+
+    private fun isReminderLikeConversation(lowerMessage: String): Boolean {
+        return listOf(
+            "记得", "提醒我", "提醒一下", "会议", "会议要点", "备忘", "笔记", "日记"
+        ).any { lowerMessage.contains(it) }
+    }
+
     private suspend fun handleTransactionCommand(message: String, lowerMessage: String): String {
         val amount = extractAmount(lowerMessage)
         val type = if (containsAny(lowerMessage, listOf("收入", "赚", "收到", "工资", "奖金")))
@@ -89,58 +123,37 @@ class AILocalProcessor @Inject constructor(
 
         if (amount != null) {
             ensureBasicCategoriesExist()
-            var accounts = accountRepository.getAllAccountsList()
-            var categories = categoryRepository.getAllCategoriesList()
 
-            var defaultAccount = accounts.firstOrNull { it.isDefault } ?: accounts.firstOrNull()
-            if (defaultAccount == null) {
-                val createOp = AIOperation.AddAccount(name = "默认账户", type = AccountType.CASH, balance = 0.0)
-                when (val result = aiOperationExecutor.executeOperation(createOp)) {
-                    is AIOperationResult.Success -> {
-                        accounts = accountRepository.getAllAccountsList()
-                        defaultAccount = accounts.firstOrNull()
-                    }
-                    is AIOperationResult.Error ->
-                        return "创建默认账户失败: ${result.error}"
-                }
-            }
-            if (defaultAccount == null) return "无法创建账户，请手动创建账户后再试。"
+            val accountResolution = AITransactionEntityResolver.resolveAccount(
+                accountRepository = accountRepository,
+                aiOperationExecutor = aiOperationExecutor,
+                fallbackAccountName = "默认账户",
+                fallbackAccountType = AccountType.CASH,
+                allowExplicitFallbackCreation = true,
+                traceContext = AITraceContext(sourceType = "AI_LOCAL")
+            )
+            val defaultAccount = accountResolution.account
+                ?: accountResolution.creationError?.let { return "创建默认账户失败: $it" }
+                ?: return "无法创建账户，请手动创建账户后再试。"
 
-            var defaultCategory = categories.firstOrNull { it.type == type }
-            if (defaultCategory == null) {
-                val catName = if (type == TransactionType.INCOME) "其他收入" else "其他支出"
-                when (val result = aiOperationExecutor.executeOperation(AIOperation.AddCategory(name = catName, type = type))) {
-                    is AIOperationResult.Success -> {
-                        categories = categoryRepository.getAllCategoriesList()
-                        defaultCategory = categories.firstOrNull { it.type == type }
-                    }
-                    is AIOperationResult.Error -> {
-                        Log.w("AILocalProcessor", "创建分类失败: ${result.error}")
-                        defaultCategory = categories.firstOrNull { it.type == type }
-                    }
+            val categoryResolution = AITransactionEntityResolver.resolveCategory(
+                categoryRepository = categoryRepository,
+                aiOperationExecutor = aiOperationExecutor,
+                transactionType = type,
+                fallbackCategoryName = if (type == TransactionType.INCOME) "其他收入" else "其他支出",
+                emergencyCategoryName = if (type == TransactionType.INCOME) "收入" else "支出",
+                traceContext = AITraceContext(sourceType = "AI_LOCAL")
+            )
+            val defaultCategory = categoryResolution.category
+                ?: categoryResolution.terminalCreationError?.let {
+                    return "❌ 记账失败：无法创建分类，请检查数据库权限"
                 }
-            }
-            if (defaultCategory == null) {
-                defaultCategory = categories.firstOrNull { it.type == type } ?: categories.firstOrNull()
-            }
-            if (defaultCategory == null) {
-                val emergencyOp = AIOperation.AddCategory(
-                    name = if (type == TransactionType.INCOME) "收入" else "支出", type = type
-                )
-                when (aiOperationExecutor.executeOperation(emergencyOp)) {
-                    is AIOperationResult.Success -> {
-                        categories = categoryRepository.getAllCategoriesList()
-                        defaultCategory = categories.firstOrNull { it.type == type }
-                    }
-                    is AIOperationResult.Error ->
-                        return "❌ 记账失败：无法创建分类，请检查数据库权限"
-                }
-            }
-            if (defaultCategory == null) return "❌ 记账失败：系统无法创建分类，请手动创建分类后再试"
+                ?: return "❌ 记账失败：系统无法创建分类，请手动创建分类后再试"
 
             val operation = AIOperation.AddTransaction(
                 amount = amount, type = type,
-                accountId = defaultAccount.id, categoryId = defaultCategory.id, note = message
+                accountId = defaultAccount.id, categoryId = defaultCategory.id, note = message,
+                traceContext = AITraceContext(sourceType = "AI_LOCAL")
             )
             return when (val result = aiOperationExecutor.executeOperation(operation)) {
                 is AIOperationResult.Success ->
@@ -194,7 +207,7 @@ class AILocalProcessor @Inject constructor(
                 val name = extractAccountName(message)
                 if (name != null) {
                     val type = extractAccountType(lowerMessage)
-                    val operation = AIOperation.AddAccount(name = name, type = type, balance = extractAmount(lowerMessage) ?: 0.0)
+                    val operation = AIOperation.AddAccount(name = name, type = type, balance = extractAmount(lowerMessage) ?: 0.0, traceContext = AITraceContext(sourceType = "AI_LOCAL"))
                     when (val result = aiOperationExecutor.executeOperation(operation)) {
                         is AIOperationResult.Success -> result.message
                         is AIOperationResult.Error -> "错误: ${result.error}"
@@ -223,7 +236,7 @@ class AILocalProcessor @Inject constructor(
                 val name = extractCategoryName(message)
                 val type = if (containsAny(lowerMessage, listOf("收入"))) TransactionType.INCOME else TransactionType.EXPENSE
                 if (name != null) {
-                    val operation = AIOperation.AddCategory(name = name, type = type)
+                    val operation = AIOperation.AddCategory(name = name, type = type, traceContext = AITraceContext(sourceType = "AI_LOCAL"))
                     when (val result = aiOperationExecutor.executeOperation(operation)) {
                         is AIOperationResult.Success -> result.message
                         is AIOperationResult.Error -> "错误: ${result.error}"
@@ -258,19 +271,107 @@ class AILocalProcessor @Inject constructor(
         }
     }
 
-    private fun handleGeneralConversation(message: String, isNetworkAvailable: Boolean, isAIConfigured: Boolean): String {
+    private fun handleGeneralConversation(
+        message: String,
+        isNetworkAvailable: Boolean,
+        isAIConfigured: Boolean,
+        currentButlerId: String
+    ): String {
+        val lowerMessage = message.lowercase()
+        return when (currentButlerId) {
+            "taotao" -> handleTaotaoConversation(lowerMessage, isNetworkAvailable, isAIConfigured)
+            "guchen" -> handleGuchenConversation(lowerMessage)
+            "suqian" -> handleSuqianConversation(lowerMessage)
+            "yishuihan" -> handleYishuihanConversation(lowerMessage)
+            else -> handleXiaocainiangConversation(lowerMessage, isNetworkAvailable, isAIConfigured)
+        }
+    }
+
+    private fun handleXiaocainiangConversation(
+        lowerMessage: String,
+        isNetworkAvailable: Boolean,
+        isAIConfigured: Boolean
+    ): String {
         return when {
-            containsAny(message.lowercase(), listOf("你好", "您好", "hi", "hello")) -> {
-                val mode = if (isAIConfigured) {
-                    if (isNetworkAvailable) "🤖 智能模式（联网）" else "📱 本地模式（离线）"
-                } else "📱 本地模式"
-                "您好！我是您的AI记账助手。\n当前模式: $mode\n\n" +
-                "我可以帮您：\n记账 - 直接说花了50元买咖啡\n查询 - 查看总资产或最近交易\n" +
-                "管理账户 - 添加现金账户\n管理分类 - 添加餐饮分类\n导出数据 - 导出Excel\n\n有什么可以帮您的吗？"
+            containsAny(lowerMessage, listOf("你是什么模型", "底层模型", "用的什么模型", "哪个模型")) -> {
+                "我是你的 AI 管家助手，目前会根据是否联网与配置情况选择合适的处理方式。比起底层型号，我更关心先把你的聊天、记账和查账需求稳稳接住。"
             }
-            containsAny(message.lowercase(), listOf("谢谢", "感谢")) -> "不客气！随时为您服务。有其他问题随时告诉我！"
-            containsAny(message.lowercase(), listOf("再见", "拜拜")) -> "再见！记得坚持记账哦，祝您理财顺利！"
-            else -> "抱歉，我不太理解您的意思。您可以尝试：\n\n记账：\n  - 花了30元吃午饭\n  - 今天收入5000元工资\n\n查询：\n  - 查看总资产\n  - 最近10笔交易\n\n或者输入帮助查看更多功能。"
+            containsAny(lowerMessage, listOf("你能做什么", "你会什么", "能帮我做什么", "可以帮我做什么")) -> {
+                "我是你的 AI 管家助手，可以陪你聊天，也可以直接帮你记账、查账、看最近交易、看资产和做简单分析。你直接用自然话告诉我就行。"
+            }
+            containsAny(lowerMessage, listOf("你好", "您好", "hi", "hello")) -> {
+                val mode = if (isAIConfigured) {
+                    if (isNetworkAvailable) "联网智能模式" else "本地离线模式"
+                } else "本地模式"
+                "你好呀，我是你的 AI 管家助手。当前是$mode，我可以陪你聊聊天，也可以直接帮你记账、查账、看分析。你想先做哪件事？"
+            }
+            containsAny(lowerMessage, listOf("谢谢", "感谢")) -> "不客气，我在呢。要继续聊，还是顺手处理一笔账，都可以。"
+            containsAny(lowerMessage, listOf("再见", "拜拜")) -> "好呀，先到这里。下次想聊天、记账或查账，直接来找我就行。"
+            else -> "我在听。你可以直接跟我聊天，也可以让我帮你记账、查余额、看最近交易；按你现在想说的继续就好。"
+        }
+    }
+
+    private fun handleTaotaoConversation(
+        lowerMessage: String,
+        isNetworkAvailable: Boolean,
+        isAIConfigured: Boolean
+    ): String {
+        return when {
+            containsAny(lowerMessage, listOf("你是什么模型", "底层模型", "用的什么模型", "哪个模型")) ->
+                "我是桃桃呀～✨ 会按现在的联网和配置情况陪你聊天、帮你记账和查账。比起底层模型，桃桃更想先把你眼前的事情做好～"
+            containsAny(lowerMessage, listOf("你能做什么", "你会什么", "能帮我做什么", "可以帮我做什么")) ->
+                "桃桃可以陪你聊天呀～也可以帮你记账、查账、看最近交易和账户资产，还能做一些简单分析～你直接告诉我就好啦！"
+            containsAny(lowerMessage, listOf("你好", "您好", "hi", "hello")) -> {
+                val mode = if (isAIConfigured) {
+                    if (isNetworkAvailable) "联网智能模式" else "本地离线模式"
+                } else "本地模式"
+                "主人～你好呀！我是桃桃～当前是$mode，我可以陪你聊天，也可以帮你记账查账哦～✨"
+            }
+            containsAny(lowerMessage, listOf("谢谢", "感谢")) -> "嘿嘿，不客气呀～桃桃在呢，有需要随时叫我！"
+            containsAny(lowerMessage, listOf("再见", "拜拜")) -> "好呀～下次再来找桃桃聊天或记账哦～🌸"
+            else -> "桃桃在听呢～你想聊天、记账、查账还是看看最近收支，都可以直接告诉我呀。"
+        }
+    }
+
+    private fun handleGuchenConversation(lowerMessage: String): String {
+        return when {
+            containsAny(lowerMessage, listOf("你是什么模型", "底层模型", "用的什么模型", "哪个模型")) ->
+                "……底层模型不重要。有事说事，我能陪你聊，也能帮你记账、查账。"
+            containsAny(lowerMessage, listOf("你能做什么", "你会什么", "能帮我做什么", "可以帮我做什么")) ->
+                "聊天，记账，查账，看记录……这些我都能处理。别绕弯子，直接说。"
+            containsAny(lowerMessage, listOf("你好", "您好", "hi", "hello")) ->
+                "……来了？要聊天，还是要我帮你把账处理掉？"
+            containsAny(lowerMessage, listOf("谢谢", "感谢")) -> "嗯。小事。"
+            containsAny(lowerMessage, listOf("再见", "拜拜")) -> "行。下次有事再说。"
+            else -> "我在。想聊什么，或者要记账查账，直接说。"
+        }
+    }
+
+    private fun handleSuqianConversation(lowerMessage: String): String {
+        return when {
+            containsAny(lowerMessage, listOf("你是什么模型", "底层模型", "用的什么模型", "哪个模型")) ->
+                "底层模型只是实现方式。你现在要聊天、记账还是查账，我都可以接。"
+            containsAny(lowerMessage, listOf("你能做什么", "你会什么", "能帮我做什么", "可以帮我做什么")) ->
+                "我可以陪你聊天，也可以帮你记账、查账、看交易记录和账户情况。你直接说需求。"
+            containsAny(lowerMessage, listOf("你好", "您好", "hi", "hello")) ->
+                "你好。我在。要继续聊，还是直接处理账务？"
+            containsAny(lowerMessage, listOf("谢谢", "感谢")) -> "不用客气。"
+            containsAny(lowerMessage, listOf("再见", "拜拜")) -> "好。有需要再来。"
+            else -> "我在听。聊天或处理账务，都可以继续。"
+        }
+    }
+
+    private fun handleYishuihanConversation(lowerMessage: String): String {
+        return when {
+            containsAny(lowerMessage, listOf("你是什么模型", "底层模型", "用的什么模型", "哪个模型")) ->
+                "模型只是背后的工具呀。重要的是，我现在能陪你聊，也能稳稳帮你记账、查账。"
+            containsAny(lowerMessage, listOf("你能做什么", "你会什么", "能帮我做什么", "可以帮我做什么")) ->
+                "我可以陪你慢慢聊，也可以帮你记账、查账、看最近交易和资产情况。你想从哪件事开始都可以。"
+            containsAny(lowerMessage, listOf("你好", "您好", "hi", "hello")) ->
+                "你好呀，我在呢。想聊聊天，还是顺手把今天的账一起整理掉？"
+            containsAny(lowerMessage, listOf("谢谢", "感谢")) -> "别客气，有我在呢。"
+            containsAny(lowerMessage, listOf("再见", "拜拜")) -> "好呀，先到这里。下次我还在。"
+            else -> "我在听呀。你可以继续聊天，也可以直接告诉我要处理哪笔账。"
         }
     }
 

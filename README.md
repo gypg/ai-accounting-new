@@ -61,6 +61,13 @@ app/src/main/java/com/example/aiaccounting/
 └── utils/                       # 工具类
 ```
 
+## 交付与验收文档
+
+- [本阶段交付总结](docs/DELIVERY_SUMMARY_2026_03_25.md)
+- [阶段性交付验收清单（P0）](docs/ACCEPTANCE_CHECKLIST_P0.md)
+- [构建与发布指南](BUILD_GUIDE.md)
+- [发布检查清单](RELEASE_CHECKLIST.md)
+
 ## 构建APK
 
 ### 使用Android Studio

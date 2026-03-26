@@ -137,7 +137,30 @@ class AIAssistantRemoteExecutionHandlerTest {
                 userMessage = "帮我记一笔午饭 25 元",
                 remoteResponse = "{\"action\":\"add_transaction\",\"amount\":25}"
             )
-        } returns RemoteResponseDecision.ExecuteActions("{\"action\":\"add_transaction\",\"amount\":25}")
+        } returns RemoteResponseDecision.ExecuteActions(
+            AIAssistantActionEnvelope(
+                actions = listOf(
+                    AIAssistantTypedAction.AddTransaction(
+                        amount = 25.0,
+                        transactionTypeRaw = "expense",
+                        categoryRef = AIAssistantEntityReference(
+                            id = null,
+                            name = "",
+                            rawIdText = "",
+                            kind = "category"
+                        ),
+                        accountRef = AIAssistantEntityReference(
+                            id = null,
+                            name = "",
+                            rawIdText = "",
+                            kind = "account"
+                        ),
+                        note = "",
+                        dateTimestamp = 0L
+                    )
+                )
+            )
+        )
 
         val result = handler.execute(
             userMessage = "帮我记一笔午饭 25 元",
@@ -146,10 +169,9 @@ class AIAssistantRemoteExecutionHandlerTest {
         )
 
         assertTrue(result is AIAssistantRemoteExecutionResult.ActionExecutionRequested)
-        assertEquals(
-            "{\"action\":\"add_transaction\",\"amount\":25}",
-            (result as AIAssistantRemoteExecutionResult.ActionExecutionRequested).rawResponse
-        )
+        val envelope = (result as AIAssistantRemoteExecutionResult.ActionExecutionRequested).envelope
+        assertEquals(1, envelope.actions.size)
+        assertTrue(envelope.actions.single() is AIAssistantTypedAction.AddTransaction)
     }
 
     @Test

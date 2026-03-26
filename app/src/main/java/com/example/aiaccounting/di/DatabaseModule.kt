@@ -13,6 +13,7 @@ import com.example.aiaccounting.data.local.dao.ChatSessionDao
 import com.example.aiaccounting.data.local.dao.TransactionDao
 import com.example.aiaccounting.data.local.dao.TransactionTemplateDao
 import com.example.aiaccounting.data.local.dao.CustomButlerDao
+import com.example.aiaccounting.data.local.dao.AIOperationTraceDao
 import com.example.aiaccounting.data.local.database.AppDatabase
 import com.example.aiaccounting.data.repository.AccountRepository
 import com.example.aiaccounting.data.repository.AIConversationRepository
@@ -21,6 +22,7 @@ import com.example.aiaccounting.data.repository.CategoryRepository
 import com.example.aiaccounting.data.repository.ChatSessionRepository
 import com.example.aiaccounting.data.repository.TransactionRepository
 import com.example.aiaccounting.data.repository.TransactionTemplateRepository
+import com.example.aiaccounting.data.repository.AIOperationTraceRepository
 import com.example.aiaccounting.security.SecurityManager
 import dagger.Module
 import dagger.Provides
@@ -56,7 +58,7 @@ object DatabaseModule {
             AppDatabase.DATABASE_NAME
         )
             .openHelperFactory(factory)
-            .addMigrations(AppDatabase.MIGRATION_4_5, AppDatabase.MIGRATION_5_6, AppDatabase.MIGRATION_6_7)
+            .addMigrations(AppDatabase.MIGRATION_4_5, AppDatabase.MIGRATION_5_6, AppDatabase.MIGRATION_6_7, AppDatabase.MIGRATION_7_8)
             .fallbackToDestructiveMigration() // For development only
             .build()
     }
@@ -163,6 +165,12 @@ object DatabaseModule {
         return TransactionTemplateRepository(transactionTemplateDao)
     }
 
+    @Provides
+    @Singleton
+    fun provideAIOperationTraceRepository(traceDao: AIOperationTraceDao): AIOperationTraceRepository {
+        return AIOperationTraceRepository(traceDao)
+    }
+
     // Chat Session DAOs
     @Provides
     @Singleton
@@ -184,6 +192,11 @@ object DatabaseModule {
     @Provides
     fun provideAIPermissionLogDao(database: AppDatabase): com.example.aiaccounting.data.local.dao.AIPermissionLogDao {
         return database.aiPermissionLogDao()
+    }
+
+    @Provides
+    fun provideAIOperationTraceDao(database: AppDatabase): AIOperationTraceDao {
+        return database.aiOperationTraceDao()
     }
 
     @Provides

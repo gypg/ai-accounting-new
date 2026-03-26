@@ -141,6 +141,9 @@ fun EditTransactionScreen(
                     onCategorySelected = { selectedCategory = it }
                 )
 
+                // AI 留痕信息
+                TransactionTraceabilityInfo(transaction = transaction!!)
+
                 // 日期选择
                 DateSelector(
                     date = date,
@@ -245,5 +248,30 @@ fun EditTransactionScreen(
                 }
             }
         )
+    }
+}
+
+@Composable
+private fun TransactionTraceabilityInfo(transaction: Transaction) {
+    val sourceLabel = when (transaction.aiSourceType) {
+        "AI_REMOTE" -> "AI 云端"
+        "AI_LOCAL" -> "AI 本地"
+        else -> "手动"
+    }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text("来源信息", style = MaterialTheme.typography.titleSmall)
+            Spacer(modifier = Modifier.height(8.dp))
+            Text("记录来源：$sourceLabel")
+            transaction.aiTraceId?.takeIf { it.isNotBlank() }?.let {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text("Trace ID：${it.take(8)}…")
+            }
+        }
     }
 }

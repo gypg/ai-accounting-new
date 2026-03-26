@@ -46,6 +46,8 @@ data class Transaction(
     val isRecurring: Boolean = false,
     val recurringInterval: String? = null,  // "daily", "weekly", "monthly", "yearly"
     val recurringEndDate: Long? = null,
+    val aiSourceType: String = "MANUAL",
+    val aiTraceId: String? = null,
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis()
 )

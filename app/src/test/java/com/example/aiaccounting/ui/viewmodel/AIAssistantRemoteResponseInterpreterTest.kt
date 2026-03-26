@@ -16,26 +16,93 @@ class AIAssistantRemoteResponseInterpreterTest {
         )
 
         assertTrue(decision is RemoteResponseDecision.ExecuteActions)
+        val action = (decision as RemoteResponseDecision.ExecuteActions).envelope.actions.single()
+        assertTrue(action is AIAssistantTypedAction.AddTransaction)
     }
 
     @Test
-    fun interpret_returnsRemoteReply_whenJsonActionHasTextPreamble() {
+    fun interpret_returnsExecuteActions_whenDirtyNullWrapperContainsJsonAction() {
+        val decision = interpreter.interpret(
+            userMessage = "帮我记一笔午饭 25 元",
+            remoteResponse = "nullnull {\"action\":\"add_transaction\",\"amount\":25} null"
+        )
+
+        assertTrue(decision is RemoteResponseDecision.ExecuteActions)
+        val action = (decision as RemoteResponseDecision.ExecuteActions).envelope.actions.single() as AIAssistantTypedAction.AddTransaction
+        assertEquals(25.0, action.amount, 0.0)
+    }
+
+    @Test
+    fun interpret_returnsExecuteActions_whenJsonActionHasShortTextPreamble() {
         val decision = interpreter.interpret(
             userMessage = "帮我记一笔午饭 25 元",
             remoteResponse = "好的，下面是执行结果：{\"action\":\"add_transaction\",\"amount\":25}"
         )
 
-        assertTrue(decision is RemoteResponseDecision.FallbackToLocalTransaction)
+        assertTrue(decision is RemoteResponseDecision.ExecuteActions)
+        val action = (decision as RemoteResponseDecision.ExecuteActions).envelope.actions.single() as AIAssistantTypedAction.AddTransaction
+        assertEquals(25.0, action.amount, 0.0)
     }
 
     @Test
-    fun interpret_returnsFallbackToLocalTransaction_whenPlainTextReplyForTransactionRequest() {
+    fun interpret_returnsExecuteActions_whenJsonActionHasPreambleAndTrailingText() {
         val decision = interpreter.interpret(
-            userMessage = "昨天买咖啡花了18元",
-            remoteResponse = "好的，我来帮你处理这笔消费。"
+            userMessage = "帮我记一笔午饭 25 元",
+            remoteResponse = "好的，我来处理。{\"action\":\"add_transaction\",\"amount\":25} 已帮你生成动作"
         )
 
-        assertTrue(decision is RemoteResponseDecision.FallbackToLocalTransaction)
+        assertTrue(decision is RemoteResponseDecision.ExecuteActions)
+        val action = (decision as RemoteResponseDecision.ExecuteActions).envelope.actions.single() as AIAssistantTypedAction.AddTransaction
+        assertEquals(25.0, action.amount, 0.0)
+    }
+
+    @Test
+    fun interpret_returnsExecuteActions_whenFencedJsonHasLeadingText() {
+        val decision = interpreter.interpret(
+            userMessage = "帮我记一笔午饭 25 元",
+            remoteResponse = "我会按你的要求执行：\n```json\n{\"action\":\"add_transaction\",\"amount\":25}\n```"
+        )
+
+        assertTrue(decision is RemoteResponseDecision.ExecuteActions)
+        val action = (decision as RemoteResponseDecision.ExecuteActions).envelope.actions.single() as AIAssistantTypedAction.AddTransaction
+        assertEquals(25.0, action.amount, 0.0)
+    }
+
+    @Test
+    fun interpret_returnsExecuteActions_whenResponseContainsArrayRootActions() {
+        val decision = interpreter.interpret(
+            userMessage = "帮我记一笔午饭 25 元",
+            remoteResponse = "[{\"action\":\"add_transaction\",\"amount\":25}]"
+        )
+
+        assertTrue(decision is RemoteResponseDecision.ExecuteActions)
+        assertTrue((decision as RemoteResponseDecision.ExecuteActions).envelope.actions.single() is AIAssistantTypedAction.AddTransaction)
+    }
+
+    @Test
+    fun interpret_returnsExecuteActions_whenResponseWrapsActionInsideDataObject() {
+        val decision = interpreter.interpret(
+            userMessage = "帮我记一笔午饭 25 元",
+            remoteResponse = "{\"data\":{\"action\":\"add_transaction\",\"amount\":25}}"
+        )
+
+        assertTrue(decision is RemoteResponseDecision.ExecuteActions)
+        val action = (decision as RemoteResponseDecision.ExecuteActions).envelope.actions.single() as AIAssistantTypedAction.AddTransaction
+        assertEquals(25.0, action.amount, 0.0)
+    }
+
+    @Test
+    fun interpret_returnsExecuteActions_whenResponseWrapsActionsInsidePayloadObject() {
+        val decision = interpreter.interpret(
+            userMessage = "帮我查账户和分类",
+            remoteResponse = "{\"payload\":{\"actions\":[{\"action\":\"query\",\"target\":\"accounts\"},{\"action\":\"query\",\"target\":\"categories\"}]}}"
+        )
+
+        assertTrue(decision is RemoteResponseDecision.ExecuteActions)
+        val actions = (decision as RemoteResponseDecision.ExecuteActions).envelope.actions
+        assertEquals(2, actions.size)
+        assertTrue(actions[0] is AIAssistantTypedAction.Query)
+        assertTrue(actions[1] is AIAssistantTypedAction.Query)
     }
 
     @Test
@@ -47,6 +114,17 @@ class AIAssistantRemoteResponseInterpreterTest {
 
         assertTrue(decision is RemoteResponseDecision.ReturnRemoteReply)
         assertEquals("我可以根据你的需求决定下一步 action。", (decision as RemoteResponseDecision.ReturnRemoteReply).reply)
+    }
+
+    @Test
+    fun interpret_returnsRemoteReply_whenDirtyNullWrapperContainsPlainReply() {
+        val decision = interpreter.interpret(
+            userMessage = "你好",
+            remoteResponse = "nullnull 你好呀，我在呢 null"
+        )
+
+        assertTrue(decision is RemoteResponseDecision.ReturnRemoteReply)
+        assertEquals("你好呀，我在呢", (decision as RemoteResponseDecision.ReturnRemoteReply).reply)
     }
 
     @Test
@@ -80,12 +158,107 @@ class AIAssistantRemoteResponseInterpreterTest {
     }
 
     @Test
-    fun combineRemoteAndLocalReply_returnsLocalError_whenLocalFallbackFails() {
-        val combined = interpreter.combineRemoteAndLocalReply(
-            remoteReply = "好的，我来帮你处理。",
-            localResult = "❌ 记账失败：金额必须大于0"
+    fun interpret_returnsRemoteReply_whenMessageOnlyContainsGenericRecordWord() {
+        val decision = interpreter.interpret(
+            userMessage = "帮我记录一下今天的会议要点",
+            remoteResponse = "好的，我记住了。"
         )
 
-        assertEquals("❌ 记账失败：金额必须大于0", combined)
+        assertTrue(decision is RemoteResponseDecision.ReturnRemoteReply)
+        assertEquals("好的，我记住了。", (decision as RemoteResponseDecision.ReturnRemoteReply).reply)
+    }
+
+
+    @Test
+    fun interpret_mapsQueryTypeAliases_toTypedQueryTargets() {
+        val decision = interpreter.interpret(
+            userMessage = "帮我查账户",
+            remoteResponse = "{\"type\":\"query_accounts\"}"
+        )
+
+        assertTrue(decision is RemoteResponseDecision.ExecuteActions)
+        val action = (decision as RemoteResponseDecision.ExecuteActions).envelope.actions.single() as AIAssistantTypedAction.Query
+        assertEquals("accounts", action.target)
+    }
+
+
+    @Test
+    fun interpret_parsesTypedEntityReferences_forAddTransactionAction() {
+        val decision = interpreter.interpret(
+            userMessage = "帮我记一笔午饭 25 元",
+            remoteResponse = """
+                {
+                  "action":"add_transaction",
+                  "amount":25,
+                  "transactionType":"expense",
+                  "accountRef":{"id":12,"name":"日常卡","kind":"account"},
+                  "categoryRef":{"id":34,"name":"餐饮","kind":"category"},
+                  "note":"午饭"
+                }
+            """.trimIndent()
+        )
+
+        assertTrue(decision is RemoteResponseDecision.ExecuteActions)
+        val action = (decision as RemoteResponseDecision.ExecuteActions).envelope.actions.single() as AIAssistantTypedAction.AddTransaction
+        assertEquals(12L, action.accountRef.id)
+        assertEquals("日常卡", action.accountRef.name)
+        assertEquals(34L, action.categoryRef.id)
+        assertEquals("餐饮", action.categoryRef.name)
+    }
+
+    @Test
+    fun interpret_parsesTransferAction_withTypedEntityReferences() {
+        val decision = interpreter.interpret(
+            userMessage = "从微信转100到支付宝",
+            remoteResponse = """
+                {
+                  "action":"add_transaction",
+                  "amount":100,
+                  "transactionType":"transfer",
+                  "accountRef":{"id":1,"name":"微信","kind":"account"},
+                  "transferAccountRef":{"id":2,"name":"支付宝","kind":"account"},
+                  "note":"转到支付宝"
+                }
+            """.trimIndent()
+        )
+
+        assertTrue(decision is RemoteResponseDecision.ExecuteActions)
+        val action = (decision as RemoteResponseDecision.ExecuteActions).envelope.actions.single() as AIAssistantTypedAction.AddTransaction
+        assertEquals("transfer", action.transactionTypeRaw)
+        assertEquals(1L, action.accountRef.id)
+        assertEquals(2L, action.transferAccountRef?.id)
+        assertEquals("支付宝", action.transferAccountRef?.name)
+    }
+
+    @Test
+    fun interpret_parsesTransferAction_withExplicitTransferType() {
+        val decision = interpreter.interpret(
+            userMessage = "从微信转100到支付宝",
+            remoteResponse = """
+                {
+                  "type":"transfer",
+                  "amount":100,
+                  "accountRef":{"id":1,"name":"微信","kind":"account"},
+                  "transferAccountRef":{"id":2,"name":"支付宝","kind":"account"},
+                  "note":"转到支付宝"
+                }
+            """.trimIndent()
+        )
+
+        assertTrue(decision is RemoteResponseDecision.ExecuteActions)
+        val action = (decision as RemoteResponseDecision.ExecuteActions).envelope.actions.single() as AIAssistantTypedAction.AddTransaction
+        assertEquals("transfer", action.transactionTypeRaw)
+        assertEquals(1L, action.accountRef.id)
+        assertEquals(2L, action.transferAccountRef?.id)
+    }
+
+    @Test
+    fun combineRemoteAndLocalReply_returnsLocalError_whenLocalFallbackFailsWithoutEmoji() {
+        val combined = interpreter.combineRemoteAndLocalReply(
+            remoteReply = "好的，我来帮你处理。",
+            localResult = "记账失败：无法创建账户"
+        )
+
+        assertEquals("记账失败：无法创建账户", combined)
     }
 }

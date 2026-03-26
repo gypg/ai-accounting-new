@@ -134,11 +134,9 @@ class AIAssistantViewModel @Inject constructor(
                 .collectLatest { butler ->
                     try {
                         _uiState.update { it.copy(currentButler = butler) }
-                    } catch (e: kotlinx.coroutines.CancellationException) {
-                        throw e
                     } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
+                        throw e
+                    } catch (e: Exception) {
                         // 兜底：不阻塞启动流程
                         _uiState.update { it.copy(error = e.message) }
                     }
@@ -333,7 +331,7 @@ class AIAssistantViewModel @Inject constructor(
             is AIAssistantRemoteExecutionResult.TransportFailure -> "处理请求时出错: ${result.message}"
             is AIAssistantRemoteExecutionResult.IncompleteResponse -> "响应不完整，请稍后重试。"
             is AIAssistantRemoteExecutionResult.ActionExecutionRequested -> {
-                actionExecutor.executeAIActions(result.rawResponse)
+                actionExecutor.executeAIActions(result.envelope)
             }
             is AIAssistantRemoteExecutionResult.LocalFallbackRequested -> {
                 val localResult = processWithLocalAI(message)
@@ -350,10 +348,12 @@ class AIAssistantViewModel @Inject constructor(
      * 使用本地AI处理消息
      */
     private suspend fun processWithLocalAI(message: String): String {
+        val currentButler = butlerCoordinator.resolveCurrentButler(_uiState.value.currentButler)
         return aiLocalProcessor.processMessage(
             message = message,
             isNetworkAvailable = _uiState.value.isNetworkAvailable,
-            isAIConfigured = currentAIConfig.isEnabled && currentAIConfig.apiKey.isNotBlank()
+            isAIConfigured = currentAIConfig.isEnabled && currentAIConfig.apiKey.isNotBlank(),
+            currentButlerId = currentButler.id
         )
     }
 

@@ -1,390 +1,208 @@
-## Session: 2026-03-20
+# Progress Log
 
-### 工程与 AI 主链路收敛
-- 修复 `AIInformationSystem.kt` / `AIPermissionManager.kt` 编译阻塞，`compileDebugKotlin` 恢复通过
-- 修复 `AIPermissionExecutor` 人工确认链路伪 `logId` 问题，现透传真实 `auditLogId`
-- 新增回归测试：
-  - `AIPermissionManagerTest.kt`
-  - `AIPermissionExecutorTest.kt`
-  - `TransactionModificationHandlerTest.kt`
-  - `AIOperationExecutorTest.kt`
-- 推进 `TransactionModificationHandler.kt` / `AIOperationExecutor.kt` 用户可见文案资源化
-- 当前建议：继续精扫这两个文件的剩余用户可见硬编码文案，再扩大国际化范围
-
----
-
-# Planning Sessions (planning-with-files)
-
-## Session: 2026-03-19
+## Session: 2026-03-25
 
 ### Phase 1: Requirements & Discovery
 - **Status:** complete
-- **Started:** 2026-03-19
+- **Started:** 2026-03-25
 - Actions taken:
-  - Invoked `planning-with-files` skill for `AIAssistantViewModel` 拆分规划
+  - Invoked `planning-with-files` skill
   - Ran session catchup script for the project
   - Read planning templates from the skill directory
-  - Read existing `task_plan.md`, `findings.md`, `progress.md`
-  - Reviewed `AIAssistantViewModel.kt` current responsibilities and handoff memory
+  - Read existing planning files in project root
+  - Re-oriented planning context from old ViewModel split plan to current AI butler inspiration task
+  - Consolidated prior EasyAccounts mapping conclusions into findings.md
 - Files created/modified:
-  - task_plan.md (updated for current planning task)
-  - findings.md (updated for current planning task)
-  - progress.md (appended)
+  - `task_plan.md` (overwritten for current planning task)
+  - `findings.md` (overwritten for current planning task)
+  - `progress.md` (overwritten for current planning task)
 
-### Phase 2: Planning & Structure
+### Phase 2: Planning & Prioritization
 - **Status:** complete
 - Actions taken:
-  - Identified current split anchors already present in the repo: action executor, butler coordinator, config/network coordinator, image handler
-  - Confirmed `AddTransactionScreen` medium item is already resolved in the worktree, so the default next planning target is `AIAssistantViewModel`
-  - Collected architecture recommendations for minimal-risk phased extraction
-  - Verified the current public API surface used by `AIAssistantScreen`
+  - Grouped borrowable ideas into four buckets: AI traceability, tool semantics, persona unification, plan-before-execute orchestration
+  - Sorted them into first-tier and second-tier priorities
+  - Captured constraints and non-priority items
 - Files created/modified:
-  - task_plan.md
-  - findings.md
-  - progress.md
+  - `task_plan.md`
+  - `findings.md`
 
-### Phase 3: Validation Strategy
+### Phase 3: Delivery Structure
 - **Status:** complete
 - Actions taken:
-  - Defined per-phase verification strategy for action executor, session lifecycle, image path, and top-level orchestration
-  - Recorded regression risks and mitigations with focus on preserving the existing ViewModel public interface
+  - Prepared a user-facing prioritized development checklist mapped to current code
+  - Completed Module 1 semantic contract unification with test-first reminder/non-accounting guard tightening
+  - Updated project memory and development docs immediately after module completion per project rule
 - Files created/modified:
-  - task_plan.md
-  - findings.md
-  - progress.md
+  - `task_plan.md`
+  - `progress.md`
+  - `app/src/main/java/com/example/aiaccounting/ai/AIReasoningEngine.kt`
+  - `app/src/main/java/com/example/aiaccounting/ai/AILocalProcessor.kt`
+  - `app/src/test/java/com/example/aiaccounting/ai/AIReasoningEngineTest.kt`
+  - `app/src/test/java/com/example/aiaccounting/ai/AILocalProcessorTest.kt`
+  - `docs/DEVELOPMENT_DOCUMENT.md`
+
+### Phase 4: Module 1 Verification & Sync
+- **Status:** complete
+- Actions taken:
+  - Added regression coverage for reminder-style non-accounting phrases
+  - Tightened local fallback routing so reminder / memo / meeting phrases do not enter bookkeeping flow
+  - Tightened reasoning intent routing so “later bookkeeping reminder” phrases remain general conversation
+  - Ran targeted AI assistant unit tests and confirmed pass
+  - Synced memory and development documentation immediately after module completion
+- Files created/modified:
+  - `app/src/main/java/com/example/aiaccounting/ai/AIReasoningEngine.kt`
+  - `app/src/main/java/com/example/aiaccounting/ai/AILocalProcessor.kt`
+  - `app/src/test/java/com/example/aiaccounting/ai/AIReasoningEngineTest.kt`
+  - `app/src/test/java/com/example/aiaccounting/ai/AILocalProcessorTest.kt`
+  - `docs/DEVELOPMENT_DOCUMENT.md`
+  - `PROGRESS.md`
+
+### Phase 5: Module 2 Entity Resolution & Feedback Sync
+- **Status:** complete
+- Actions taken:
+  - Added regression coverage for remote action bookkeeping feedback to include resolved account/category details
+  - Added regression coverage for numeric `accountId` / `categoryId` payloads so remote actions prefer existing entities over placeholder creation
+  - Updated `AIAssistantActionExecutor` to resolve numeric IDs first, then fall back to name matching and missing-entity creation
+  - Kept remote dirty reply / action JSON safety boundary unchanged in this module
+  - Ran targeted AI assistant unit tests and re-checked the follow-up review finding against the main workspace implementation
+- Files created/modified:
+  - `app/src/main/java/com/example/aiaccounting/ui/viewmodel/AIAssistantActionExecutor.kt`
+  - `app/src/test/java/com/example/aiaccounting/ui/viewmodel/AIAssistantActionExecutorTest.kt`
+  - `docs/DEVELOPMENT_DOCUMENT.md`
+  - `PROGRESS.md`
+
+### Phase 6: Module 3 Shared Entity Orchestration Sync
+- **Status:** complete
+- Actions taken:
+  - Added `AITransactionEntityResolver` to centralize transaction account/category resolution and on-demand creation across local and remote bookkeeping flows
+  - Switched `AILocalProcessor` and `AIAssistantActionExecutor` to the shared resolver while keeping their transaction parsing and user-facing copy local
+  - Expanded regression coverage for local fallback entity creation, amount+verb local transaction detection, remote JSON variants, numeric ID resolution, and batch result formatting
+  - Addressed review follow-ups by restoring broader local transaction detection with amount gating and removing batch double-numbering in executor summaries
+  - Ran targeted AI assistant regression unit tests and re-checked review comments against the main workspace state
+- Files created/modified:
+  - `app/src/main/java/com/example/aiaccounting/ai/AITransactionEntityResolver.kt`
+  - `app/src/main/java/com/example/aiaccounting/ai/AILocalProcessor.kt`
+  - `app/src/main/java/com/example/aiaccounting/ui/viewmodel/AIAssistantActionExecutor.kt`
+  - `app/src/test/java/com/example/aiaccounting/ai/AILocalProcessorTest.kt`
+  - `app/src/test/java/com/example/aiaccounting/ui/viewmodel/AIAssistantActionExecutorTest.kt`
+  - `app/src/test/java/com/example/aiaccounting/ui/viewmodel/AIAssistantRemoteResponseInterpreterTest.kt`
+  - `docs/DEVELOPMENT_DOCUMENT.md`
+  - `PROGRESS.md`
+
+### Phase 7: Module 3 Failure Feedback & Wrapper Variants Sync
+- **Status:** complete
+- Actions taken:
+  - Refined remote bookkeeping failure feedback so account/category resolution failures now expose the requested entity label together with the underlying error
+  - Extended `AIAssistantRemoteResponseInterpreter` and `AIAssistantActionExecutor` to conservatively unwrap executable payloads from known wrapper keys: `data`, `result`, and `payload`
+  - Added regression coverage for wrapped single-action payloads, wrapped batch `actions`, and finer-grained account/category failure messages
+  - Ran targeted wrapper-variant tests and full AI assistant regression tests
+- Files created/modified:
+  - `app/src/main/java/com/example/aiaccounting/ai/AITransactionEntityResolver.kt`
+  - `app/src/main/java/com/example/aiaccounting/ui/viewmodel/AIAssistantActionExecutor.kt`
+  - `app/src/main/java/com/example/aiaccounting/ui/viewmodel/AIAssistantRemoteResponseInterpreter.kt`
+  - `app/src/test/java/com/example/aiaccounting/ui/viewmodel/AIAssistantActionExecutorTest.kt`
+  - `app/src/test/java/com/example/aiaccounting/ui/viewmodel/AIAssistantRemoteResponseInterpreterTest.kt`
+  - `docs/DEVELOPMENT_DOCUMENT.md`
+  - `PROGRESS.md`
+
+### Phase 8: Module 4 AI Traceability Sync
+- **Status:** complete
+- **Actions taken:**
+  - Added transaction-level AI source markers via `aiSourceType` and `aiTraceId` so AI-created or AI-updated bookkeeping rows carry direct provenance for filtering and later audit lookup
+  - Added dedicated `AIOperationTrace` Room entity / DAO / repository to persist trace records for AI create, update, delete, and auto-create-supporting-entity flows across transactions, accounts, and categories
+  - Extended `AIOperation` with shared `AITraceContext` and threaded it through remote executor, local processor, and shared entity resolver so one AI request keeps a stable `traceId` across auto-created account/category + final transaction execution
+  - Updated Room migrations and Hilt database wiring for schema version 8, including `transactions` trace columns, `ai_operation_traces` table, and backfill-safe migration fixes for historical `ai_permission_logs`
+  - Ran targeted AI traceability regression tests and code review passes; fixed migration review findings before final verification
+- Files created/modified:
+  - `app/src/main/java/com/example/aiaccounting/data/local/entity/Transaction.kt`
+  - `app/src/main/java/com/example/aiaccounting/data/local/entity/AIOperationTrace.kt`
+  - `app/src/main/java/com/example/aiaccounting/data/local/dao/AIOperationTraceDao.kt`
+  - `app/src/main/java/com/example/aiaccounting/data/repository/AIOperationTraceRepository.kt`
+  - `app/src/main/java/com/example/aiaccounting/data/local/database/AppDatabase.kt`
+  - `app/src/main/java/com/example/aiaccounting/di/DatabaseModule.kt`
+  - `app/src/main/java/com/example/aiaccounting/ai/AIOperationExecutor.kt`
+  - `app/src/main/java/com/example/aiaccounting/ai/AITransactionEntityResolver.kt`
+  - `app/src/main/java/com/example/aiaccounting/ai/AILocalProcessor.kt`
+  - `app/src/main/java/com/example/aiaccounting/ui/viewmodel/AIAssistantActionExecutor.kt`
+  - `docs/DEVELOPMENT_DOCUMENT.md`
+  - `PROGRESS.md`
+
+### Phase 9: Module 4 Traceability UI & Safe Resolver Sync
+- **Status:** complete
+- **Actions taken:**
+  - Added AI source filter state to `TransactionListViewModel` and composed it with existing month/date/type/sort filtering so transaction detail lists can now filter `All / AI / Manual` without new navigation
+  - Added transaction-row AI source badges in `TransactionListScreen` and a compact traceability info card in `EditTransactionScreen` so AI-created bookkeeping is visible in both list and detail surfaces
+  - Updated `TransactionViewModel` edit flow to load the existing transaction first and preserve `aiSourceType` / `aiTraceId` on save instead of rebuilding a fresh row and dropping provenance metadata
+  - Tightened `AITransactionEntityResolver` so explicit account/category references that miss existing entities now fail fast by default instead of silently remapping to unrelated defaults; local fallback creation remains opt-in for offline bookkeeping flow
+  - Cleaned `AIAssistantViewModel` duplicate cancellation catch and aligned remote fallback account creation to stable `CASH` default semantics
+  - Re-ran targeted traceability UI / resolver tests and manually re-checked stale code-review findings against the live workspace implementation
+- Files created/modified:
+  - `app/src/main/java/com/example/aiaccounting/ui/viewmodel/TransactionListViewModel.kt`
+  - `app/src/main/java/com/example/aiaccounting/ui/screens/TransactionListScreen.kt`
+  - `app/src/main/java/com/example/aiaccounting/ui/screens/EditTransactionScreen.kt`
+  - `app/src/main/java/com/example/aiaccounting/ui/viewmodel/TransactionViewModel.kt`
+  - `app/src/main/java/com/example/aiaccounting/ai/AITransactionEntityResolver.kt`
+  - `app/src/main/java/com/example/aiaccounting/ui/viewmodel/AIAssistantActionExecutor.kt`
+  - `app/src/main/java/com/example/aiaccounting/ui/viewmodel/AIAssistantViewModel.kt`
+  - `app/src/test/java/com/example/aiaccounting/ui/viewmodel/TransactionListViewModelTest.kt`
+  - `app/src/test/java/com/example/aiaccounting/ui/viewmodel/AIAssistantActionExecutorTest.kt`
+  - `docs/DEVELOPMENT_DOCUMENT.md`
+  - `PROGRESS.md`
+
+### Phase 10: Module 5 Typed Action Semantic Explicitness Sync
+- **Status:** complete
+- **Actions taken:**
+  - Added explicit typed entity reference modeling via `AIAssistantEntityReference`, so remote `account/category` semantics now enter executor code as structured refs instead of parallel `name/id/rawId` fields
+  - Updated `AIAssistantRemoteResponseInterpreter` to parse `accountRef / categoryRef / transferAccountRef`, while still preserving legacy `account/accountId/category/categoryId` compatibility and wrapper / dirty-reply handling
+  - Updated `AIAssistantActionExecutor` to resolve entities from typed refs first, so explicit IDs now beat conflicting raw names and executor-side entity semantics are more explicit
+  - Closed current `TRANSFER` semantics by making remote `transfer` / `transactionType=transfer` payloads parse through the typed path but return an explicit non-supported execution message instead of silently collapsing into incomplete bookkeeping behavior
+  - Synced regression coverage across interpreter, action executor, remote execution handler, and reasoning tests for typed refs, transfer envelopes, and explicit transfer rejection
+- Files created/modified:
+  - `app/src/main/java/com/example/aiaccounting/ui/viewmodel/AIAssistantTypedAction.kt`
+  - `app/src/main/java/com/example/aiaccounting/ui/viewmodel/AIAssistantRemoteResponseInterpreter.kt`
+  - `app/src/main/java/com/example/aiaccounting/ui/viewmodel/AIAssistantActionExecutor.kt`
+  - `app/src/test/java/com/example/aiaccounting/ui/viewmodel/AIAssistantRemoteResponseInterpreterTest.kt`
+  - `app/src/test/java/com/example/aiaccounting/ui/viewmodel/AIAssistantActionExecutorTest.kt`
+  - `app/src/test/java/com/example/aiaccounting/ui/viewmodel/AIAssistantRemoteExecutionHandlerTest.kt`
+  - `app/src/test/java/com/example/aiaccounting/ai/AIReasoningEngineTest.kt`
+  - `docs/DEVELOPMENT_DOCUMENT.md`
+  - `PROGRESS.md`
 
 ## Test Results
 | Test | Input | Expected | Actual | Status |
 |------|-------|----------|--------|--------|
-| session-catchup | planning-with-files session-catchup script | Catchup context or clean no-op | Script completed with no output | ✓ |
+| Module 5 typed action regressions | `./gradlew testDebugUnitTest --tests com.example.aiaccounting.ui.viewmodel.AIAssistantRemoteResponseInterpreterTest --tests com.example.aiaccounting.ui.viewmodel.AIAssistantActionExecutorTest --tests com.example.aiaccounting.ui.viewmodel.AIAssistantRemoteExecutionHandlerTest --tests com.example.aiaccounting.ai.AIReasoningEngineTest` | typed entity reference 收口与 transfer 语义封口后关键回归全部通过 | 全部通过 | ✓ |
+| Module 5 typed action regressions | `./gradlew testDebugUnitTest --tests com.example.aiaccounting.ui.viewmodel.AIAssistantRemoteResponseInterpreterTest --tests com.example.aiaccounting.ui.viewmodel.AIAssistantActionExecutorTest --tests com.example.aiaccounting.ui.viewmodel.AIAssistantRemoteExecutionHandlerTest --tests com.example.aiaccounting.ai.AIReasoningEngineTest` | typed action 语义边界收口后解释器、执行器、远程执行链与 reasoning 关键回归全部通过 | 全部通过 | ✓ |
 
 ## Error Log
 | Timestamp | Error | Attempt | Resolution |
 |-----------|-------|---------|------------|
-| 2026-03-19 | Final review found action detection missed pretty-printed JSON `type` payloads | 1 | Replaced exact compact-string checks with a whitespace-tolerant regex for supported `type` values |
-| 2026-03-19 | Phase A review found swallowed `CancellationException` and incomplete action detection gate | 1 | Added cancellation rethrow in `AIAssistantActionExecutor` and expanded ViewModel action JSON detection for `query_*` and `create_category` |
-| 2026-03-19 | compileDebugKotlin failed: `ensureBasicCategoriesExist` unresolved after Phase A cleanup | 1 | Restored the shared helper and kept only the fully duplicated JSON/action code removed |
-| 2026-03-19 | worktree agent failed because `.git/config` lock file exists | 1 | Switched to planning and review in current worktree without repeating the same failing path |
+| 2026-03-26 | 新增 `TransactionListViewModelTest` 初版因 `stateIn(WhileSubscribed)` 未被订阅导致断言始终命中空列表 | 1 | 在测试中显式 collect `filteredTransactions` 后再推进 dispatcher 调度 |
+| 2026-03-26 | `AIAssistantActionExecutor` 编译缺少 `AccountType` import | 1 | 补 import 后重新执行 targeted tests |
+| 2026-03-26 | resolver 安全语义收紧后，旧测试仍断言底层补建失败文案 | 1 | 将回归测试更新为断言“未找到指定账户/分类”新语义 |
+
+## Test Results
+| Test | Input | Expected | Actual | Status |
+|------|-------|----------|--------|--------|
+| Module 4 targeted tests | `./gradlew testDebugUnitTest --tests com.example.aiaccounting.ui.viewmodel.AIAssistantActionExecutorTest --tests com.example.aiaccounting.ai.AILocalProcessorTest --tests com.example.aiaccounting.data.repository.TransactionRepositoryTest` | AI 留痕相关改动可编译且关键回归通过 | 全部通过 | ✓ |
+| Module 4 targeted tests (post-review fix) | `./gradlew testDebugUnitTest --tests com.example.aiaccounting.ui.viewmodel.AIAssistantActionExecutorTest --tests com.example.aiaccounting.ai.AILocalProcessorTest --tests com.example.aiaccounting.data.repository.TransactionRepositoryTest` | migration 修复后关键回归仍通过 | 全部通过 | ✓ |
+
+## Error Log
+| Timestamp | Error | Attempt | Resolution |
+|-----------|-------|---------|------------|
+| 2026-03-26 | reviewer 指出 Hilt `DatabaseModule` 未接入 `MIGRATION_7_8`，升级路径存在 destructive fallback 风险 | 1 | 补齐 Hilt 侧 migration 集合并重新执行 targeted tests |
+| 2026-03-26 | reviewer 追出历史 `MIGRATION_6_7` 未创建 `ai_permission_logs`，旧升级路径可能触发 Room schema mismatch | 1 | 在 `MIGRATION_6_7` 补齐 `ai_permission_logs` 建表 SQL 并重新验证 |
+
 
 ## 5-Question Reboot Check
 | Question | Answer |
 |----------|--------|
-| Where am I? | Phase 2: Planning & Structure |
-| Where am I going? | Finish validation strategy, then deliver the split plan for approval |
-| What's the goal? | Produce a file-backed implementation plan for `AIAssistantViewModel` splitting without editing code |
-| What have I learned? | Existing repo already contains several extraction anchors and supports phased coordinator/executor-based slimming |
-| What have I done? | Initialized planning workflow for this task, updated all three planning files, and summarized the current split direction |
+| Where am I? | Phase 3: Delivery Structure |
+| Where am I going? | Phase 4 Verification → Phase 5 Delivery |
+| What's the goal? | 把 EasyAccounts 借鉴点转成当前项目的具体开发任务清单 |
+| What have I learned? | 当前最值得借鉴的是 AI 留痕、工具语义显式化、人格统一收口、先查再执行编排 |
+| What have I done? | 已创建/覆盖三份规划文件并完成映射与优先级整理 |
 
 ---
-
-## Session: 2026-03-14
-
-### Phase 1: Requirements & Discovery
-- **Status:** in_progress
-- Actions taken:
-  - Initialized planning-with-files workflow
-  - Created [task_plan.md](task_plan.md) and [findings.md](findings.md)
-  - Detected existing progress.md is a project progress document; appended planning session log instead of overwriting
-  - First-pass codebase grep: located AIService.fetchModels (/v1/models) and InviteGatewayService.bootstrap (/bootstrap)
-  - Confirmed product decisions: Auto retry N=2; invite users pick from fetched model list; advanced users can switch to custom config
-- Files created/modified:
-  - task_plan.md (created)
-  - findings.md (created)
-  - progress.md (appended)
-
-### Phase 2: Architecture & Data Model Design
-- **Status:** complete
-- Actions taken:
-  - Finalized model selection decisions: Auto retry N=2; invite users pick from fetched /v1/models list
-  - Implemented invite model mode persistence and UI entry in AISettings
-
-### Phase 3: Implementation (Model Management)
-- **Status:** complete
-- Actions taken:
-  - Added invite model selection mode and persistence (DataStore)
-  - Updated AISettingsScreen to show InviteModelSelectorCard when invite-bound
-  - Implemented AIService Auto fallback (N=2) using /v1/models candidate pool
-  - Added unit test with MockWebServer for model fallback
-  - Ran ./gradlew testDebugUnitTest (PASS)
-- Files created/modified:
-  - app/src/main/java/com/example/aiaccounting/data/model/AIConfig.kt
-  - app/src/main/java/com/example/aiaccounting/data/repository/AIConfigRepository.kt
-  - app/src/main/java/com/example/aiaccounting/ui/viewmodel/AISettingsViewModel.kt
-  - app/src/main/java/com/example/aiaccounting/ui/screens/AISettingsScreen.kt
-  - app/src/main/java/com/example/aiaccounting/data/service/AIService.kt
-  - app/src/test/java/com/example/aiaccounting/ui/viewmodel/AISettingsInviteBindingTest.kt
-  - app/src/test/java/com/example/aiaccounting/data/service/AIServiceModelFallbackTest.kt
-  - app/build.gradle.kts
-
----
-
-# AI记账 - 项目进度
-
-## 总体进度: 100% ✅
-
----
-
-## 已完成任务
-
-### ✅ P0 - 基础架构 (100%)
-- [x] 项目初始化与Gradle配置
-- [x] AndroidManifest.xml配置
-- [x] 依赖库引入 (Room, Hilt, Compose, SQLCipher等)
-- [x] 基础包结构创建
-- [x] 主题与样式定义
-- [x] 导航结构搭建
-
-### ✅ P0 - 数据层 (100%)
-- [x] 数据库设计 (Transaction, Account, Category实体)
-- [x] DAO接口定义
-- [x] SQLCipher加密集成
-- [x] Repository模式实现
-- [x] 数据迁移策略
-
-### ✅ P0 - 核心UI (100%)
-- [x] MainActivity.kt - 主活动
-- [x] HomeScreen.kt - 首页/明细列表
-- [x] AddTransactionScreen.kt - 添加交易
-- [x] EditTransactionScreen.kt - 编辑交易
-
-### ✅ P1 - 账户管理 (100%)
-- [x] AccountsScreen.kt - 账户列表与管理
-- [x] AccountViewModel.kt - 账户逻辑
-
-### ✅ P1 - 分类管理 (100%)
-- [x] CategoriesScreen.kt - 分类列表与管理
-- [x] CategoryViewModel.kt - 分类逻辑
-
-### ✅ P1 - 统计功能 (100%)
-- [x] StatisticsScreen.kt - 统计主界面
-- [x] StatisticsViewModel.kt - 统计数据逻辑
-- [x] MPAndroidChart集成
-- [x] 月度/分类/趋势统计
-
-### ✅ P1 - AI功能 (100%)
-- [x] NaturalLanguageParser.kt - 自然语言解析器
-- [x] AIAssistantViewModel.kt - AI助手逻辑
-- [x] AIAssistantScreen.kt - AI助手界面
-- [x] 金额提取算法
-- [x] 日期提取算法
-- [x] 分类匹配算法
-- [x] 置信度计算
-
-### ✅ P1 - 设置功能 (100%)
-- [x] SettingsScreen.kt - 设置主界面（包含安全、AI、备份、关于等设置）
-
-### ✅ P2 - 数据备份 (100%)
-- [x] BackupService.kt - 备份服务
-- [x] AutoBackupManager.kt - 自动备份管理
-- [x] Excel导出功能
-- [x] 备份加密 (AES-256)
-- [x] 定时备份 (AlarmManager)
-
-### ✅ P2 - UI优化 (100%)
-- [x] ThemeManager.kt - 主题管理器
-- [x] 深色模式支持
-- [x] Animations.kt - 动画库
-- [x] 页面切换动画
-- [x] 列表项动画
-- [x] 加载动画
-
-### ✅ P2 - 性能优化 (100%)
-- [x] 数据库查询优化
-- [x] 图片加载优化
-- [x] 内存管理
-- [x] 启动速度优化
-
-### ✅ P3 - 测试 (100%)
-- [x] NaturalLanguageParserTest.kt - AI解析器单元测试
-- [x] NumberUtilsTest.kt - 工具类单元测试
-- [x] TransactionDaoTest.kt - 数据库集成测试
-- [x] HomeScreenTest.kt - 首页UI测试
-- [x] AIAssistantScreenTest.kt - AI助手UI测试
-
-### ✅ P3 - 发布准备 (100%)
-- [x] proguard-rules.pro - ProGuard混淆规则
-- [x] build.gradle.kts - 发布构建配置
-- [x] generate-keystore.bat - 密钥生成脚本
-- [x] screenshots_description.md - 应用商店素材
-- [x] RELEASE_CHECKLIST.md - 发布检查清单
-- [x] PRIVACY_POLICY.md - 隐私政策
-
----
-
-## 项目文件统计
-
-### 源代码文件 (Kotlin)
-| 模块 | 文件数 | 代码行数 |
-|------|--------|----------|
-| data | 12 | ~1500 |
-| ui | 18 | ~3500 |
-| ai | 3 | ~800 |
-| viewmodel | 6 | ~1200 |
-| service | 3 | ~600 |
-| security | 2 | ~400 |
-| utils | 4 | ~500 |
-| **总计** | **48** | **~8500** |
-
-### 测试文件
-| 类型 | 文件数 | 测试用例数 |
-|------|--------|------------|
-| 单元测试 | 2 | 30+ |
-| 集成测试 | 1 | 8 |
-| UI测试 | 2 | 15+ |
-| **总计** | **5** | **50+** |
-
-### 资源文件
-| 类型 | 数量 |
-|------|------|
-| 布局XML | 0 (纯Compose) |
-| 矢量图标 | 20+ |
-| 字符串资源 | 200+ |
-| 主题定义 | 2 (Light/Dark) |
-
----
-
-## 技术栈
-
-### 架构
-- **架构模式**: MVVM (Model-View-ViewModel)
-- **依赖注入**: Hilt
-- **异步处理**: Kotlin Coroutines + Flow
-- **导航**: Jetpack Navigation Compose
-
-### UI
-- **UI框架**: Jetpack Compose
-- **设计系统**: Material Design 3
-- **图表**: MPAndroidChart
-- **动画**: Compose Animation API
-
-### 数据
-- **数据库**: Room + SQLCipher
-- **序列化**: Gson
-- **Excel处理**: Apache POI
-
-### 安全
-- **数据库加密**: SQLCipher (AES-256)
-- **备份加密**: AES-256
-- **生物识别**: Android Biometric API
-
-### 测试
-- **单元测试**: JUnit 4 + MockK
-- **集成测试**: AndroidJUnit4 + Hilt
-- **UI测试**: Compose Testing + Espresso
-
----
-
-## 功能清单
-
-### 核心功能
-- ✅ 自然语言记账 (AI解析)
-- ✅ 交易增删改查
-- ✅ 多账户管理
-- ✅ 分类管理 (支持子分类)
-- ✅ 收支统计 (月度/分类/趋势)
-- ✅ 数据搜索
-
-### 安全功能
-- ✅ 数据库加密
-- ✅ PIN码保护
-- ✅ 生物识别 (指纹/面部)
-- ✅ 应用锁定
-
-### 数据管理
-- ✅ 自动备份
-- ✅ 手动备份
-- ✅ 数据恢复
-- ✅ Excel导出
-- ✅ 数据清理
-
-### 用户体验
-- ✅ 深色模式
-- ✅ 主题切换
-- ✅ 流畅动画
-- ✅ 快速操作
-- ✅ 智能提示
-
----
-
-## 发布状态
-
-### 构建配置
-- ✅ 版本号: 1.0.0
-- ✅ 版本名称: 1.0.0
-- ✅ 签名配置: 已配置
-- ✅ ProGuard: 已启用
-- ✅ 资源压缩: 已启用
-
-### 应用商店素材
-- ✅ 应用图标 (512x512)
-- ✅ 特色图形 (1024x500)
-- ✅ 截图说明 (7张)
-- ✅ 应用描述
-- ✅ 隐私政策
-
-### 文档
-- ✅ README.md
-- ✅ DEVELOPMENT_DOCUMENT.md
-- ✅ TASK_CHECKLIST.md
-- ✅ QUICK_REFERENCE.md
-- ✅ RELEASE_CHECKLIST.md
-- ✅ PRIVACY_POLICY.md
-
----
-
-## 下一步计划
-
-项目开发已完成！可以进行以下操作：
-
-1. **构建发布版本**
-   ```bash
-   ./gradlew assembleRelease
-   ```
-
-2. **运行测试**
-   ```bash
-   ./gradlew test
-   ./gradlew connectedAndroidTest
-   ```
-
-3. **生成签名APK**
-   - 运行 `generate-keystore.bat` 生成密钥
-   - 使用 Android Studio 构建签名APK
-
-4. **发布应用**
-   - 按照 RELEASE_CHECKLIST.md 进行发布
-   - 上传至应用商店
-
----
-
-## 项目总结
-
-### 开发周期
-- **开始日期**: 2024年1月
-- **完成日期**: 2024年1月
-- **开发时长**: 约2周
-
-### 代码质量
-- ✅ 单元测试覆盖率: >80%
-- ✅ 集成测试: 通过
-- ✅ UI测试: 通过
-- ✅ 代码规范: 遵循Kotlin规范
-- ✅ 架构清晰: MVVM分层明确
-
-### 特色亮点
-1. **AI智能记账**: 自然语言解析，3秒完成记账
-2. **本地安全**: 纯本地存储，多重加密保护
-3. **零服务器**: 无需联网，隐私绝对安全
-4. **开源免费**: 完全开源，永久免费
-
-### 技术亮点
-- 使用最新Android技术栈 (Compose, Hilt, Room)
-- 完整的测试覆盖 (单元/集成/UI)
-- 企业级安全方案 (SQLCipher + Biometric)
-- 优秀的用户体验 (动画 + 深色模式)
-
----
-
-**项目状态**: ✅ 已完成，可发布
-
-**最后更新**: 2024-01-XX
+*Update after completing each phase or encountering errors*

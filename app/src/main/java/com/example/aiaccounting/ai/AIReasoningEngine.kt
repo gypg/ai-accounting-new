@@ -297,9 +297,14 @@ class AIReasoningEngine @Inject constructor(
         val transactionScore = transactionPatterns.count { lowerMessage.contains(it) }
         val queryScore = queryPatterns.count { lowerMessage.contains(it) }
         val isExplicitRecordRequest = lowerMessage.contains("记一笔") || lowerMessage.contains("记一下") || lowerMessage.contains("记个")
+        val isReminderLikeConversation = isOrdinaryNonAccountingConversation(lowerMessage)
 
         // 判断意图
         return when {
+            isAssistantPersonaConversation(lowerMessage) || isReminderLikeConversation -> {
+                IntentAnalysis(UserIntent.GENERAL_CONVERSATION, 0.92f)
+            }
+
             // 高置信度记账
             transactionScore >= 2 ||
                 (transactionScore >= 1 && messageParser.containsAmount(message)) ||
@@ -745,31 +750,41 @@ class AIReasoningEngine @Inject constructor(
     /**
      * 生成对话动作
      */
-    private suspend fun generateConversationActions(
+    private fun generateConversationActions(
         context: ReasoningContext,
         intentAnalysis: IntentAnalysis
     ): List<AIAction> {
         val message = context.userMessage.lowercase()
-        
+
         val response = when {
+            message.contains("你是什么模型") ||
+                message.contains("什么模型") ||
+                message.contains("底层模型") ||
+                message.contains("底层是什么模型") ||
+                message.contains("用的什么模型") ||
+                message.contains("哪个模型") -> {
+                "我是你的 AI 管家助手，会按当前管家的人设陪你聊天，也能帮你记账、查账和整理账本。关于底层模型这类实现细节，我更想先把眼前这件事替你办好。"
+            }
+            message.contains("你能做什么") ||
+                message.contains("你会什么") ||
+                message.contains("能帮我做什么") ||
+                message.contains("可以帮我做什么") -> {
+                "我是你的 AI 管家助手，可以陪你聊天，也能直接帮你记账、查账、看交易记录、看账户资产，还能做一些简单分析。你直接说需求，我来接住。"
+            }
             message.contains("你好") || message.contains("您好") || message.contains("hi") || message.contains("hello") -> {
-                "您好！我是您的AI记账助手。我可以帮您：\n" +
-                "• 记账：直接说花了50元买咖啡\n" +
-                "• 查询：查看账户余额、交易记录\n" +
-                "• 分析：分析支出结构、收支趋势\n" +
-                "有什么可以帮您的吗？"
+                "你好呀，我在这儿。除了陪你聊聊，我也可以直接帮你记账、查账户余额、看交易记录，或者一起整理最近的收支。"
             }
             message.contains("谢谢") || message.contains("感谢") -> {
-                "不客气！随时为您服务。"
+                "不客气，我会一直在。你想继续聊，还是顺手处理一笔账，都可以。"
             }
             message.contains("再见") || message.contains("拜拜") -> {
-                "再见！记得坚持记账哦！"
+                "好呀，先陪你到这里。下次想聊天、记账或查账，直接叫我就行。"
             }
             else -> {
-                "您好！我可以帮您记账、查询财务信息或分析数据。请告诉我您需要什么帮助？"
+                "我在听。你可以直接跟我聊天，也可以让我帮你记账、查账、看分析；按你现在想说的继续就好。"
             }
         }
-        
+
         return listOf(AIAction.GenerateResponse(response))
     }
 
@@ -904,8 +919,7 @@ class AIReasoningEngine @Inject constructor(
                     category = categories.firstOrNull { it.type == action.type }
                 }
                 is AIOperationExecutor.AIOperationResult.Error -> {
-                    // 尝试使用任何可用分类
-                    category = categories.firstOrNull()
+                    category = null
                 }
             }
         }
@@ -983,6 +997,20 @@ class AIReasoningEngine @Inject constructor(
     // ============ 辅助方法 ============
 
     private data class IntentAnalysis(val intent: UserIntent, val confidence: Float)
+
+    private fun isAssistantPersonaConversation(message: String): Boolean {
+        return listOf(
+            "你好", "您好", "hi", "hello", "谢谢", "感谢", "再见", "拜拜",
+            "你是什么模型", "什么模型", "底层模型", "底层是什么模型", "用的什么模型", "哪个模型",
+            "你能做什么", "你会什么", "能帮我做什么", "可以帮我做什么"
+        ).any { message.contains(it) }
+    }
+
+    private fun isOrdinaryNonAccountingConversation(message: String): Boolean {
+        return listOf(
+            "记得", "提醒我", "会议要点", "备忘", "笔记", "日记"
+        ).any { message.contains(it) }
+    }
 
     private fun inferAccount(message: String): String? {
         val lower = message.lowercase()

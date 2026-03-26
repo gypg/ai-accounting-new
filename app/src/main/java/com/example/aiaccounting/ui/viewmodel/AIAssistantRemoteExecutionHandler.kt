@@ -31,7 +31,7 @@ internal class AIAssistantRemoteExecutionHandler(
 
                     when (val decision = interpreter.interpret(userMessage = userMessage, remoteResponse = collected.response)) {
                         is RemoteResponseDecision.ExecuteActions -> {
-                            AIAssistantRemoteExecutionResult.ActionExecutionRequested(decision.rawResponse)
+                            AIAssistantRemoteExecutionResult.ActionExecutionRequested(decision.envelope)
                         }
                         is RemoteResponseDecision.FallbackToLocalTransaction -> {
                             AIAssistantRemoteExecutionResult.LocalFallbackRequested(decision.remoteReply)
