@@ -645,7 +645,9 @@ AI记账是一款面向中国大陆个人用户的智能记账 Android 应用。
 - 模块 2 已将 POI 的 keep 范围从整个 `org.apache.poi.**` 收敛到当前 Excel 导出主路径所需的 `org.apache.poi.ss.**`、`org.apache.poi.xssf.**`、`org.apache.poi.openxml4j.**`，并补充 `-dontwarn org.openxmlformats.schemas.**` 以恢复 release 构建稳定性
 - 模块 6A 已删除 direct dependency `org.apache.poi:poi:5.2.5`，仅保留 `org.apache.poi:poi-ooxml:5.2.5`；`dependencyInsight` 已确认 `poi` 仍由 `poi-ooxml` 传递引入，因此当前变更只是在依赖声明层面去冗余，不改变 release 结果
 - 模块 6B 已新增 [ExcelExporterTest.kt](../app/src/test/java/com/example/aiaccounting/data/exporter/ExcelExporterTest.kt)，覆盖交易导出、空列表导出、月度汇总导出三类回归场景；当前已确认单测与 release 构建均通过，为后续进一步裁剪 POI 依赖提供安全网
-- 当前 release 构建仍依赖 `app/proguard-rules.pro` 中对 POI / AWT / XML schema 的 suppress 规则，将该 warning 维持为非阻塞项；下一步若继续推进，应优先从依赖层面缩减 POI，而不是继续扩大 suppress
+- 模块 6C 已把 `app/proguard-rules.pro` 中的 suppress 从全量 `org.apache.poi.**` 收窄到已归因的 `org.apache.poi.xslf.**`、`org.apache.poi.sl.**`，并仅保留 release 实测仍需要的 `javax.imageio.**`、`javax.swing.**` desktop API 边界；当前已确认业务侧 POI 用法仍只限 `XSSFWorkbook` 基础导出主链
+- 模块 6C 实测表明：若去掉 `javax.imageio.**` / `javax.swing.**`，R8 会重新报缺失类错误，因此当前结果不是“完全取消 suppress”，而是把 suppress 收敛到 **已验证的最小可行边界**
+- 当前 release 构建仍依赖 `app/proguard-rules.pro` 中这组已归因的 POI 可选路径与 desktop API suppress 规则，将该 warning 维持为非阻塞项；后续若继续推进，应优先从更深层依赖裁剪或导出库替换评估入手，而不是重新放大 suppress
 - 旧文档中仍有部分历史路径、旧版本号、v1.0.0/v1.8.1 叙述，需要以后继续收敛
 
 ### 5.3 建议后续手工复核的文档

@@ -143,15 +143,26 @@ export KEY_PASSWORD="your_key_password"
 - 保留 `implementation("org.apache.poi:poi-ooxml:5.2.5")`
 - 通过 `dependencyInsight` 确认 `poi` 仍由 `poi-ooxml` 传递引入，release 构建不受影响
 
-模块 6B 当前已完成的保护：
-- 新增 [ExcelExporterTest.kt](app/src/test/java/com/example/aiaccounting/data/exporter/ExcelExporterTest.kt)
-- 覆盖 `exportTransactions` 正常导出、空列表导出、`exportMonthlySummary` 汇总导出三类回归场景
-- 测试通过真实文件写入与重新读取 workbook，确保后续若继续裁剪 POI 依赖时，能第一时间发现 Excel 导出回归
-- 已验证：
+模块 6C 当前已完成的审计与收敛：
+- 通过 `:app:dependencyInsight --dependency org.apache.poi --configuration releaseRuntimeClasspath` 与 `--dependency poi-ooxml` 再次确认 release 依赖主链仍为：
+  - `org.apache.poi:poi-ooxml:5.2.5`
+  - `org.apache.poi:poi-ooxml-lite:5.2.5`
+  - `org.apache.poi:poi:5.2.5`（由 `poi-ooxml` 传递引入）
+  - `org.apache.xmlbeans:xmlbeans:5.2.0`
+- 通过 `Grep` 复核项目内 POI 触点后，当前业务侧仍仅在 `ExcelExporter.kt` 与 `ExcelExporterTest.kt` 中使用 `XSSFWorkbook`、样式与合并单元格等基础 `.xlsx` API，没有新增 PPT / SVG / 签名相关直接用法
+- 将 `app/proguard-rules.pro` 中的 POI suppress 从全量 `org.apache.poi.**` 收窄为当前已归因的可选展示路径：
+  - `org.apache.poi.xslf.**`
+  - `org.apache.poi.sl.**`
+  - 并补齐本轮 release 实测需要的 desktop API suppress：`javax.imageio.**`、`javax.swing.**`
+- 实测表明：如果只保留 `xslf/sl` 而移除 desktop API suppress，R8 会重新报缺失类：`javax.imageio.*`、`javax.swing.JLabel`；因此模块 6C 的最终结果不是“彻底删光 suppress”，而是把 suppress 收敛到 **已验证会被 POI 可选路径触发的最小包面**
+- 重新执行验证后：
   - `./gradlew :app:testDebugUnitTest --tests com.example.aiaccounting.data.exporter.ExcelExporterTest` ✅
   - `./gradlew :app:assembleRelease` ✅
+- 当前 release 仍保留单条已知 warning：
+  - `org.apache.poi.xslf.draw.SVGUserAgent.getViewbox()` unreachable warning
+- 该 warning 在模块 6C 之后仍被确认为 **poi-ooxml 自带未使用 PPT/SVG 渲染路径的静态分析噪音**，但本轮已把 suppress 范围从“整个 POI 命名空间”收紧为“已验证的 PPT/SVG + desktop API 边界”
 
-当前状态说明：
-- warning **尚未被彻底消除**
-- 当前 release 构建仍依赖 `app/proguard-rules.pro` 中对 POI / AWT / XML schema 的 suppress 规则将其维持为非阻塞项
-- 在当前实现范围内这是可接受状态；后续若继续推进，下一步应优先尝试真正缩减 POI 依赖，而不是继续扩大 suppress 范围
+当前状态说明（模块 6C 后）：
+- release 构建与 Excel 导出回归均保持通过
+- suppress 范围比模块 6B 前更窄，且已用实际失败/恢复验证过最小边界
+- 下一步若继续推进，不应再优先调 ProGuard，而应考虑是否值得继续做更深层的 `poi-ooxml` 传递依赖裁剪或导出库替换评估

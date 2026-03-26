@@ -71,7 +71,8 @@
 - 模块 2 已将 POI keep 范围收敛到当前 Excel 导出主路径，并补充 `-dontwarn org.openxmlformats.schemas.**` 以恢复 release 构建；当前 warning 仍存在，但已确认继续保持非阻塞
 - 模块 6A 已删除 direct `poi` 依赖声明，并验证 `poi` 仍由 `poi-ooxml` 传递引入；当前 release 构建结果与 warning 状态均保持不变
 - 模块 6B 已新增 Excel 导出回归测试，并验证 `ExcelExporterTest` 与 `assembleRelease` 均通过；后续若继续裁剪 POI 依赖，应以这些回归用例作为最低验证基线
-- 后续若继续处理，优先方向应是缩减 POI 依赖面，而不是继续扩大 suppress 规则
+- 模块 6C 已将 `app/proguard-rules.pro` 中的 POI suppress 从全量 `org.apache.poi.**` 收窄到已确认的 `org.apache.poi.xslf.**`、`org.apache.poi.sl.**` 与 release 实测仍需要的 `javax.imageio.**`、`javax.swing.**` 边界；`ExcelExporterTest` 与 `assembleRelease` 再次通过，说明当前收窄未破坏 Excel 导出与 release 构建
+- 当前剩余单条 `SVGUserAgent.getViewbox()` warning 继续归类为 `poi-ooxml` 自带未使用 PPT/SVG 渲染路径的静态分析噪音；后续若继续处理，优先方向应转向更深层依赖裁剪或库替换评估，而不是重新放大 suppress 包面
 
 ## 四、回滚思路
 

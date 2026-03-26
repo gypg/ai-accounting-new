@@ -62,13 +62,16 @@
 -keep class org.apache.poi.ss.** { *; }
 -keep class org.apache.poi.xssf.** { *; }
 -keep class org.apache.poi.openxml4j.** { *; }
--dontwarn org.apache.poi.**
+-dontwarn org.apache.poi.xslf.**
+-dontwarn org.apache.poi.sl.**
 -dontwarn org.apache.xmlbeans.**
 -dontwarn org.openxmlformats.schemas.**
 -dontwarn org.apache.logging.log4j.**
 -dontwarn com.graphbuilder.curve.**
 -dontwarn aQute.bnd.annotation.spi.**
 -dontwarn java.awt.**
+-dontwarn javax.imageio.**
+-dontwarn javax.swing.**
 -dontwarn javax.xml.stream.**
 -dontwarn net.sf.saxon.**
 -dontwarn org.osgi.framework.**

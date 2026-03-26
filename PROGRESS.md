@@ -150,37 +150,34 @@
   - `docs/DEVELOPMENT_DOCUMENT.md`
   - `PROGRESS.md`
 
-### Phase 10: Module 5 Typed Action Semantic Explicitness Sync
+### Phase 11: Module 6C POI Provenance Audit & Warning Scope Reduction
 - **Status:** complete
 - **Actions taken:**
-  - Added explicit typed entity reference modeling via `AIAssistantEntityReference`, so remote `account/category` semantics now enter executor code as structured refs instead of parallel `name/id/rawId` fields
-  - Updated `AIAssistantRemoteResponseInterpreter` to parse `accountRef / categoryRef / transferAccountRef`, while still preserving legacy `account/accountId/category/categoryId` compatibility and wrapper / dirty-reply handling
-  - Updated `AIAssistantActionExecutor` to resolve entities from typed refs first, so explicit IDs now beat conflicting raw names and executor-side entity semantics are more explicit
-  - Closed current `TRANSFER` semantics by making remote `transfer` / `transactionType=transfer` payloads parse through the typed path but return an explicit non-supported execution message instead of silently collapsing into incomplete bookkeeping behavior
-  - Synced regression coverage across interpreter, action executor, remote execution handler, and reasoning tests for typed refs, transfer envelopes, and explicit transfer rejection
+  - Re-ran release dependency audit with `dependencyInsight` and confirmed `poi` is still transitively provided by `poi-ooxml`, while `poi-ooxml-lite` / `xmlbeans` remain in the release graph
+  - Re-checked project POI usage and confirmed business-side usage is still limited to `ExcelExporter` + `ExcelExporterTest` with `XSSFWorkbook`-based `.xlsx` export only
+  - Narrowed `app/proguard-rules.pro` from broad `-dontwarn org.apache.poi.**` to verified optional POI presentation packages `org.apache.poi.xslf.**` / `org.apache.poi.sl.**`
+  - Verified that removing desktop API suppress completely causes R8 missing-class failures for `javax.imageio.*` and `javax.swing.JLabel`, then restored the minimal `javax.imageio.**` / `javax.swing.**` boundary needed for release builds
+  - Re-ran Excel exporter regression tests and `assembleRelease`, confirming export behavior and release build stability remained intact after the narrower suppress set
 - Files created/modified:
-  - `app/src/main/java/com/example/aiaccounting/ui/viewmodel/AIAssistantTypedAction.kt`
-  - `app/src/main/java/com/example/aiaccounting/ui/viewmodel/AIAssistantRemoteResponseInterpreter.kt`
-  - `app/src/main/java/com/example/aiaccounting/ui/viewmodel/AIAssistantActionExecutor.kt`
-  - `app/src/test/java/com/example/aiaccounting/ui/viewmodel/AIAssistantRemoteResponseInterpreterTest.kt`
-  - `app/src/test/java/com/example/aiaccounting/ui/viewmodel/AIAssistantActionExecutorTest.kt`
-  - `app/src/test/java/com/example/aiaccounting/ui/viewmodel/AIAssistantRemoteExecutionHandlerTest.kt`
-  - `app/src/test/java/com/example/aiaccounting/ai/AIReasoningEngineTest.kt`
+  - `app/proguard-rules.pro`
+  - `BUILD_GUIDE.md`
+  - `RELEASE_CHECKLIST.md`
   - `docs/DEVELOPMENT_DOCUMENT.md`
   - `PROGRESS.md`
 
 ## Test Results
 | Test | Input | Expected | Actual | Status |
 |------|-------|----------|--------|--------|
-| Module 5 typed action regressions | `./gradlew testDebugUnitTest --tests com.example.aiaccounting.ui.viewmodel.AIAssistantRemoteResponseInterpreterTest --tests com.example.aiaccounting.ui.viewmodel.AIAssistantActionExecutorTest --tests com.example.aiaccounting.ui.viewmodel.AIAssistantRemoteExecutionHandlerTest --tests com.example.aiaccounting.ai.AIReasoningEngineTest` | typed entity reference 收口与 transfer 语义封口后关键回归全部通过 | 全部通过 | ✓ |
-| Module 5 typed action regressions | `./gradlew testDebugUnitTest --tests com.example.aiaccounting.ui.viewmodel.AIAssistantRemoteResponseInterpreterTest --tests com.example.aiaccounting.ui.viewmodel.AIAssistantActionExecutorTest --tests com.example.aiaccounting.ui.viewmodel.AIAssistantRemoteExecutionHandlerTest --tests com.example.aiaccounting.ai.AIReasoningEngineTest` | typed action 语义边界收口后解释器、执行器、远程执行链与 reasoning 关键回归全部通过 | 全部通过 | ✓ |
+| Module 6C dependency audit | `./gradlew :app:dependencyInsight --dependency org.apache.poi --configuration releaseRuntimeClasspath` | 确认 POI release 依赖主链仍来自 `poi-ooxml` 传递路径 | 确认 `poi` / `poi-ooxml-lite` / `xmlbeans` 仍在 release graph | ✓ |
+| Module 6C dependency audit | `./gradlew :app:dependencyInsight --dependency poi-ooxml --configuration releaseRuntimeClasspath` | 确认 `poi-ooxml` 仍为直接声明主依赖 | 确认 `poi-ooxml` 直接存在且携带 `poi-ooxml-lite` | ✓ |
+| Module 6C export regression | `./gradlew :app:testDebugUnitTest --tests com.example.aiaccounting.data.exporter.ExcelExporterTest` | 收窄 suppress 后 Excel 导出回归仍通过 | 全部通过 | ✓ |
+| Module 6C release build | `./gradlew :app:assembleRelease` | 收窄 suppress 后 release 仍可构建 | 构建通过；保留单条 `SVGUserAgent.getViewbox()` 已知 warning | ✓ |
 
 ## Error Log
 | Timestamp | Error | Attempt | Resolution |
 |-----------|-------|---------|------------|
-| 2026-03-26 | 新增 `TransactionListViewModelTest` 初版因 `stateIn(WhileSubscribed)` 未被订阅导致断言始终命中空列表 | 1 | 在测试中显式 collect `filteredTransactions` 后再推进 dispatcher 调度 |
-| 2026-03-26 | `AIAssistantActionExecutor` 编译缺少 `AccountType` import | 1 | 补 import 后重新执行 targeted tests |
-| 2026-03-26 | resolver 安全语义收紧后，旧测试仍断言底层补建失败文案 | 1 | 将回归测试更新为断言“未找到指定账户/分类”新语义 |
+| 2026-03-26 | 将 POI suppress 直接从 `org.apache.poi.**` 收窄到 `org.apache.poi.xslf.**` / `org.apache.poi.sl.**` 后，R8 新增缺失类错误：`javax.imageio.*` / `javax.swing.JLabel` | 1 | 读取 `missing_rules.txt`，并仅回补 `-dontwarn javax.imageio.**` / `-dontwarn javax.swing.**`，恢复 release 构建 |
+
 
 ## Test Results
 | Test | Input | Expected | Actual | Status |
