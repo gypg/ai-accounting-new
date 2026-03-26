@@ -150,16 +150,15 @@
   - `docs/DEVELOPMENT_DOCUMENT.md`
   - `PROGRESS.md`
 
-### Phase 11: Module 6C POI Provenance Audit & Warning Scope Reduction
+### Phase 12: Module 6D POI Warning End-State Confirmation
 - **Status:** complete
 - **Actions taken:**
-  - Re-ran release dependency audit with `dependencyInsight` and confirmed `poi` is still transitively provided by `poi-ooxml`, while `poi-ooxml-lite` / `xmlbeans` remain in the release graph
-  - Re-checked project POI usage and confirmed business-side usage is still limited to `ExcelExporter` + `ExcelExporterTest` with `XSSFWorkbook`-based `.xlsx` export only
-  - Narrowed `app/proguard-rules.pro` from broad `-dontwarn org.apache.poi.**` to verified optional POI presentation packages `org.apache.poi.xslf.**` / `org.apache.poi.sl.**`
-  - Verified that removing desktop API suppress completely causes R8 missing-class failures for `javax.imageio.*` and `javax.swing.JLabel`, then restored the minimal `javax.imageio.**` / `javax.swing.**` boundary needed for release builds
-  - Re-ran Excel exporter regression tests and `assembleRelease`, confirming export behavior and release build stability remained intact after the narrower suppress set
+  - Re-validated release dependency structure and confirmed `poi-ooxml` still brings both `poi` and `poi-ooxml-lite` into `releaseRuntimeClasspath`
+  - Inspected the actual jars in local Gradle cache and confirmed the warning-bearing classes live inside upstream POI artifacts themselves: `poi-ooxml-5.2.5.jar` contains `org.apache.poi.xslf.draw.SVGUserAgent`, while `poi-5.2.5.jar` contains the `org.apache.poi.sl.**` presentation rendering chain
+  - Confirmed `poi-ooxml-lite-5.2.5.jar` does not contain the current `xslf/sl` warning source classes, narrowing the root cause to the main POI jars rather than the lite schema jar
+  - Re-ran `ExcelExporterTest` and `assembleRelease` without further dependency/proguard changes, confirming the current narrowed suppress baseline remains stable
+  - Closed the POI warning track with an explicit engineering conclusion: under the current `XSSFWorkbook`-based export implementation, there is no obvious low-risk dependency-pruning step left; future work should be a separate library-replacement / export-decoupling evaluation rather than more aggressive POI trimming
 - Files created/modified:
-  - `app/proguard-rules.pro`
   - `BUILD_GUIDE.md`
   - `RELEASE_CHECKLIST.md`
   - `docs/DEVELOPMENT_DOCUMENT.md`
@@ -168,38 +167,40 @@
 ## Test Results
 | Test | Input | Expected | Actual | Status |
 |------|-------|----------|--------|--------|
-| Module 6C dependency audit | `./gradlew :app:dependencyInsight --dependency org.apache.poi --configuration releaseRuntimeClasspath` | 确认 POI release 依赖主链仍来自 `poi-ooxml` 传递路径 | 确认 `poi` / `poi-ooxml-lite` / `xmlbeans` 仍在 release graph | ✓ |
-| Module 6C dependency audit | `./gradlew :app:dependencyInsight --dependency poi-ooxml --configuration releaseRuntimeClasspath` | 确认 `poi-ooxml` 仍为直接声明主依赖 | 确认 `poi-ooxml` 直接存在且携带 `poi-ooxml-lite` | ✓ |
-| Module 6C export regression | `./gradlew :app:testDebugUnitTest --tests com.example.aiaccounting.data.exporter.ExcelExporterTest` | 收窄 suppress 后 Excel 导出回归仍通过 | 全部通过 | ✓ |
-| Module 6C release build | `./gradlew :app:assembleRelease` | 收窄 suppress 后 release 仍可构建 | 构建通过；保留单条 `SVGUserAgent.getViewbox()` 已知 warning | ✓ |
+| Module 6D jar provenance audit | local Gradle cache jar inspection (`poi-ooxml`, `poi`, `poi-ooxml-lite`) | 明确当前 warning 源类位于哪个 POI artifact | 确认 `SVGUserAgent` 在 `poi-ooxml`，`sl/**` 在 `poi`，`poi-ooxml-lite` 不含源类 | ✓ |
+| Module 6D export regression | `./gradlew :app:testDebugUnitTest --tests com.example.aiaccounting.data.exporter.ExcelExporterTest` | 在 6C baseline 下导出回归继续通过 | 全部通过 | ✓ |
+| Module 6D release build | `./gradlew :app:assembleRelease` | 在 6C baseline 下 release 继续通过 | 构建通过；warning 状态保持不变且继续归类为非阻塞 | ✓ |
 
-## Error Log
-| Timestamp | Error | Attempt | Resolution |
-|-----------|-------|---------|------------|
-| 2026-03-26 | 将 POI suppress 直接从 `org.apache.poi.**` 收窄到 `org.apache.poi.xslf.**` / `org.apache.poi.sl.**` 后，R8 新增缺失类错误：`javax.imageio.*` / `javax.swing.JLabel` | 1 | 读取 `missing_rules.txt`，并仅回补 `-dontwarn javax.imageio.**` / `-dontwarn javax.swing.**`，恢复 release 构建 |
-
+### Phase 13: Planning File Closure
+- **Status:** complete
+- **Actions taken:**
+  - Completed the remaining `task_plan.md` planning phases by turning the EasyAccounts inspiration mapping into a concrete user-facing delivery checklist
+  - Split the checklist into near-term priorities vs mid-term optimizations, and added an explicit “not high priority now” section to prevent peripheral work from drifting upward
+  - Added a recommended execution order so the planning artifact can be used directly as the next implementation handoff
+  - Cross-checked the final checklist against `findings.md` and the current development document so planning conclusions stay aligned with the already-landed module history
+- Files created/modified:
+  - `task_plan.md`
+  - `PROGRESS.md`
 
 ## Test Results
 | Test | Input | Expected | Actual | Status |
 |------|-------|----------|--------|--------|
-| Module 4 targeted tests | `./gradlew testDebugUnitTest --tests com.example.aiaccounting.ui.viewmodel.AIAssistantActionExecutorTest --tests com.example.aiaccounting.ai.AILocalProcessorTest --tests com.example.aiaccounting.data.repository.TransactionRepositoryTest` | AI 留痕相关改动可编译且关键回归通过 | 全部通过 | ✓ |
-| Module 4 targeted tests (post-review fix) | `./gradlew testDebugUnitTest --tests com.example.aiaccounting.ui.viewmodel.AIAssistantActionExecutorTest --tests com.example.aiaccounting.ai.AILocalProcessorTest --tests com.example.aiaccounting.data.repository.TransactionRepositoryTest` | migration 修复后关键回归仍通过 | 全部通过 | ✓ |
+| Planning consistency review | `task_plan.md` vs `findings.md` vs `docs/DEVELOPMENT_DOCUMENT.md` | 近期/中期任务排序与既有结论一致，且未把外围能力误抬到高优先级 | 一致；规划文件已完成剩余 3 个 phase 收尾 | ✓ |
 
 ## Error Log
 | Timestamp | Error | Attempt | Resolution |
 |-----------|-------|---------|------------|
-| 2026-03-26 | reviewer 指出 Hilt `DatabaseModule` 未接入 `MIGRATION_7_8`，升级路径存在 destructive fallback 风险 | 1 | 补齐 Hilt 侧 migration 集合并重新执行 targeted tests |
-| 2026-03-26 | reviewer 追出历史 `MIGRATION_6_7` 未创建 `ai_permission_logs`，旧升级路径可能触发 Room schema mismatch | 1 | 在 `MIGRATION_6_7` 补齐 `ai_permission_logs` 建表 SQL 并重新验证 |
+| 2026-03-26 | `gh` CLI 在当前 bash 环境中不可用，无法按全局工作流要求做 GitHub code search | 1 | 改为使用本地 Gradle dependencyInsight + jar inspection 完成本轮依赖归因，未阻塞模块 6D 结论 |
 
 
 ## 5-Question Reboot Check
 | Question | Answer |
 |----------|--------|
-| Where am I? | Phase 3: Delivery Structure |
-| Where am I going? | Phase 4 Verification → Phase 5 Delivery |
+| Where am I? | Phase 5: Delivery |
+| Where am I going? | 若继续执行，可从 task_plan 的推荐顺序直接拆下一个实现模块 |
 | What's the goal? | 把 EasyAccounts 借鉴点转成当前项目的具体开发任务清单 |
-| What have I learned? | 当前最值得借鉴的是 AI 留痕、工具语义显式化、人格统一收口、先查再执行编排 |
-| What have I done? | 已创建/覆盖三份规划文件并完成映射与优先级整理 |
+| What have I learned? | 当前最值得借鉴的是 AI 留痕、工具语义显式化、聊天/执行语义边界收口、共享实体编排 |
+| What have I done? | 已完成 task_plan 剩余 3 个 phase 收尾，并把规划交付结构固定为可直接接手的 checklist |
 
 ---
 *Update after completing each phase or encountering errors*

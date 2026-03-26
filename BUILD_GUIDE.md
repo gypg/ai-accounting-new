@@ -143,26 +143,23 @@ export KEY_PASSWORD="your_key_password"
 - 保留 `implementation("org.apache.poi:poi-ooxml:5.2.5")`
 - 通过 `dependencyInsight` 确认 `poi` 仍由 `poi-ooxml` 传递引入，release 构建不受影响
 
-模块 6C 当前已完成的审计与收敛：
-- 通过 `:app:dependencyInsight --dependency org.apache.poi --configuration releaseRuntimeClasspath` 与 `--dependency poi-ooxml` 再次确认 release 依赖主链仍为：
-  - `org.apache.poi:poi-ooxml:5.2.5`
-  - `org.apache.poi:poi-ooxml-lite:5.2.5`
-  - `org.apache.poi:poi:5.2.5`（由 `poi-ooxml` 传递引入）
-  - `org.apache.xmlbeans:xmlbeans:5.2.0`
-- 通过 `Grep` 复核项目内 POI 触点后，当前业务侧仍仅在 `ExcelExporter.kt` 与 `ExcelExporterTest.kt` 中使用 `XSSFWorkbook`、样式与合并单元格等基础 `.xlsx` API，没有新增 PPT / SVG / 签名相关直接用法
-- 将 `app/proguard-rules.pro` 中的 POI suppress 从全量 `org.apache.poi.**` 收窄为当前已归因的可选展示路径：
-  - `org.apache.poi.xslf.**`
-  - `org.apache.poi.sl.**`
-  - 并补齐本轮 release 实测需要的 desktop API suppress：`javax.imageio.**`、`javax.swing.**`
-- 实测表明：如果只保留 `xslf/sl` 而移除 desktop API suppress，R8 会重新报缺失类：`javax.imageio.*`、`javax.swing.JLabel`；因此模块 6C 的最终结果不是“彻底删光 suppress”，而是把 suppress 收敛到 **已验证会被 POI 可选路径触发的最小包面**
+模块 6D 当前已完成的结论收口：
+- 重新审计本地 Gradle cache 中的 POI jars 后，已确认：
+  - `poi-ooxml-5.2.5.jar` 内直接包含 `org/apache/poi/xslf/draw/SVGUserAgent.class` 等 xslf/SVG 渲染类
+  - `poi-5.2.5.jar` 内直接包含 `org/apache/poi/sl/**` 演示文稿绘制链
+  - `poi-ooxml-lite-5.2.5.jar` 不包含这批 `xslf/sl` warning 源类
+- 这说明当前剩余 `SVGUserAgent.getViewbox()` warning 的根源不在业务代码，也不在额外引入的第三方桥接层，而在 `poi-ooxml` / `poi` 自带 jar 的可选 PPT/SVG 渲染实现
+- 结合当前 `ExcelExporter.kt` 仍仅使用 `XSSFWorkbook` 基础导出主链，模块 6D 将“继续做安全依赖裁剪”收口为明确结论：
+  - 在 **不改 Excel 导出实现 / 不替换库** 的前提下，当前可安全压缩的依赖面已基本收尽
+  - 若继续强裁 `poi-ooxml` / `poi`，高概率会进入“破坏 XSSF 正常能力”的高风险区，而不再是低风险收敛
+- 因此模块 6D 的结果不是继续修改 `build.gradle.kts` 或 ProGuard，而是把后续方向显式定为：
+  - 当前 warning 继续作为非阻塞噪音接受
+  - 若未来仍要彻底清零 warning，应进入单独技术方案：**评估替换 Apache POI、改为 CSV/轻量 xlsx 写库，或单独抽离导出实现**
 - 重新执行验证后：
   - `./gradlew :app:testDebugUnitTest --tests com.example.aiaccounting.data.exporter.ExcelExporterTest` ✅
   - `./gradlew :app:assembleRelease` ✅
-- 当前 release 仍保留单条已知 warning：
-  - `org.apache.poi.xslf.draw.SVGUserAgent.getViewbox()` unreachable warning
-- 该 warning 在模块 6C 之后仍被确认为 **poi-ooxml 自带未使用 PPT/SVG 渲染路径的静态分析噪音**，但本轮已把 suppress 范围从“整个 POI 命名空间”收紧为“已验证的 PPT/SVG + desktop API 边界”
 
-当前状态说明（模块 6C 后）：
-- release 构建与 Excel 导出回归均保持通过
-- suppress 范围比模块 6B 前更窄，且已用实际失败/恢复验证过最小边界
-- 下一步若继续推进，不应再优先调 ProGuard，而应考虑是否值得继续做更深层的 `poi-ooxml` 传递依赖裁剪或导出库替换评估
+当前状态说明（模块 6D 后）：
+- 模块 6A~6D 已把“删 direct dependency → 补回归测试 → 收窄 suppress → 收口依赖级结论”完整跑通
+- 当前没有发现还能在 **低风险、低改动** 范围内继续消除 POI warning 的空间
+- 后续若继续推进，应新开独立模块做“导出库替换/降级方案评估”，而不是继续在现有 POI 依赖上做硬裁剪
