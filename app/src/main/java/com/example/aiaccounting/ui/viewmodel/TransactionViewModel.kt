@@ -5,9 +5,11 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.aiaccounting.data.local.entity.Account
 import com.example.aiaccounting.data.local.entity.Category
+import com.example.aiaccounting.data.local.entity.AIOperationTrace
 import com.example.aiaccounting.data.local.entity.Tag
 import com.example.aiaccounting.data.local.entity.Transaction
 import com.example.aiaccounting.data.local.entity.TransactionType
+import com.example.aiaccounting.data.repository.AIOperationTraceRepository
 import com.example.aiaccounting.data.repository.AccountRepository
 import com.example.aiaccounting.data.repository.CategoryRepository
 import com.example.aiaccounting.data.repository.TagRepository
@@ -30,6 +32,7 @@ class TransactionViewModel @Inject constructor(
     private val accountRepository: AccountRepository,
     private val categoryRepository: CategoryRepository,
     private val tagRepository: TagRepository,
+    private val aiOperationTraceRepository: AIOperationTraceRepository,
     private val widgetUpdateService: WidgetUpdateService,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
@@ -286,6 +289,52 @@ class TransactionViewModel @Inject constructor(
         _uiState.update { it.copy(error = null) }
     }
 
+    fun loadTraceDetails(traceId: String) {
+        viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    isTraceLoading = true,
+                    traceDetails = emptyList(),
+                    traceError = null,
+                    activeTraceId = traceId
+                )
+            }
+
+            runCatching {
+                aiOperationTraceRepository.getTracesByTraceId(traceId).first()
+            }.onSuccess { traces ->
+                _uiState.update {
+                    it.copy(
+                        isTraceLoading = false,
+                        traceDetails = traces,
+                        traceError = if (traces.isEmpty()) "未找到留痕记录" else null,
+                        activeTraceId = traceId
+                    )
+                }
+            }.onFailure { error ->
+                _uiState.update {
+                    it.copy(
+                        isTraceLoading = false,
+                        traceDetails = emptyList(),
+                        traceError = error.message ?: "加载 AI 留痕失败",
+                        activeTraceId = traceId
+                    )
+                }
+            }
+        }
+    }
+
+    fun clearTraceDetails() {
+        _uiState.update {
+            it.copy(
+                isTraceLoading = false,
+                traceDetails = emptyList(),
+                traceError = null,
+                activeTraceId = null
+            )
+        }
+    }
+
     fun getMonthSummary(year: Int, month: Int): MonthSummary {
         val (start, end) = transactionRepository.getMonthRange(year, month)
         return MonthSummary(
@@ -318,7 +367,11 @@ data class TransactionUiState(
     val editingTransaction: Transaction? = null,
     val monthIncome: Double = 0.0,
     val monthExpense: Double = 0.0,
-    val monthBalance: Double = 0.0
+    val monthBalance: Double = 0.0,
+    val isTraceLoading: Boolean = false,
+    val activeTraceId: String? = null,
+    val traceDetails: List<AIOperationTrace> = emptyList(),
+    val traceError: String? = null
 )
 
 /**

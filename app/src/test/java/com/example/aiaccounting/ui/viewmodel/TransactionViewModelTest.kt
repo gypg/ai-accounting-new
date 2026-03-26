@@ -2,12 +2,14 @@ package com.example.aiaccounting.ui.viewmodel
 
 import android.content.Context
 import androidx.arch.core.executor.testing.InstantTaskExecutorRule
+import com.example.aiaccounting.data.local.entity.AIOperationTrace
 import com.example.aiaccounting.data.local.entity.Account
 import com.example.aiaccounting.data.local.entity.AccountType
 import com.example.aiaccounting.data.local.entity.Category
 import com.example.aiaccounting.data.local.entity.Transaction
 import com.example.aiaccounting.data.local.entity.TransactionType
 import com.example.aiaccounting.data.repository.AccountRepository
+import com.example.aiaccounting.data.repository.AIOperationTraceRepository
 import com.example.aiaccounting.data.repository.CategoryRepository
 import com.example.aiaccounting.data.repository.TagRepository
 import com.example.aiaccounting.data.repository.TransactionRepository
@@ -59,6 +61,9 @@ class TransactionViewModelTest {
     @MockK
     private lateinit var tagRepository: TagRepository
 
+    @MockK
+    private lateinit var aiOperationTraceRepository: AIOperationTraceRepository
+
     private lateinit var viewModel: TransactionViewModel
     private lateinit var context: Context
 
@@ -75,6 +80,7 @@ class TransactionViewModelTest {
         every { accountRepository.getAllAccounts() } returns flowOf(emptyList())
         every { categoryRepository.getAllCategories() } returns flowOf(emptyList())
         every { tagRepository.getAllTags() } returns flowOf(emptyList())
+        every { aiOperationTraceRepository.getTracesByTraceId(any()) } returns flowOf(emptyList())
         coEvery { transactionRepository.getCurrentMonthRange() } returns Pair(0L, 9999999999L)
         coEvery { transactionRepository.getTotalIncome(any(), any()) } returns 1000.0
         coEvery { transactionRepository.getTotalExpense(any(), any()) } returns 500.0
@@ -85,6 +91,7 @@ class TransactionViewModelTest {
             accountRepository,
             categoryRepository,
             tagRepository,
+            aiOperationTraceRepository,
             widgetUpdateService,
             context
         )
@@ -399,16 +406,66 @@ class TransactionViewModelTest {
     }
 
     @Test
-    fun `getTransactionsByType should return flow from repository`() {
-        // Given
-        val type = TransactionType.EXPENSE
-        val typeFlow: Flow<List<Transaction>> = flowOf(emptyList())
-        every { transactionRepository.getTransactionsByType(type) } returns typeFlow
+    fun `loadTraceDetails should populate trace details when repository returns records`() = runTest {
+        val traceId = "trace-123"
+        val traces = listOf(
+            AIOperationTrace(
+                id = "1",
+                traceId = traceId,
+                sourceType = "AI_REMOTE",
+                actionType = "ADD_TRANSACTION",
+                entityType = "TRANSACTION",
+                summary = "已创建交易"
+            )
+        )
+        every { aiOperationTraceRepository.getTracesByTraceId(traceId) } returns flowOf(traces)
 
-        // When
-        val result = viewModel.getTransactionsByType(type)
+        viewModel.loadTraceDetails(traceId)
+        testDispatcher.scheduler.advanceUntilIdle()
 
-        // Then
-        assertEquals(typeFlow, result)
+        assertFalse(viewModel.uiState.value.isTraceLoading)
+        assertEquals(traceId, viewModel.uiState.value.activeTraceId)
+        assertEquals(traces, viewModel.uiState.value.traceDetails)
+        assertNull(viewModel.uiState.value.traceError)
+        verify { aiOperationTraceRepository.getTracesByTraceId(traceId) }
+    }
+
+    @Test
+    fun `loadTraceDetails should expose empty state when no records found`() = runTest {
+        val traceId = "trace-empty"
+        every { aiOperationTraceRepository.getTracesByTraceId(traceId) } returns flowOf(emptyList())
+
+        viewModel.loadTraceDetails(traceId)
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertFalse(viewModel.uiState.value.isTraceLoading)
+        assertEquals(traceId, viewModel.uiState.value.activeTraceId)
+        assertTrue(viewModel.uiState.value.traceDetails.isEmpty())
+        assertEquals("未找到留痕记录", viewModel.uiState.value.traceError)
+    }
+
+    @Test
+    fun `clearTraceDetails should reset trace state`() = runTest {
+        val traceId = "trace-reset"
+        val traces = listOf(
+            AIOperationTrace(
+                id = "1",
+                traceId = traceId,
+                sourceType = "AI_LOCAL",
+                actionType = "CREATE_CATEGORY",
+                entityType = "CATEGORY",
+                summary = "已创建分类"
+            )
+        )
+        every { aiOperationTraceRepository.getTracesByTraceId(traceId) } returns flowOf(traces)
+        viewModel.loadTraceDetails(traceId)
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        viewModel.clearTraceDetails()
+
+        assertFalse(viewModel.uiState.value.isTraceLoading)
+        assertNull(viewModel.uiState.value.activeTraceId)
+        assertTrue(viewModel.uiState.value.traceDetails.isEmpty())
+        assertNull(viewModel.uiState.value.traceError)
     }
 }
