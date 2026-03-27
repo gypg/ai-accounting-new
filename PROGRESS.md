@@ -199,14 +199,60 @@
   - `docs/DEVELOPMENT_DOCUMENT.md`
   - `PROGRESS.md`
 
+### Phase 15: Module 6 Second Segment Auto-Creation & Direct-Execution Closure
+- **Status:** complete
+- **Actions taken:**
+  - Executed TDD for remote `add_transaction` explicit-missing-entity behavior: rewrote prior failure-oriented assertions into success-with-auto-creation assertions and added combined account+category missing scenario
+  - Added query-before-execution regression to ensure pre-query summary and execution path remain intact when missing entities are auto-created
+  - Updated `AIAssistantActionExecutor.resolveAddTransactionExecution()` to allow explicit fallback creation for account/category in remote add-transaction path, while resolver-level safeguards still keep explicit ID misses as hard-fail
+  - Extended `AITransactionEntityResolver` resolution results with `autoCreated` metadata so executor can reliably distinguish lookup-hit vs just-created entities
+  - Added resolver safeguards from code review: explicit `accountId/categoryId` miss now remains terminal failure; explicit category-creation failure no longer degrades to unrelated same-type fallback category
+  - Updated add-transaction success rendering to append explicit user-visible lines for auto-created entities (`已自动创建账户/分类`), while preserving existing success/failure core wording and transfer rejection boundary
+  - Ran targeted + related-chain + full unit regressions and confirmed green
+- Files created/modified:
+  - `app/src/main/java/com/example/aiaccounting/ai/AITransactionEntityResolver.kt`
+  - `app/src/main/java/com/example/aiaccounting/ui/viewmodel/AIAssistantActionExecutor.kt`
+  - `app/src/test/java/com/example/aiaccounting/ui/viewmodel/AIAssistantActionExecutorTest.kt`
+  - `docs/DEVELOPMENT_DOCUMENT.md`
+  - `PROGRESS.md`
+
+### Phase 16: Module 6 Third Segment TRANSFER Semantic Execution Closure
+- **Status:** complete
+- **Actions taken:**
+  - Executed RED→GREEN for transfer semantics in remote action chain: replaced old rejection test with executable transfer assertions and added target-missing / same-account guard tests
+  - Added interpreter RED→GREEN for `action="transfer"` alias without explicit `type/transactionType`, ensuring it still normalizes into transfer typed action instead of expense fallback
+  - Extended `AIOperation.AddTransaction` with `transferAccountId` and implemented transfer-specific execution behavior in `AIOperationExecutor.addTransaction()`:
+    - validate target account id/presence
+    - prevent same source/target account
+    - persist `transferAccountId`
+    - execute transaction insert + dual-account balance update under Room `withTransaction` for all-or-nothing consistency (source `-amount`, target `+amount`)
+  - Patched transfer follow-up integrity in `AIOperationExecutor.updateTransaction()` / `deleteTransaction()`: transfer rollback/re-apply now includes both source and target account sides to avoid balance drift after editing/deleting transfer records
+  - Closed reviewer-raised consistency risk by extending Room `withTransaction` boundary from add path to update/delete paths as well, so multi-step transfer lifecycle mutations no longer run as independent writes
+  - Refactored `AIAssistantActionExecutor` transfer branch from explicit rejection to executable resolution + execution:
+    - resolve source/target accounts and transfer category
+    - keep query-before-execution summaries for source/category/target
+    - keep auto-create feedback lines visible for source/target/category when triggered
+  - Re-ran focused transfer tests, AI reasoning transfer regressions, remote chain regressions, and full unit suite; all green
+- Files created/modified:
+  - `app/src/main/java/com/example/aiaccounting/ai/AIOperationExecutor.kt`
+  - `app/src/main/java/com/example/aiaccounting/ui/viewmodel/AIAssistantActionExecutor.kt`
+  - `app/src/main/java/com/example/aiaccounting/ui/viewmodel/AIAssistantRemoteResponseInterpreter.kt`
+  - `app/src/test/java/com/example/aiaccounting/ui/viewmodel/AIAssistantActionExecutorTest.kt`
+  - `app/src/test/java/com/example/aiaccounting/ui/viewmodel/AIAssistantRemoteResponseInterpreterTest.kt`
+  - `docs/DEVELOPMENT_DOCUMENT.md`
+  - `PROGRESS.md`
+
 ## Test Results
 | Test | Input | Expected | Actual | Status |
 |------|-------|----------|--------|--------|
 | Planning consistency review | `task_plan.md` vs `findings.md` vs `docs/DEVELOPMENT_DOCUMENT.md` | 近期/中期任务排序与既有结论一致，且未把外围能力误抬到高优先级 | 一致；规划文件已完成剩余 3 个 phase 收尾 | ✓ |
 | Module 6 segment-1 TDD: concise bookkeeping intent | `AILocalProcessorTest` new cases (`记50午饭`, `帮我记50午饭`, `我怕忘记50这件事`) | 前两者命中记账执行，后者保持普通聊天 | 全部通过 | ✓ |
 | Module 6 segment-1 TDD: identity name case mismatch | `IdentityConfirmationDetectorTest.detectIdentityQuery_whenActiveCustomLatinNameCaseDiff_stillMatchesSpecificIdentity` | `Alice/alice` 可匹配并保留原名输出 | 通过 | ✓ |
-| AI assistant targeted regression suite | Interpreter/Handler/Executor/LocalProcessor/Reasoning/Identity/Coordinator 定向集 | 不引入回归 | 全部通过 | ✓ |
-| Full unit + build verification | `./gradlew testDebugUnitTest --continue` + `./gradlew assembleDebug` | 单测与构建通过 | 全部通过 | ✓ |
+| Module 6 segment-2 TDD: auto-create missing explicit account/category | `AIAssistantActionExecutorTest` 新增场景（缺账户、缺分类、双缺失、query-before-execution） | 显式缺失时默认自动补建并继续记账，反馈包含自动补建实体信息 | 全部通过 | ✓ |
+| Module 6 segment-3 TDD: transfer executable semantics | `AIAssistantActionExecutorTest` 转账执行/缺目标账户/同账户防错 + `AIAssistantRemoteResponseInterpreterTest` transfer alias | TRANSFER 从“拒绝执行”升级为“可执行且防错”，并保持 parser 语义稳定 | 全部通过 | ✓ |
+| Module 6 segment-3 reasoning regression | `./gradlew :app:testDebugUnitTest --tests com.example.aiaccounting.ai.AIReasoningEngineTest` | 转账相关推理回归不被破坏 | 全部通过 | ✓ |
+| Related remote-chain regressions | `AIAssistantMessageExecutionCoordinatorTest` + `AIAssistantRemoteExecutionHandlerTest` + `AIAssistantRemoteResponseInterpreterTest` | 不引入远程执行链语义回归 | 全部通过 | ✓ |
+| Full unit verification | `./gradlew :app:testDebugUnitTest --continue` | 全量单测通过 | 全部通过 | ✓ |
 
 ## Error Log
 | Timestamp | Error | Attempt | Resolution |

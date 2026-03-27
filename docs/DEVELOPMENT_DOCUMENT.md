@@ -63,6 +63,66 @@ AI记账是一款面向中国大陆个人用户的智能记账 Android 应用。
   - 构建验证：`./gradlew assembleDebug` ✅
 - 当前状态：模块 6 第一段在“先查再执行链路已接通”的前提下，补齐了关键自然语言入口与身份检测边界的回归保护；后续若继续模块 6 第二段，可在此基线上推进更上层的阶段语义/编排收口。
 
+#### 2026-03-27 模块 6 第二段完成：显式缺失实体自动补建与直接执行收口
+- 已完成 **模块 6 第二段（先查再执行编排补齐）** 的第一轮收口，目标是让远程 `add_transaction` 在显式账户/分类缺失时不再直接失败，而是按当前产品策略默认自动补建并继续执行，同时把补建结果明确反馈给用户。
+- 本轮改动：
+  - `AIAssistantActionExecutor.resolveAddTransactionExecution()` 已把远程交易动作的实体解析参数从 `allowExplicitFallbackCreation = false` 调整为 `true`，对**显式名称缺失**账户/分类默认进入补建流程，不再停在“未找到指定账户/分类”的早失败。
+  - `AITransactionEntityResolver` 的返回模型新增 `autoCreated` 标记，账户/分类在本次解析中若触发创建成功会显式记录，避免执行层只能靠字符串猜测是否补建。
+  - `AIAssistantActionExecutor` 的交易执行结果新增补建反馈行：当本次执行发生自动补建时，会在成功记账反馈后追加“已自动创建账户：... / 已自动创建分类：...”，让用户可以核对系统做了哪些自动动作。
+  - `AITransactionEntityResolver` 同步补了两条防误记账边界：
+    - 显式 `accountId/categoryId` 缺失时继续失败，不会偷偷新建默认实体替代指定 ID；
+    - 显式分类创建失败时不再回落到任意同类型分类继续记账，避免把失败请求落到错误分类。
+  - 保持既有边界不回退：`TRANSFER` 仍维持“可解析但显式拒绝执行”的语义封口；数值 ID 命中优先、query-before-execute 摘要、traceContext 传递和失败原因透出逻辑继续保留。
+- 本轮新增/更新回归测试：
+  - `AIAssistantActionExecutorTest`
+    - 覆盖显式缺失账户会自动创建并继续记账，且反馈包含“自动创建账户”。
+    - 覆盖显式缺失分类会自动创建并继续记账，且反馈包含“自动创建分类”。
+    - 覆盖账户+分类同时缺失时会双补建并保留双反馈。
+    - 覆盖 query-before-execution 路径在补建后仍能返回查询摘要 + 自动补建反馈 + 执行结果。
+    - 保留补建失败路径断言（创建账户/分类失败时仍返回明确失败，不伪造成功）。
+    - 补充显式 ID 缺失回归：`accountId/categoryId` 找不到时保持失败，不自动补建默认实体替代。
+- 本轮验证：
+  - `./gradlew :app:testDebugUnitTest --tests com.example.aiaccounting.ui.viewmodel.AIAssistantActionExecutorTest` ✅
+  - `./gradlew :app:testDebugUnitTest --tests com.example.aiaccounting.ui.viewmodel.AIAssistantMessageExecutionCoordinatorTest --tests com.example.aiaccounting.ui.viewmodel.AIAssistantRemoteExecutionHandlerTest --tests com.example.aiaccounting.ui.viewmodel.AIAssistantRemoteResponseInterpreterTest` ✅
+  - `./gradlew :app:testDebugUnitTest --continue` ✅
+- 当前状态：远程记账链在显式实体缺失场景下已完成“默认自动补建 + 明确反馈”的收口，用户体验从“识别出来但失败”提升为“直接完成并可核对”；下一优先节点可进入模块 6 更上层编排语义或补齐 `TRANSFER` 完整执行语义。
+
+#### 2026-03-27 模块 6 第三段完成：TRANSFER 完整执行语义首轮收口
+- 已完成 **模块 6 第三段（TRANSFER 可执行语义）** 的首轮收口，目标是把此前“可解析但显式拒绝执行”的转账动作，升级为可稳定执行的双账户转账记账语义，并保持现有安全边界不回退。
+- 本轮改动：
+  - `AIAssistantActionExecutor.resolveAddTransactionExecution()` 已为 `transactionType=TRANSFER` 建立独立解析分支：
+    - 校验目标账户存在（`transferAccountRef` 不能为空）；
+    - 校验来源/目标账户不能相同；
+    - 分别解析来源账户与目标账户（支持显式引用缺失时按当前策略自动补建）；
+    - 解析并确保转账分类（`TransactionType.TRANSFER`）可用。
+  - `AIAssistantActionExecutor` 新增 `executeResolvedTransfer()`：
+    - 通过 `AIOperation.AddTransaction(type=TRANSFER, accountId, transferAccountId, categoryId, ...)` 执行；
+    - 成功反馈显式展示来源账户、目标账户与分类；
+    - 对自动补建来源/目标账户与分类继续给出可见反馈。
+  - `AIOperation.AddTransaction` 新增 `transferAccountId` 字段并落到 `AIOperationExecutor.addTransaction()`：
+    - 转账场景强校验目标账户 ID 与存在性；
+    - 转账时同步更新来源账户减额、目标账户加额；
+    - 交易记录保存 `transferAccountId`，trace details 同步带上目标账户信息；
+    - 交易写入 + 余额更新已通过 Room `withTransaction` 放入同一数据库事务边界，避免中途失败导致“来源已扣、目标未加”的部分成功脏状态。
+  - `AIOperationExecutor.updateTransaction()/deleteTransaction()` 已补齐 transfer 回滚语义：更新/删除转账记录时会同步回滚目标账户侧余额，避免 transfer 交易后续编辑/删除导致余额漂移。
+  - 针对 code review 高风险项已补齐事务一致性：`addTransaction / updateTransaction / deleteTransaction` 中涉及“交易记录 + 多账户余额”联动写操作的路径均已放入 Room `withTransaction`，避免中途中断造成部分成功。
+  - `AIAssistantRemoteResponseInterpreter` 补齐 alias 语义：`action="transfer"` 且缺少 `type/transactionType` 时，typed action 现在默认落为 `transactionTypeRaw="transfer"`，避免被误降级成 `expense`。
+- 保持不回退：
+  - 显式 ID 缺失仍保持失败，不会偷偷补建默认实体替代指定 ID；
+  - 显式分类创建失败不会回落到任意同类型分类继续记账。
+- 本轮新增/更新回归测试：
+  - `AIAssistantActionExecutorTest`
+    - 原“转账显式拒绝”用例已替换为“可执行转账”用例，断言会调用 `AddTransaction(type=TRANSFER, transferAccountId=...)`。
+    - 新增目标账户缺失失败、同账户转账失败两条防错用例。
+  - `AIAssistantRemoteResponseInterpreterTest`
+    - 新增 `action="transfer"` 无 `type` 字段时仍解析为 transfer typed action 的回归。
+- 本轮验证：
+  - `./gradlew :app:testDebugUnitTest --tests com.example.aiaccounting.ui.viewmodel.AIAssistantActionExecutorTest --tests com.example.aiaccounting.ui.viewmodel.AIAssistantRemoteResponseInterpreterTest` ✅
+  - `./gradlew :app:testDebugUnitTest --tests com.example.aiaccounting.ai.AIReasoningEngineTest` ✅
+  - `./gradlew :app:testDebugUnitTest --tests com.example.aiaccounting.ui.viewmodel.AIAssistantMessageExecutionCoordinatorTest --tests com.example.aiaccounting.ui.viewmodel.AIAssistantRemoteExecutionHandlerTest --tests com.example.aiaccounting.ui.viewmodel.AIAssistantRemoteResponseInterpreterTest` ✅
+  - `./gradlew :app:testDebugUnitTest --continue` ✅
+- 当前状态：TRANSFER 已从“可解析但拒绝执行”升级为“可执行且可核对反馈”的主链能力；下一节点应优先进入模块 6 更上层编排/阶段语义统一与本地/远程语义进一步收口。
+
 #### 2026-03-26 模块 5 完成：typed entity reference + transfer 语义封口
 - 已在模块 5 第一轮 typed action 收口基础上，完成 **typed entity reference + transfer 语义封口** 的第二轮最小收口，目标是把交易动作里仍然并存的 `accountName/accountId/categoryName/categoryId` 进一步提升为统一实体引用模型，并让 `TRANSFER` 不再停留在“能识别但未真正定义执行语义”的半完成状态。
 - 本轮改动：

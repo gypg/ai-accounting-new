@@ -159,7 +159,13 @@ internal class AIAssistantRemoteResponseInterpreter {
         return when (actionName) {
             "add_transaction", "transfer" -> AIAssistantTypedAction.AddTransaction(
                 amount = actionJson.optDouble("amount", 0.0),
-                transactionTypeRaw = actionJson.optString("transactionType", actionJson.optString("type", "expense")),
+                transactionTypeRaw = actionJson.optString(
+                    "transactionType",
+                    actionJson.optString(
+                        "type",
+                        if (actionName == "transfer") "transfer" else "expense"
+                    )
+                ),
                 categoryRef = parseEntityReference(
                     actionJson = actionJson,
                     objectKey = "categoryRef",

@@ -10,6 +10,7 @@ import com.example.aiaccounting.data.local.entity.TransactionType
 import com.example.aiaccounting.data.repository.AccountRepository
 import com.example.aiaccounting.data.repository.CategoryRepository
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.mockk
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertTrue
@@ -116,34 +117,58 @@ class AIAssistantActionExecutorTest {
     }
 
     @Test
-    fun executeAIActions_createsDefaultAccount_whenAccountListIsEmpty() = runTest {
+    fun executeAIActions_autoCreatesMissingExplicitAccount_andReportsItInUserResult() = runTest {
         coEvery { aiLocalProcessor.ensureBasicCategoriesExist() } returns Unit
         coEvery { accountRepository.getAllAccountsList() } returnsMany listOf(
             emptyList(),
-            listOf(Account(id = 9, name = "默认账户", type = AccountType.CASH))
+            listOf(Account(id = 21, name = "旅行卡", type = AccountType.BANK))
         )
         coEvery { categoryRepository.getAllCategoriesList() } returnsMany listOf(
-            listOf(Category(id = 2, name = "其他支出", type = TransactionType.EXPENSE)),
-            listOf(Category(id = 2, name = "其他支出", type = TransactionType.EXPENSE)),
-            listOf(Category(id = 2, name = "其他支出", type = TransactionType.EXPENSE))
+            listOf(Category(id = 2, name = "餐饮", type = TransactionType.EXPENSE)),
+            listOf(Category(id = 2, name = "餐饮", type = TransactionType.EXPENSE))
         )
         coEvery {
-            aiOperationExecutor.executeOperation(match<AIOperation.AddAccount> { it.name == "默认账户" })
-        } returnsMany listOf(
-            AIOperationExecutor.AIOperationResult.Success("created"),
-            AIOperationExecutor.AIOperationResult.Success("created")
-        )
+            aiOperationExecutor.executeOperation(match<AIOperation.AddAccount> { it.name == "旅行卡" })
+        } returns AIOperationExecutor.AIOperationResult.Success("created")
         coEvery {
-            aiOperationExecutor.executeOperation(match<AIOperation.AddTransaction> { it.accountId == 9L })
+            aiOperationExecutor.executeOperation(match<AIOperation.AddTransaction> { it.accountId == 21L })
         } returns AIOperationExecutor.AIOperationResult.Success("ok")
 
         val result = executor.executeAIActions(
             """
-            {"action":"add_transaction","amount":18,"type":"expense","category":"其他支出","note":"早餐"}
+            {"action":"add_transaction","amount":18,"type":"expense","account":"旅行卡","category":"餐饮","note":"早餐"}
             """.trimIndent()
         )
 
         assertTrue(result.contains("已记账"))
+        assertTrue(result.contains("自动创建账户") && result.contains("旅行卡"))
+    }
+
+    @Test
+    fun executeAIActions_autoCreatesMissingExplicitCategory_andReportsItInUserResult() = runTest {
+        coEvery { aiLocalProcessor.ensureBasicCategoriesExist() } returns Unit
+        coEvery { accountRepository.getAllAccountsList() } returns listOf(
+            Account(id = 9, name = "默认账户", type = AccountType.CASH, isDefault = true)
+        )
+        coEvery { categoryRepository.getAllCategoriesList() } returnsMany listOf(
+            emptyList(),
+            listOf(Category(id = 35, name = "夜宵", type = TransactionType.EXPENSE))
+        )
+        coEvery {
+            aiOperationExecutor.executeOperation(match<AIOperation.AddCategory> { it.name == "夜宵" })
+        } returns AIOperationExecutor.AIOperationResult.Success("created")
+        coEvery {
+            aiOperationExecutor.executeOperation(match<AIOperation.AddTransaction> { it.categoryId == 35L })
+        } returns AIOperationExecutor.AIOperationResult.Success("ok")
+
+        val result = executor.executeAIActions(
+            """
+            {"action":"add_transaction","amount":22,"type":"expense","category":"夜宵","note":"加班餐"}
+            """.trimIndent()
+        )
+
+        assertTrue(result.contains("已记账"))
+        assertTrue(result.contains("自动创建分类") && result.contains("夜宵"))
     }
 
 
@@ -176,6 +201,42 @@ class AIAssistantActionExecutorTest {
 
         assertTrue(result.contains("账户: 日常卡"))
         assertTrue(result.contains("分类: 餐饮"))
+    }
+
+    @Test
+    fun executeAIActions_fails_whenExplicitAccountIdDoesNotExist() = runTest {
+        coEvery { aiLocalProcessor.ensureBasicCategoriesExist() } returns Unit
+        coEvery { accountRepository.getAllAccountsList() } returns emptyList()
+        coEvery { categoryRepository.getAllCategoriesList() } returns listOf(
+            Category(id = 34, name = "餐饮", type = TransactionType.EXPENSE)
+        )
+
+        val result = executor.executeAIActions(
+            """
+            {"action":"add_transaction","amount":26,"type":"expense","accountId":999,"categoryId":34,"note":"工作餐"}
+            """.trimIndent()
+        )
+
+        assertTrue(result.contains("ID=999"))
+        assertTrue(result.contains("未找到指定账户"))
+    }
+
+    @Test
+    fun executeAIActions_fails_whenExplicitCategoryIdDoesNotExist() = runTest {
+        coEvery { aiLocalProcessor.ensureBasicCategoriesExist() } returns Unit
+        coEvery { accountRepository.getAllAccountsList() } returns listOf(
+            Account(id = 12, name = "日常卡", type = AccountType.BANK)
+        )
+        coEvery { categoryRepository.getAllCategoriesList() } returns emptyList()
+
+        val result = executor.executeAIActions(
+            """
+            {"action":"add_transaction","amount":26,"type":"expense","accountId":12,"categoryId":999,"note":"工作餐"}
+            """.trimIndent()
+        )
+
+        assertTrue(result.contains("ID=999"))
+        assertTrue(result.contains("未找到指定分类"))
     }
 
 
@@ -233,7 +294,7 @@ class AIAssistantActionExecutorTest {
     }
 
     @Test
-    fun executeAIActions_reportsRequestedAccount_whenAccountResolutionFails() = runTest {
+    fun executeAIActions_returnsClearFailure_whenAutoCreateAccountFailsForExplicitReference() = runTest {
         coEvery { aiLocalProcessor.ensureBasicCategoriesExist() } returns Unit
         coEvery { accountRepository.getAllAccountsList() } returns emptyList()
         coEvery { categoryRepository.getAllCategoriesList() } returns listOf(
@@ -250,11 +311,11 @@ class AIAssistantActionExecutorTest {
         )
 
         assertTrue(result.contains("旅行卡"))
-        assertTrue(result.contains("未找到指定账户") || result.contains("无法创建或找到账户"))
+        assertTrue(result.contains("创建账户失败"))
     }
 
     @Test
-    fun executeAIActions_reportsRequestedCategory_whenCategoryResolutionFails() = runTest {
+    fun executeAIActions_returnsClearFailure_whenAutoCreateCategoryFailsForExplicitReference() = runTest {
         coEvery { aiLocalProcessor.ensureBasicCategoriesExist() } returns Unit
         coEvery { accountRepository.getAllAccountsList() } returns listOf(
             Account(id = 9, name = "默认账户", type = AccountType.CASH, isDefault = true)
@@ -271,7 +332,7 @@ class AIAssistantActionExecutorTest {
         )
 
         assertTrue(result.contains("夜宵"))
-        assertTrue(result.contains("未找到指定分类") || result.contains("无法创建或找到分类"))
+        assertTrue(result.contains("创建分类失败"))
     }
 
     @Test
@@ -341,7 +402,34 @@ class AIAssistantActionExecutorTest {
     }
 
     @Test
-    fun executeAIActions_rejectsTransferAction_withExplicitMessage() = runTest {
+    fun executeAIActions_executesTransfer_withResolvedSourceAndTargetAccounts() = runTest {
+        coEvery { aiLocalProcessor.ensureBasicCategoriesExist() } returns Unit
+        coEvery { accountRepository.getAllAccountsList() } returnsMany listOf(
+            listOf(
+                Account(id = 1, name = "微信", type = AccountType.WECHAT, balance = 200.0),
+                Account(id = 2, name = "支付宝", type = AccountType.ALIPAY, balance = 50.0)
+            ),
+            listOf(
+                Account(id = 1, name = "微信", type = AccountType.WECHAT, balance = 200.0),
+                Account(id = 2, name = "支付宝", type = AccountType.ALIPAY, balance = 50.0)
+            )
+        )
+        coEvery { categoryRepository.getAllCategoriesList() } returnsMany listOf(
+            listOf(Category(id = 3, name = "转账", type = TransactionType.TRANSFER)),
+            listOf(Category(id = 3, name = "转账", type = TransactionType.TRANSFER))
+        )
+        coEvery {
+            aiOperationExecutor.executeOperation(
+                match<AIOperation.AddTransaction> {
+                    it.type == TransactionType.TRANSFER &&
+                        it.accountId == 1L &&
+                        it.categoryId == 3L &&
+                        it.transferAccountId == 2L &&
+                        it.amount == 100.0
+                }
+            )
+        } returns AIOperationExecutor.AIOperationResult.Success("ok")
+
         val result = executor.executeAIActions(
             """
             {
@@ -355,8 +443,136 @@ class AIAssistantActionExecutorTest {
             """.trimIndent()
         )
 
-        assertTrue(result.contains("暂不支持"))
-        assertTrue(result.contains("转账"))
+        assertTrue(result.contains("已转账") || result.contains("已记账"))
+        assertTrue(result.contains("微信"))
+        assertTrue(result.contains("支付宝"))
+        assertTrue(!result.contains("暂不支持"))
+        coVerify(exactly = 1) {
+            aiOperationExecutor.executeOperation(
+                match<AIOperation.AddTransaction> {
+                    it.type == TransactionType.TRANSFER &&
+                        it.accountId == 1L &&
+                        it.transferAccountId == 2L &&
+                        it.amount == 100.0
+                }
+            )
+        }
+    }
+
+    @Test
+    fun executeAIActions_failsTransfer_whenTargetAccountMissing() = runTest {
+        val result = executor.executeAIActions(
+            """
+            {
+              "action":"add_transaction",
+              "amount":100,
+              "transactionType":"transfer",
+              "accountRef":{"id":1,"name":"微信","kind":"account"},
+              "note":"转账"
+            }
+            """.trimIndent()
+        )
+
+        assertTrue(result.contains("目标账户"))
+        assertTrue(result.contains("失败") || result.contains("缺失") || result.contains("不能为空"))
+        coVerify(exactly = 0) { aiOperationExecutor.executeOperation(any<AIOperation.AddTransaction>()) }
+    }
+
+    @Test
+    fun executeAIActions_failsTransfer_whenSourceAndTargetAreSameAccount() = runTest {
+        val result = executor.executeAIActions(
+            """
+            {
+              "action":"add_transaction",
+              "amount":100,
+              "transactionType":"transfer",
+              "accountRef":{"id":1,"name":"微信","kind":"account"},
+              "transferAccountRef":{"id":1,"name":"微信","kind":"account"},
+              "note":"转账"
+            }
+            """.trimIndent()
+        )
+
+        assertTrue(result.contains("不能相同") || result.contains("相同账户"))
+        coVerify(exactly = 0) { aiOperationExecutor.executeOperation(any<AIOperation.AddTransaction>()) }
+    }
+
+    @Test
+    fun executeAIActions_autoCreatesMissingAccountAndCategory_andReportsBothEntities() = runTest {
+        coEvery { aiLocalProcessor.ensureBasicCategoriesExist() } returns Unit
+        coEvery { accountRepository.getAllAccountsList() } returnsMany listOf(
+            emptyList(),
+            listOf(Account(id = 21, name = "旅行卡", type = AccountType.BANK))
+        )
+        coEvery { categoryRepository.getAllCategoriesList() } returnsMany listOf(
+            emptyList(),
+            listOf(Category(id = 35, name = "夜宵", type = TransactionType.EXPENSE))
+        )
+        coEvery {
+            aiOperationExecutor.executeOperation(match<AIOperation.AddAccount> { it.name == "旅行卡" })
+        } returns AIOperationExecutor.AIOperationResult.Success("created")
+        coEvery {
+            aiOperationExecutor.executeOperation(match<AIOperation.AddCategory> { it.name == "夜宵" })
+        } returns AIOperationExecutor.AIOperationResult.Success("created")
+        coEvery {
+            aiOperationExecutor.executeOperation(
+                match<AIOperation.AddTransaction> { it.accountId == 21L && it.categoryId == 35L }
+            )
+        } returns AIOperationExecutor.AIOperationResult.Success("ok")
+
+        val result = executor.executeAIActions(
+            """
+            {"action":"add_transaction","amount":25,"type":"expense","account":"旅行卡","category":"夜宵","note":"加班餐"}
+            """.trimIndent()
+        )
+
+        assertTrue(result.contains("已记账"))
+        assertTrue(result.contains("自动创建账户") && result.contains("旅行卡"))
+        assertTrue(result.contains("自动创建分类") && result.contains("夜宵"))
+    }
+
+    @Test
+    fun executeQueryBeforeExecution_reportsAutoCreatedEntities_forMissingExplicitReferences() = runTest {
+        coEvery { aiLocalProcessor.ensureBasicCategoriesExist() } returns Unit
+        coEvery { accountRepository.getAllAccountsList() } returnsMany listOf(
+            emptyList(),
+            listOf(Account(id = 21, name = "旅行卡", type = AccountType.BANK))
+        )
+        coEvery { categoryRepository.getAllCategoriesList() } returnsMany listOf(
+            emptyList(),
+            listOf(Category(id = 35, name = "夜宵", type = TransactionType.EXPENSE))
+        )
+        coEvery {
+            aiOperationExecutor.executeOperation(match<AIOperation.AddAccount> { it.name == "旅行卡" })
+        } returns AIOperationExecutor.AIOperationResult.Success("created")
+        coEvery {
+            aiOperationExecutor.executeOperation(match<AIOperation.AddCategory> { it.name == "夜宵" })
+        } returns AIOperationExecutor.AIOperationResult.Success("created")
+        coEvery {
+            aiOperationExecutor.executeOperation(
+                match<AIOperation.AddTransaction> { it.accountId == 21L && it.categoryId == 35L }
+            )
+        } returns AIOperationExecutor.AIOperationResult.Success("ok")
+
+        val result = executor.executeQueryBeforeExecution(
+            AIAssistantActionEnvelope(
+                actions = listOf(
+                    AIAssistantTypedAction.AddTransaction(
+                        amount = 25.0,
+                        transactionTypeRaw = "expense",
+                        accountRef = AIAssistantEntityReference(id = null, name = "旅行卡", kind = "account"),
+                        categoryRef = AIAssistantEntityReference(id = null, name = "夜宵", kind = "category"),
+                        note = "加班餐",
+                        dateTimestamp = 0L
+                    )
+                )
+            )
+        )
+
+        assertTrue(result.contains("已先查询本地上下文，再执行记账"))
+        assertTrue(result.contains("自动创建账户") && result.contains("旅行卡"))
+        assertTrue(result.contains("自动创建分类") && result.contains("夜宵"))
+        assertTrue(result.contains("已记账"))
     }
 
     @Test

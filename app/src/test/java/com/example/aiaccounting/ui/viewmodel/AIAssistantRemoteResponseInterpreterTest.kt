@@ -253,6 +253,28 @@ class AIAssistantRemoteResponseInterpreterTest {
     }
 
     @Test
+    fun interpret_parsesTransferAlias_whenActionIsTransfer_withoutTypeField() {
+        val decision = interpreter.interpret(
+            userMessage = "从微信转100到支付宝",
+            remoteResponse = """
+                {
+                  "action":"transfer",
+                  "amount":100,
+                  "accountRef":{"id":1,"name":"微信","kind":"account"},
+                  "transferAccountRef":{"id":2,"name":"支付宝","kind":"account"},
+                  "note":"转到支付宝"
+                }
+            """.trimIndent()
+        )
+
+        assertTrue(decision is RemoteResponseDecision.QueryBeforeExecute)
+        val action = (decision as RemoteResponseDecision.QueryBeforeExecute).envelope.actions.single() as AIAssistantTypedAction.AddTransaction
+        assertEquals("transfer", action.transactionTypeRaw)
+        assertEquals(1L, action.accountRef.id)
+        assertEquals(2L, action.transferAccountRef?.id)
+    }
+
+    @Test
     fun combineRemoteAndLocalReply_returnsLocalError_whenLocalFallbackFailsWithoutEmoji() {
         val combined = interpreter.combineRemoteAndLocalReply(
             remoteReply = "好的，我来帮你处理。",

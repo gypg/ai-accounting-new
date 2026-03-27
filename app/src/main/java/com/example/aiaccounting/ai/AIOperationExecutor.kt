@@ -5,6 +5,7 @@ import com.example.aiaccounting.data.local.entity.*
 import com.example.aiaccounting.data.repository.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import androidx.room.withTransaction
 import java.util.Locale
 import java.util.UUID
 import javax.inject.Inject
@@ -20,7 +21,8 @@ class AIOperationExecutor @Inject constructor(
     private val accountRepository: AccountRepository,
     private val categoryRepository: CategoryRepository,
     private val budgetRepository: BudgetRepository,
-    private val aiOperationTraceRepository: AIOperationTraceRepository
+    private val aiOperationTraceRepository: AIOperationTraceRepository,
+    private val appDatabase: com.example.aiaccounting.data.local.database.AppDatabase
 ) {
     
     sealed class AIOperationResult {
@@ -95,75 +97,102 @@ class AIOperationExecutor @Inject constructor(
         if (accountId <= 0) {
             return AIOperationResult.Error("无效的账户ID，请先创建账户")
         }
-        
+
         // 验证分类ID
         val categoryId = op.categoryId ?: 0
         if (categoryId <= 0) {
             return AIOperationResult.Error("无效的分类ID")
         }
-        
+
         // 检查账户是否存在
-        val account = accountRepository.getAccountById(accountId)
-            ?: return AIOperationResult.Error("账户不存在，请先创建账户")
-        
+        if (accountRepository.getAccountById(accountId) == null) {
+            return AIOperationResult.Error("账户不存在，请先创建账户")
+        }
+
         // 检查分类是否存在
-        val category = categoryRepository.getCategoryById(categoryId)
+        categoryRepository.getCategoryById(categoryId)
             ?: return AIOperationResult.Error("分类不存在")
-        
+
+        val transferTargetId = if (op.type == TransactionType.TRANSFER) {
+            val targetId = op.transferAccountId ?: return AIOperationResult.Error("无效的目标账户ID")
+            if (targetId == accountId) {
+                return AIOperationResult.Error("转账失败：源账户和目标账户不能相同")
+            }
+            if (accountRepository.getAccountById(targetId) == null) {
+                return AIOperationResult.Error("目标账户不存在")
+            }
+            targetId
+        } else {
+            null
+        }
+
         // 先插入交易记录（关键修复：先插入交易，确保交易记录存在）
         val transaction = Transaction(
             amount = op.amount,
             type = op.type,
             categoryId = categoryId,
             accountId = accountId,
+            transferAccountId = op.transferAccountId,
             date = op.date,
             note = op.note ?: "",
             aiSourceType = op.traceContext.sourceType,
             aiTraceId = op.traceContext.traceId
         )
-        
+
         return try {
             Log.d("AIOperationExecutor", "开始插入交易记录: amount=${op.amount}, type=${op.type}, accountId=$accountId, categoryId=$categoryId")
-            val transactionId = transactionRepository.insertTransaction(transaction)
-            Log.d("AIOperationExecutor", "交易记录插入结果: transactionId=$transactionId")
-            
-            if (transactionId > 0) {
-                // 交易记录插入成功后，再更新账户余额
-                val newBalance = when (op.type) {
-                    TransactionType.INCOME -> account.balance + op.amount
-                    TransactionType.EXPENSE -> account.balance - op.amount
-                    TransactionType.TRANSFER -> account.balance // 转账需要特殊处理
+            val transactionId = appDatabase.withTransaction {
+                val insertedId = transactionRepository.insertTransaction(transaction)
+                if (insertedId <= 0L) {
+                    throw IllegalStateException("保存交易记录失败")
                 }
-                Log.d("AIOperationExecutor", "更新账户余额: oldBalance=${account.balance}, newBalance=$newBalance")
-                val updatedAccount = account.copy(balance = newBalance)
-                accountRepository.updateAccount(updatedAccount)
-                Log.d("AIOperationExecutor", "账户余额更新成功")
-                writeTrace(
-                    traceContext = op.traceContext,
-                    actionType = "ADD_TRANSACTION",
-                    entityType = "transaction",
-                    entityId = transactionId.toString(),
-                    relatedTransactionId = transactionId,
-                    summary = "AI 添加交易",
-                    details = "amount=${op.amount}, type=${op.type}, accountId=$accountId, categoryId=$categoryId",
-                    success = true
-                )
 
-                AIOperationResult.Success("已添加${if (op.type == TransactionType.INCOME) "收入" else "支出"}记录: ${op.amount}元")
-            } else {
-                // 交易插入失败，返回错误
-                Log.e("AIOperationExecutor", "交易记录插入失败: transactionId=$transactionId")
-                writeTrace(
-                    traceContext = op.traceContext,
-                    actionType = "ADD_TRANSACTION",
-                    entityType = "transaction",
-                    summary = "AI 添加交易失败",
-                    details = "amount=${op.amount}, type=${op.type}, accountId=$accountId, categoryId=$categoryId",
-                    success = false,
-                    errorMessage = "保存交易记录失败"
-                )
-                AIOperationResult.Error("保存交易记录失败")
+                when (op.type) {
+                    TransactionType.INCOME -> {
+                        val currentSource = accountRepository.getAccountById(accountId)
+                            ?: throw IllegalStateException("账户不存在")
+                        val updatedSource = currentSource.copy(balance = currentSource.balance + op.amount)
+                        accountRepository.updateAccount(updatedSource)
+                    }
+                    TransactionType.EXPENSE -> {
+                        val currentSource = accountRepository.getAccountById(accountId)
+                            ?: throw IllegalStateException("账户不存在")
+                        val updatedSource = currentSource.copy(balance = currentSource.balance - op.amount)
+                        accountRepository.updateAccount(updatedSource)
+                    }
+                    TransactionType.TRANSFER -> {
+                        val resolvedTargetId = transferTargetId ?: throw IllegalStateException("目标账户不存在")
+                        val currentSource = accountRepository.getAccountById(accountId)
+                            ?: throw IllegalStateException("账户不存在")
+                        val currentTarget = accountRepository.getAccountById(resolvedTargetId)
+                            ?: throw IllegalStateException("目标账户不存在")
+                        val updatedSource = currentSource.copy(balance = currentSource.balance - op.amount)
+                        val updatedTarget = currentTarget.copy(balance = currentTarget.balance + op.amount)
+                        accountRepository.updateAccount(updatedSource)
+                        accountRepository.updateAccount(updatedTarget)
+                    }
+                }
+                insertedId
             }
+            Log.d("AIOperationExecutor", "交易记录插入结果: transactionId=$transactionId")
+
+            writeTrace(
+                traceContext = op.traceContext,
+                actionType = "ADD_TRANSACTION",
+                entityType = "transaction",
+                entityId = transactionId.toString(),
+                relatedTransactionId = transactionId,
+                summary = "AI 添加交易",
+                details = "amount=${op.amount}, type=${op.type}, accountId=$accountId, categoryId=$categoryId, transferAccountId=${op.transferAccountId}",
+                success = true
+            )
+
+            val successMessage = when (op.type) {
+                TransactionType.INCOME -> "已添加收入记录: ${op.amount}元"
+                TransactionType.EXPENSE -> "已添加支出记录: ${op.amount}元"
+                TransactionType.TRANSFER -> "已添加转账记录: ${op.amount}元"
+            }
+            AIOperationResult.Success(successMessage)
         } catch (e: Exception) {
             // 捕获异常，确保错误被正确处理
             Log.e("AIOperationExecutor", "保存交易记录异常: ${e.message}", e)
@@ -172,7 +201,7 @@ class AIOperationExecutor @Inject constructor(
                 actionType = "ADD_TRANSACTION",
                 entityType = "transaction",
                 summary = "AI 添加交易异常",
-                details = "amount=${op.amount}, type=${op.type}, accountId=$accountId, categoryId=$categoryId",
+                details = "amount=${op.amount}, type=${op.type}, accountId=$accountId, categoryId=$categoryId, transferAccountId=${op.transferAccountId}",
                 success = false,
                 errorMessage = e.message
             )
@@ -184,86 +213,153 @@ class AIOperationExecutor @Inject constructor(
      * 更新交易记录并重新计算账户余额
      */
     private suspend fun updateTransaction(op: AIOperation.UpdateTransaction): AIOperationResult {
-        val oldTransaction = transactionRepository.getTransactionById(op.id) 
+        val oldTransaction = transactionRepository.getTransactionById(op.id)
             ?: return AIOperationResult.Error("未找到该交易记录")
-        
-        // 恢复旧账户余额
-        val oldAccount = accountRepository.getAccountById(oldTransaction.accountId)
-        if (oldAccount != null) {
-            val restoredBalance = when (oldTransaction.type) {
-                TransactionType.INCOME -> oldAccount.balance - oldTransaction.amount
-                TransactionType.EXPENSE -> oldAccount.balance + oldTransaction.amount
-                TransactionType.TRANSFER -> oldAccount.balance
-            }
-            accountRepository.updateAccount(oldAccount.copy(balance = restoredBalance))
-        }
-        
-        // 更新交易
+
         val updated = oldTransaction.copy(
             amount = op.amount ?: oldTransaction.amount,
             type = op.type ?: oldTransaction.type,
             categoryId = op.categoryId ?: oldTransaction.categoryId,
             accountId = op.accountId ?: oldTransaction.accountId,
+            transferAccountId = oldTransaction.transferAccountId,
             note = op.note ?: oldTransaction.note,
             aiSourceType = op.traceContext.sourceType,
             aiTraceId = op.traceContext.traceId
         )
-        transactionRepository.updateTransaction(updated)
-        
-        // 更新新账户余额
-        val newAccount = accountRepository.getAccountById(updated.accountId)
-        if (newAccount != null) {
-            val newBalance = when (updated.type) {
-                TransactionType.INCOME -> newAccount.balance + updated.amount
-                TransactionType.EXPENSE -> newAccount.balance - updated.amount
-                TransactionType.TRANSFER -> newAccount.balance
-            }
-            accountRepository.updateAccount(newAccount.copy(balance = newBalance))
+
+        if (updated.type == TransactionType.TRANSFER && updated.transferAccountId == null) {
+            return AIOperationResult.Error("转账失败：缺少目标账户")
         }
-        
-        writeTrace(
-            traceContext = op.traceContext,
-            actionType = "UPDATE_TRANSACTION",
-            entityType = "transaction",
-            entityId = updated.id.toString(),
-            relatedTransactionId = updated.id,
-            summary = "AI 更新交易",
-            details = "amount=${updated.amount}, type=${updated.type}, accountId=${updated.accountId}, categoryId=${updated.categoryId}",
-            success = true
-        )
-        return AIOperationResult.Success("已更新交易记录")
+        if (updated.type == TransactionType.TRANSFER && updated.transferAccountId == updated.accountId) {
+            return AIOperationResult.Error("转账失败：源账户和目标账户不能相同")
+        }
+
+        return try {
+            appDatabase.withTransaction {
+                // 恢复旧账户余额
+                val oldAccount = accountRepository.getAccountById(oldTransaction.accountId)
+                if (oldAccount != null) {
+                    val restoredBalance = when (oldTransaction.type) {
+                        TransactionType.INCOME -> oldAccount.balance - oldTransaction.amount
+                        TransactionType.EXPENSE -> oldAccount.balance + oldTransaction.amount
+                        TransactionType.TRANSFER -> oldAccount.balance + oldTransaction.amount
+                    }
+                    accountRepository.updateAccount(oldAccount.copy(balance = restoredBalance))
+                }
+                if (oldTransaction.type == TransactionType.TRANSFER && oldTransaction.transferAccountId != null) {
+                    val oldTargetAccount = accountRepository.getAccountById(oldTransaction.transferAccountId)
+                    if (oldTargetAccount != null) {
+                        val restoredTargetBalance = oldTargetAccount.balance - oldTransaction.amount
+                        accountRepository.updateAccount(oldTargetAccount.copy(balance = restoredTargetBalance))
+                    }
+                }
+
+                // 更新交易
+                transactionRepository.updateTransaction(updated)
+
+                // 更新新账户余额
+                val newAccount = accountRepository.getAccountById(updated.accountId)
+                if (newAccount != null) {
+                    val newBalance = when (updated.type) {
+                        TransactionType.INCOME -> newAccount.balance + updated.amount
+                        TransactionType.EXPENSE -> newAccount.balance - updated.amount
+                        TransactionType.TRANSFER -> newAccount.balance - updated.amount
+                    }
+                    accountRepository.updateAccount(newAccount.copy(balance = newBalance))
+                }
+                if (updated.type == TransactionType.TRANSFER && updated.transferAccountId != null) {
+                    val newTargetAccount = accountRepository.getAccountById(updated.transferAccountId)
+                    if (newTargetAccount != null) {
+                        val targetBalance = newTargetAccount.balance + updated.amount
+                        accountRepository.updateAccount(newTargetAccount.copy(balance = targetBalance))
+                    }
+                }
+            }
+
+            writeTrace(
+                traceContext = op.traceContext,
+                actionType = "UPDATE_TRANSACTION",
+                entityType = "transaction",
+                entityId = updated.id.toString(),
+                relatedTransactionId = updated.id,
+                summary = "AI 更新交易",
+                details = "amount=${updated.amount}, type=${updated.type}, accountId=${updated.accountId}, categoryId=${updated.categoryId}",
+                success = true
+            )
+            AIOperationResult.Success("已更新交易记录")
+        } catch (e: Exception) {
+            Log.e("AIOperationExecutor", "更新交易记录异常: ${e.message}", e)
+            writeTrace(
+                traceContext = op.traceContext,
+                actionType = "UPDATE_TRANSACTION",
+                entityType = "transaction",
+                entityId = updated.id.toString(),
+                relatedTransactionId = updated.id,
+                summary = "AI 更新交易异常",
+                details = "amount=${updated.amount}, type=${updated.type}, accountId=${updated.accountId}, categoryId=${updated.categoryId}",
+                success = false,
+                errorMessage = e.message
+            )
+            AIOperationResult.Error("更新交易记录失败: ${e.message}")
+        }
     }
     
     /**
      * 删除交易记录并恢复账户余额
      */
     private suspend fun deleteTransaction(op: AIOperation.DeleteTransaction): AIOperationResult {
-        val transaction = transactionRepository.getTransactionById(op.id) 
+        val transaction = transactionRepository.getTransactionById(op.id)
             ?: return AIOperationResult.Error("未找到该交易记录")
-        
-        // 恢复账户余额
-        val account = accountRepository.getAccountById(transaction.accountId)
-        if (account != null) {
-            val restoredBalance = when (transaction.type) {
-                TransactionType.INCOME -> account.balance - transaction.amount
-                TransactionType.EXPENSE -> account.balance + transaction.amount
-                TransactionType.TRANSFER -> account.balance
+
+        return try {
+            appDatabase.withTransaction {
+                // 恢复账户余额
+                val account = accountRepository.getAccountById(transaction.accountId)
+                if (account != null) {
+                    val restoredBalance = when (transaction.type) {
+                        TransactionType.INCOME -> account.balance - transaction.amount
+                        TransactionType.EXPENSE -> account.balance + transaction.amount
+                        TransactionType.TRANSFER -> account.balance + transaction.amount
+                    }
+                    accountRepository.updateAccount(account.copy(balance = restoredBalance))
+                }
+                if (transaction.type == TransactionType.TRANSFER && transaction.transferAccountId != null) {
+                    val targetAccount = accountRepository.getAccountById(transaction.transferAccountId)
+                    if (targetAccount != null) {
+                        val targetRestoredBalance = targetAccount.balance - transaction.amount
+                        accountRepository.updateAccount(targetAccount.copy(balance = targetRestoredBalance))
+                    }
+                }
+
+                transactionRepository.deleteTransaction(transaction)
             }
-            accountRepository.updateAccount(account.copy(balance = restoredBalance))
+
+            writeTrace(
+                traceContext = op.traceContext,
+                actionType = "DELETE_TRANSACTION",
+                entityType = "transaction",
+                entityId = transaction.id.toString(),
+                relatedTransactionId = transaction.id,
+                summary = "AI 删除交易",
+                details = "amount=${transaction.amount}, type=${transaction.type}, accountId=${transaction.accountId}, categoryId=${transaction.categoryId}",
+                success = true
+            )
+            AIOperationResult.Success("已删除交易记录")
+        } catch (e: Exception) {
+            Log.e("AIOperationExecutor", "删除交易记录异常: ${e.message}", e)
+            writeTrace(
+                traceContext = op.traceContext,
+                actionType = "DELETE_TRANSACTION",
+                entityType = "transaction",
+                entityId = transaction.id.toString(),
+                relatedTransactionId = transaction.id,
+                summary = "AI 删除交易异常",
+                details = "amount=${transaction.amount}, type=${transaction.type}, accountId=${transaction.accountId}, categoryId=${transaction.categoryId}",
+                success = false,
+                errorMessage = e.message
+            )
+            AIOperationResult.Error("删除交易记录失败: ${e.message}")
         }
-        
-        transactionRepository.deleteTransaction(transaction)
-        writeTrace(
-            traceContext = op.traceContext,
-            actionType = "DELETE_TRANSACTION",
-            entityType = "transaction",
-            entityId = transaction.id.toString(),
-            relatedTransactionId = transaction.id,
-            summary = "AI 删除交易",
-            details = "amount=${transaction.amount}, type=${transaction.type}, accountId=${transaction.accountId}, categoryId=${transaction.categoryId}",
-            success = true
-        )
-        return AIOperationResult.Success("已删除交易记录")
     }
     
     private suspend fun addAccount(op: AIOperation.AddAccount): AIOperationResult {
@@ -723,6 +819,7 @@ sealed class AIOperation {
         val type: TransactionType,
         val categoryId: Long? = null,
         val accountId: Long? = null,
+        val transferAccountId: Long? = null,
         val date: Long = System.currentTimeMillis(),
         val note: String? = null,
         val description: String? = null,

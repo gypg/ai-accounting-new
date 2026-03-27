@@ -10,14 +10,16 @@ import com.example.aiaccounting.data.repository.CategoryRepository
 internal data class AccountResolutionResult(
     val account: Account?,
     val creationError: String? = null,
-    val requestedLabel: String? = null
+    val requestedLabel: String? = null,
+    val autoCreated: Boolean = false
 )
 
 internal data class CategoryResolutionResult(
     val category: Category?,
     val creationError: String? = null,
     val terminalCreationError: String? = null,
-    val requestedLabel: String? = null
+    val requestedLabel: String? = null,
+    val autoCreated: Boolean = false
 )
 
 internal object AITransactionEntityResolver {
@@ -44,9 +46,13 @@ internal object AITransactionEntityResolver {
             else -> fallbackAccountName
         }
 
+        val hasExplicitIdReference = accountId != null && accountId > 0
+        val hasExplicitNameReference = normalizedAccountName.isNotBlank()
+        val hasExplicitReference = hasExplicitIdReference || hasExplicitNameReference
+
         var account = when {
-            accountId != null && accountId > 0 -> accounts.find { it.id == accountId }
-            normalizedAccountName.isNotBlank() -> {
+            hasExplicitIdReference -> accounts.find { it.id == accountId }
+            hasExplicitNameReference -> {
                 accounts.find { it.name == normalizedAccountName }
                     ?: if (enableFuzzyNameMatch) {
                         accounts.find {
@@ -64,7 +70,7 @@ internal object AITransactionEntityResolver {
             else -> accounts.firstOrNull { it.isDefault } ?: accounts.firstOrNull()
         }
 
-        if (account == null && (accountId != null && accountId > 0 || normalizedAccountName.isNotBlank()) && !allowExplicitFallbackCreation) {
+        if (account == null && hasExplicitIdReference) {
             return AccountResolutionResult(
                 account = null,
                 creationError = "未找到指定账户",
@@ -72,6 +78,15 @@ internal object AITransactionEntityResolver {
             )
         }
 
+        if (account == null && hasExplicitReference && !allowExplicitFallbackCreation) {
+            return AccountResolutionResult(
+                account = null,
+                creationError = "未找到指定账户",
+                requestedLabel = requestedLabel
+            )
+        }
+
+        var autoCreated = false
         if (account == null) {
             when (
                 val result = aiOperationExecutor.executeOperation(
@@ -84,6 +99,7 @@ internal object AITransactionEntityResolver {
                 )
             ) {
                 is AIOperationExecutor.AIOperationResult.Success -> {
+                    autoCreated = true
                     accounts = loadAccounts(accountRepository, excludeArchived)
                     account = accounts.find { it.name == fallbackAccountName }
                         ?: accounts.firstOrNull { it.isDefault }
@@ -99,7 +115,7 @@ internal object AITransactionEntityResolver {
             }
         }
 
-        return AccountResolutionResult(account = account, requestedLabel = requestedLabel)
+        return AccountResolutionResult(account = account, requestedLabel = requestedLabel, autoCreated = autoCreated)
     }
 
     suspend fun resolveCategory(
@@ -122,9 +138,13 @@ internal object AITransactionEntityResolver {
             else -> fallbackCategoryName
         }
 
+        val hasExplicitIdReference = categoryId != null && categoryId > 0
+        val hasExplicitNameReference = normalizedCategoryName.isNotBlank()
+        val hasExplicitReference = hasExplicitIdReference || hasExplicitNameReference
+
         var category = when {
-            categoryId != null && categoryId > 0 -> categories.find { it.id == categoryId }
-            normalizedCategoryName.isNotBlank() -> {
+            hasExplicitIdReference -> categories.find { it.id == categoryId }
+            hasExplicitNameReference -> {
                 categories.find { it.name == normalizedCategoryName }
                     ?: categories.find {
                         it.name.contains(normalizedCategoryName) || normalizedCategoryName.contains(it.name)
@@ -134,7 +154,16 @@ internal object AITransactionEntityResolver {
         }
 
         var creationError: String? = null
-        if (category == null && (categoryId != null && categoryId > 0 || normalizedCategoryName.isNotBlank()) && !allowExplicitFallbackCreation) {
+        var autoCreated = false
+        if (category == null && hasExplicitIdReference) {
+            return CategoryResolutionResult(
+                category = null,
+                creationError = "未找到指定分类",
+                terminalCreationError = null,
+                requestedLabel = requestedLabel
+            )
+        }
+        if (category == null && hasExplicitReference && !allowExplicitFallbackCreation) {
             return CategoryResolutionResult(
                 category = null,
                 creationError = "未找到指定分类",
@@ -149,12 +178,22 @@ internal object AITransactionEntityResolver {
                 )
             ) {
                 is AIOperationExecutor.AIOperationResult.Success -> {
+                    autoCreated = true
                     categories = categoryRepository.getAllCategoriesList()
                     category = categories.find { it.name == fallbackCategoryName }
                         ?: categories.firstOrNull { it.type == transactionType }
                 }
                 is AIOperationExecutor.AIOperationResult.Error -> {
                     creationError = result.error
+                    if (hasExplicitReference) {
+                        return CategoryResolutionResult(
+                            category = null,
+                            creationError = creationError,
+                            terminalCreationError = null,
+                            requestedLabel = requestedLabel,
+                            autoCreated = false
+                        )
+                    }
                     category = categories.firstOrNull { it.type == transactionType }
                 }
             }
@@ -193,7 +232,8 @@ internal object AITransactionEntityResolver {
             category = category,
             creationError = creationError,
             terminalCreationError = null,
-            requestedLabel = requestedLabel
+            requestedLabel = requestedLabel,
+            autoCreated = autoCreated
         )
     }
 
