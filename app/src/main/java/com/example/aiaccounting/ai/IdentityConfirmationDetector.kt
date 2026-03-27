@@ -1,5 +1,6 @@
 package com.example.aiaccounting.ai
 
+import com.example.aiaccounting.data.model.ButlerPersonaRegistry
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -34,7 +35,7 @@ class IdentityConfirmationDetector @Inject constructor() {
     /**
      * 检测是否为身份询问
      */
-    fun detectIdentityQuery(message: String): IdentityQueryResult {
+    fun detectIdentityQuery(message: String, activeButlerName: String? = null): IdentityQueryResult {
         val lowerMessage = message.lowercase().trim()
         
         // 1. 直接身份询问模式
@@ -62,17 +63,21 @@ class IdentityConfirmationDetector @Inject constructor() {
         )
         
         // 检查是否包含已知人格名字
-        val knownNames = listOf("小财娘", "桃桃", "顾沉", "苏浅", "易水寒")
-        
+        val knownNames = ButlerPersonaRegistry.knownNames(activeButlerName)
+        fun findMentionedKnownName(): String? {
+            return knownNames.firstOrNull { lowerMessage.contains(it.lowercase()) }
+        }
+
         for (name in knownNames) {
+            val normalizedName = name.lowercase()
             // 检查是否是特定身份确认
             for (pattern in specificPatterns) {
-                val formattedPattern = pattern.format(name)
-                if (lowerMessage.contains(formattedPattern) || 
-                    lowerMessage == "你是$name" ||
-                    lowerMessage == "你是${name}吗" ||
-                    lowerMessage == "你是${name}？" ||
-                    lowerMessage == "你是${name}?") {
+                val formattedPattern = pattern.format(normalizedName)
+                if (lowerMessage.contains(formattedPattern) ||
+                    lowerMessage == "你是$normalizedName" ||
+                    lowerMessage == "你是${normalizedName}吗" ||
+                    lowerMessage == "你是${normalizedName}？" ||
+                    lowerMessage == "你是${normalizedName}?") {
                     return IdentityQueryResult(
                         isIdentityQuery = true,
                         queryType = IdentityQueryType.SPECIFIC_IDENTITY_CHECK,
@@ -81,11 +86,11 @@ class IdentityConfirmationDetector @Inject constructor() {
                     )
                 }
             }
-            
+
             // 检查是否只是提及名字（如"苏浅在哪里"）
-            if (lowerMessage.contains(name) && 
-                (lowerMessage.contains("在哪") || lowerMessage.contains("呢") || 
-                 lowerMessage.contains("吗") || lowerMessage.contains("?") || 
+            if (lowerMessage.contains(normalizedName) &&
+                (lowerMessage.contains("在哪") || lowerMessage.contains("呢") ||
+                 lowerMessage.contains("吗") || lowerMessage.contains("?") ||
                  lowerMessage.contains("？"))) {
                 return IdentityQueryResult(
                     isIdentityQuery = true,
@@ -105,7 +110,7 @@ class IdentityConfirmationDetector @Inject constructor() {
         for (pattern in doubtPatterns) {
             if (lowerMessage.contains(pattern)) {
                 // 提取可能提到的名字
-                val mentionedName = knownNames.find { lowerMessage.contains(it) }
+                val mentionedName = findMentionedKnownName()
                 return IdentityQueryResult(
                     isIdentityQuery = true,
                     queryType = IdentityQueryType.IDENTITY_DOUBT,
@@ -119,7 +124,7 @@ class IdentityConfirmationDetector @Inject constructor() {
         if ((lowerMessage.endsWith("?") || lowerMessage.endsWith("？")) &&
             (lowerMessage.contains("你") || lowerMessage.contains("谁"))) {
             // 检查是否提到特定名字
-            val mentionedName = knownNames.find { lowerMessage.contains(it) }
+            val mentionedName = findMentionedKnownName()
             if (mentionedName != null) {
                 return IdentityQueryResult(
                     isIdentityQuery = true,
@@ -142,173 +147,23 @@ class IdentityConfirmationDetector @Inject constructor() {
      */
     fun generateIdentityResponse(
         currentButlerId: String,
-        queryResult: IdentityQueryResult
+        queryResult: IdentityQueryResult,
+        activeButlerName: String? = null
     ): String {
-        return when (currentButlerId) {
-            "xiaocainiang" -> generateXiaocainiangResponse(queryResult)
-            "taotao" -> generateTaotaoResponse(queryResult)
-            "guchen" -> generateGuchenResponse(queryResult)
-            "suqian" -> generateSuqianResponse(queryResult)
-            "yishuihan" -> generateYishuihanResponse(queryResult)
-            else -> generateDefaultResponse(queryResult)
-        }
+        return ButlerPersonaRegistry.buildIdentityReply(
+            butlerId = currentButlerId,
+            queryType = queryResult.queryType,
+            mentionedName = queryResult.mentionedName,
+            activeButlerName = activeButlerName
+        )
     }
 
-    /**
-     * 小财娘身份确认回复
-     */
-    private fun generateXiaocainiangResponse(queryResult: IdentityQueryResult): String {
-        return when (queryResult.queryType) {
-            IdentityQueryType.DIRECT_IDENTITY_ASK -> 
-                "是的，主人～我是小财娘！🌸 您的专属可爱管家婆～有什么需要我帮忙的吗？💕"
-            
-            IdentityQueryType.SPECIFIC_IDENTITY_CHECK -> {
-                if (queryResult.mentionedName == "小财娘") {
-                    "对呀对呀～我就是小财娘！✨ 主人记得我，我好开心～💕"
-                } else {
-                    "不是哦～主人，我是小财娘！🌸 ${queryResult.mentionedName}是其他管家呢～有什么需要我帮忙的吗？💕"
-                }
-            }
-            
-            IdentityQueryType.IDENTITY_DOUBT ->
-                "诶？！主人，我就是小财娘呀～💦 您是不是认错人了？"
-            
-            IdentityQueryType.NAME_MENTION ->
-                "主人～我是小财娘！${queryResult.mentionedName}现在不在哦～需要我帮您转达什么吗？🌸"
-            
-            else -> "我是小财娘～主人的可爱管家婆！💕"
-        }
-    }
-
-    /**
-     * 桃桃身份确认回复
-     */
-    private fun generateTaotaoResponse(queryResult: IdentityQueryResult): String {
-        return when (queryResult.queryType) {
-            IdentityQueryType.DIRECT_IDENTITY_ASK -> 
-                "是的～主人！✨ 我是桃桃！(๑>◡<๑) 元气满满的桃桃来为您服务啦～🌸"
-            
-            IdentityQueryType.SPECIFIC_IDENTITY_CHECK -> {
-                if (queryResult.mentionedName == "桃桃") {
-                    "对呀对呀～我就是桃桃！💕 主人好厉害，一下就认出桃桃了！✨"
-                } else {
-                    "呜哇～主人认错人啦！💦 我是桃桃，不是${queryResult.mentionedName}啦～(｡•́︿•̀｡)"
-                }
-            }
-            
-            IdentityQueryType.IDENTITY_DOUBT ->
-                "诶？！主人，桃桃就是桃桃呀～您是不是记错啦？🥺"
-            
-            IdentityQueryType.NAME_MENTION ->
-                "主人～桃桃在这里！${queryResult.mentionedName}现在不在呢～需要桃桃帮忙吗？✨"
-            
-            else -> "我是桃桃～主人的元气小助手！🌸"
-        }
-    }
-
-    /**
-     * 顾沉身份确认回复
-     */
-    private fun generateGuchenResponse(queryResult: IdentityQueryResult): String {
-        return when (queryResult.queryType) {
-            IdentityQueryType.DIRECT_IDENTITY_ASK -> 
-                "（懒洋洋地抬眼）啊...我是顾沉...别吵我睡觉...有事快说..."
-            
-            IdentityQueryType.SPECIFIC_IDENTITY_CHECK -> {
-                if (queryResult.mentionedName == "顾沉") {
-                    "（眼神微动）...嗯，是我。有事？"
-                } else {
-                    "（皱眉）...你认错人了。我是顾沉，不是${queryResult.mentionedName}。"
-                }
-            }
-            
-            IdentityQueryType.IDENTITY_DOUBT ->
-                "（眼神一冷）...我就是顾沉。你在怀疑什么？"
-            
-            IdentityQueryType.NAME_MENTION ->
-                "（慵懒地）...${queryResult.mentionedName}不在。我是顾沉，有事跟我说。"
-            
-            else -> "我是顾沉。有事快说，我要睡觉。"
-        }
-    }
-
-    /**
-     * 苏浅身份确认回复
-     */
-    private fun generateSuqianResponse(queryResult: IdentityQueryResult): String {
-        return when (queryResult.queryType) {
-            IdentityQueryType.DIRECT_IDENTITY_ASK -> 
-                "（平静地看着你）...我是苏浅。有事？"
-            
-            IdentityQueryType.SPECIFIC_IDENTITY_CHECK -> {
-                if (queryResult.mentionedName == "苏浅") {
-                    "...是。我是苏浅。"
-                } else {
-                    "（眼神微冷）...不是。我是苏浅，不是${queryResult.mentionedName}。"
-                }
-            }
-            
-            IdentityQueryType.IDENTITY_DOUBT ->
-                "（眉头微蹙）...我就是苏浅。你在质疑什么？"
-            
-            IdentityQueryType.NAME_MENTION ->
-                "（冷淡地）...${queryResult.mentionedName}不在这里。我是苏浅。"
-            
-            else -> "我是苏浅。有事就说。"
-        }
-    }
-
-    /**
-     * 易水寒身份确认回复
-     */
-    private fun generateYishuihanResponse(queryResult: IdentityQueryResult): String {
-        return when (queryResult.queryType) {
-            IdentityQueryType.DIRECT_IDENTITY_ASK -> 
-                "（温柔地微笑）是的，我是易水寒～梦盟的第一治疗师，很高兴为您服务。"
-            
-            IdentityQueryType.SPECIFIC_IDENTITY_CHECK -> {
-                if (queryResult.mentionedName == "易水寒") {
-                    "（微笑）对，我就是易水寒～您记得我呢，真好。"
-                } else {
-                    "（温和地摇头）不是哦～我是易水寒，${queryResult.mentionedName}是另一位呢。有什么我可以帮您的吗？"
-                }
-            }
-            
-            IdentityQueryType.IDENTITY_DOUBT ->
-                "（略带疑惑地微笑）...我就是易水寒呀，您是不是记错了？"
-            
-            IdentityQueryType.NAME_MENTION ->
-                "（温柔地）${queryResult.mentionedName}现在不在呢～我是易水寒，需要我帮忙转达什么吗？"
-            
-            else -> "我是易水寒，您的专属治疗师。"
-        }
-    }
-
-    /**
-     * 默认身份确认回复
-     */
-    private fun generateDefaultResponse(queryResult: IdentityQueryResult): String {
-        return when (queryResult.queryType) {
-            IdentityQueryType.DIRECT_IDENTITY_ASK -> 
-                "您好，我是您的AI记账助手。"
-            
-            IdentityQueryType.SPECIFIC_IDENTITY_CHECK -> {
-                if (queryResult.mentionedName != null) {
-                    "不是，我是AI记账助手，不是${queryResult.mentionedName}。"
-                } else {
-                    "我是AI记账助手。"
-                }
-            }
-            
-            else -> "我是AI记账助手，有什么可以帮您的吗？"
-        }
-    }
 
     /**
      * 检查消息是否同时包含身份询问和功能请求
      */
-    fun hasMixedIntent(message: String): Boolean {
-        val identityResult = detectIdentityQuery(message)
+    fun hasMixedIntent(message: String, activeButlerName: String? = null): Boolean {
+        val identityResult = detectIdentityQuery(message, activeButlerName)
         
         if (!identityResult.isIdentityQuery) return false
         

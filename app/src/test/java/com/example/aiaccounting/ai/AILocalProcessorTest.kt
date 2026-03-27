@@ -84,6 +84,86 @@ class AILocalProcessorTest {
 
 
     @Test
+    fun processMessage_keepsNoteLikeChat_asGeneralConversation() = runTest {
+        val result = processor.processMessage(
+            message = "我想写日记，记一下今天的感受",
+            isNetworkAvailable = false,
+            isAIConfigured = false
+        )
+
+        assertTrue(result.contains("我在听") || result.contains("AI 管家助手"))
+    }
+
+    @Test
+    fun processMessage_recognizesConciseJiPlusAmountCommand_asTransaction() = runTest {
+        coEvery { categoryRepository.getAllCategoriesList() } returns
+            listOf(Category(id = 7, name = "其他支出", type = TransactionType.EXPENSE))
+        coEvery { accountRepository.getAllAccountsList() } returns
+            listOf(Account(id = 3, name = "默认账户", type = AccountType.CASH))
+        coEvery {
+            aiOperationExecutor.executeOperation(
+                match<AIOperation.AddTransaction> {
+                    it.amount == 50.0 &&
+                        it.type == TransactionType.EXPENSE &&
+                        it.accountId == 3L &&
+                        it.categoryId == 7L &&
+                        it.note == "记50午饭"
+                }
+            )
+        } returns AIOperationExecutor.AIOperationResult.Success("已记录这笔支出")
+
+        val result = processor.processMessage(
+            message = "记50午饭",
+            isNetworkAvailable = false,
+            isAIConfigured = false
+        )
+
+        assertTrue(result.contains("已记录这笔支出"))
+        assertTrue(result.contains("账户: 默认账户"))
+        assertTrue(result.contains("分类: 其他支出"))
+    }
+
+    @Test
+    fun processMessage_recognizesPolitePrefixedJiAmountCommand_asTransaction() = runTest {
+        coEvery { categoryRepository.getAllCategoriesList() } returns
+            listOf(Category(id = 7, name = "其他支出", type = TransactionType.EXPENSE))
+        coEvery { accountRepository.getAllAccountsList() } returns
+            listOf(Account(id = 3, name = "默认账户", type = AccountType.CASH))
+        coEvery {
+            aiOperationExecutor.executeOperation(
+                match<AIOperation.AddTransaction> {
+                    it.amount == 50.0 &&
+                        it.type == TransactionType.EXPENSE &&
+                        it.accountId == 3L &&
+                        it.categoryId == 7L &&
+                        it.note == "帮我记50午饭"
+                }
+            )
+        } returns AIOperationExecutor.AIOperationResult.Success("已记录这笔支出")
+
+        val result = processor.processMessage(
+            message = "帮我记50午饭",
+            isNetworkAvailable = false,
+            isAIConfigured = false
+        )
+
+        assertTrue(result.contains("已记录这笔支出"))
+        assertTrue(result.contains("账户: 默认账户"))
+        assertTrue(result.contains("分类: 其他支出"))
+    }
+
+    @Test
+    fun processMessage_keepsForgetSentence_withNumber_asGeneralConversation() = runTest {
+        val result = processor.processMessage(
+            message = "我怕忘记50这件事",
+            isNetworkAvailable = false,
+            isAIConfigured = false
+        )
+
+        assertTrue(result.contains("我在听") || result.contains("AI 管家助手"))
+    }
+
+    @Test
     fun processMessage_createsDefaultAccountAndCategory_whenTransactionNeedsFallbackEntities() = runTest {
         coEvery { categoryRepository.getAllCategoriesList() } returnsMany listOf(
             emptyList(),

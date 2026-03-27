@@ -43,6 +43,26 @@ AI记账是一款面向中国大陆个人用户的智能记账 Android 应用。
 
 ### 2.2 AI 助手文本消息主链路最新状态
 
+#### 2026-03-27 模块 6 第一段收口：Query-Before-Execute 回归加固
+- 本轮在模块 6 第一段（先查再执行）已接通的链路基础上，完成一次中断后续的 TDD 收口，重点是修复两类高风险回归：
+  1) 本地简写记账意图识别回退（`记50午饭` / `帮我记50午饭`）；
+  2) 自定义管家名大小写不一致导致身份确认漏识别（`Alice` vs `alice`）。
+- 本轮改动：
+  - `AILocalProcessor.isTransactionCommand()` 补强“记+金额”指令检测，支持命令式前缀（如“帮我/请/麻烦/给我/帮忙”），并继续避开 reminder 类表达（`记得...`）。
+  - `IdentityConfirmationDetector.detectIdentityQuery()` 对已知名字匹配做统一小写归一化比较，同时保持返回的 `mentionedName` 为原始名称，避免 UI 侧显示被改写。
+- 本轮新增/补强回归测试：
+  - `AILocalProcessorTest`
+    - `processMessage_recognizesConciseJiPlusAmountCommand_asTransaction`
+    - `processMessage_recognizesPolitePrefixedJiAmountCommand_asTransaction`
+    - `processMessage_keepsForgetSentence_withNumber_asGeneralConversation`
+  - `IdentityConfirmationDetectorTest`
+    - `detectIdentityQuery_whenActiveCustomLatinNameCaseDiff_stillMatchesSpecificIdentity`
+- 本轮验证：
+  - 定向回归：`AIAssistantRemoteResponseInterpreterTest` / `AIAssistantRemoteExecutionHandlerTest` / `AIAssistantActionExecutorTest` / `AILocalProcessorTest` / `AIReasoningEngineTest` / `IdentityConfirmationDetectorTest` / `AIAssistantMessageExecutionCoordinatorTest` ✅
+  - 全量单测：`./gradlew testDebugUnitTest --continue` ✅
+  - 构建验证：`./gradlew assembleDebug` ✅
+- 当前状态：模块 6 第一段在“先查再执行链路已接通”的前提下，补齐了关键自然语言入口与身份检测边界的回归保护；后续若继续模块 6 第二段，可在此基线上推进更上层的阶段语义/编排收口。
+
 #### 2026-03-26 模块 5 完成：typed entity reference + transfer 语义封口
 - 已在模块 5 第一轮 typed action 收口基础上，完成 **typed entity reference + transfer 语义封口** 的第二轮最小收口，目标是把交易动作里仍然并存的 `accountName/accountId/categoryName/categoryId` 进一步提升为统一实体引用模型，并让 `TRANSFER` 不再停留在“能识别但未真正定义执行语义”的半完成状态。
 - 本轮改动：

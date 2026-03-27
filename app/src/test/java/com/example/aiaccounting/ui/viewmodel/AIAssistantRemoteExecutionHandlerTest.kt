@@ -125,6 +125,56 @@ class AIAssistantRemoteExecutionHandlerTest {
     }
 
     @Test
+    fun execute_returnsQueryBeforeExecutionRequested_whenInterpreterRequestsQueryBeforeExecution() = runTest {
+        val handler = handlerWithStream {
+            flow {
+                emit("{\"action\":\"add_transaction\",\"amount\":25}")
+            }
+        }
+        coEvery { usageSuccessRecorder() } returns Unit
+        coEvery {
+            interpreter.interpret(
+                userMessage = "帮我记一笔午饭 25 元",
+                remoteResponse = "{\"action\":\"add_transaction\",\"amount\":25}"
+            )
+        } returns RemoteResponseDecision.QueryBeforeExecute(
+            AIAssistantActionEnvelope(
+                actions = listOf(
+                    AIAssistantTypedAction.AddTransaction(
+                        amount = 25.0,
+                        transactionTypeRaw = "expense",
+                        categoryRef = AIAssistantEntityReference(
+                            id = null,
+                            name = "",
+                            rawIdText = "",
+                            kind = "category"
+                        ),
+                        accountRef = AIAssistantEntityReference(
+                            id = null,
+                            name = "",
+                            rawIdText = "",
+                            kind = "account"
+                        ),
+                        note = "",
+                        dateTimestamp = 0L
+                    )
+                )
+            )
+        )
+
+        val result = handler.execute(
+            userMessage = "帮我记一笔午饭 25 元",
+            messages = messages,
+            config = config
+        )
+
+        assertTrue(result is AIAssistantRemoteExecutionResult.QueryBeforeExecutionRequested)
+        val envelope = (result as AIAssistantRemoteExecutionResult.QueryBeforeExecutionRequested).envelope
+        assertEquals(1, envelope.actions.size)
+        assertTrue(envelope.actions.single() is AIAssistantTypedAction.AddTransaction)
+    }
+
+    @Test
     fun execute_returnsActionExecutionRequested_whenInterpreterRequestsActionExecution() = runTest {
         val handler = handlerWithStream {
             flow {

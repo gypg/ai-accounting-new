@@ -100,7 +100,7 @@ class AIAssistantMessageExecutionCoordinatorTest {
         val reasoningResult = reasoningResult(AIReasoningEngine.UserIntent.QUERY_INFORMATION)
         var cleared = false
 
-        coEvery { aiReasoningEngine.reason(any(), any()) } answers {
+        coEvery { aiReasoningEngine.reason(any(), any(), any()) } answers {
             assertTrue(cleared)
             reasoningResult
         }
@@ -161,7 +161,7 @@ class AIAssistantMessageExecutionCoordinatorTest {
         val reasoningResult = reasoningResult(AIReasoningEngine.UserIntent.GENERAL_CONVERSATION)
         var remoteCallCount = 0
 
-        coEvery { aiReasoningEngine.reason(any(), any()) } returns reasoningResult
+        coEvery { aiReasoningEngine.reason(any(), any(), any()) } returns reasoningResult
         coEvery { messageOrchestrator.route(any(), any(), any(), any(), any(), any(), any(), any()) } returns
             AIAssistantMessageRoute.RemoteOrLocalFallback(
                 request = RemoteExecutionRequest(userMessage = resumedMessage)
@@ -224,7 +224,7 @@ class AIAssistantMessageExecutionCoordinatorTest {
         val reasoningResult = reasoningResult(AIReasoningEngine.UserIntent.GENERAL_CONVERSATION)
         var restoredState: PendingClarificationState? = null
 
-        coEvery { aiReasoningEngine.reason(any(), any()) } returns reasoningResult
+        coEvery { aiReasoningEngine.reason(any(), any(), any()) } returns reasoningResult
         coEvery { messageOrchestrator.route(any(), any(), any(), any(), any(), any(), any(), any()) } returns
             AIAssistantMessageRoute.RemoteOrLocalFallback(
                 request = RemoteExecutionRequest(userMessage = "帮我记一笔午饭 二十五元")
@@ -301,7 +301,7 @@ class AIAssistantMessageExecutionCoordinatorTest {
     @Test
     fun execute_returnsClarificationRequired_whenLocalActionsContainRequestClarification() = runTest {
         val reasoningResult = reasoningResult(AIReasoningEngine.UserIntent.RECORD_TRANSACTION)
-        coEvery { aiReasoningEngine.reason(any(), any()) } returns reasoningResult
+        coEvery { aiReasoningEngine.reason(any(), any(), any()) } returns reasoningResult
         coEvery { aiReasoningEngine.executeActions(any()) } returns "请问这笔交易的金额是多少呢？"
         coEvery { messageOrchestrator.route(any(), any(), any(), any(), any(), any(), any(), any()) } returns
             AIAssistantMessageRoute.LocalActions(
@@ -343,7 +343,7 @@ class AIAssistantMessageExecutionCoordinatorTest {
     @Test
     fun execute_returnsRemoteResult_whenRouteIsRemoteFallback() = runTest {
         val reasoningResult = reasoningResult(AIReasoningEngine.UserIntent.GENERAL_CONVERSATION)
-        coEvery { aiReasoningEngine.reason(any(), any()) } returns reasoningResult
+        coEvery { aiReasoningEngine.reason(any(), any(), any()) } returns reasoningResult
         coEvery { messageOrchestrator.route(any(), any(), any(), any(), any(), any(), any(), any()) } returns
             AIAssistantMessageRoute.RemoteOrLocalFallback(
                 request = RemoteExecutionRequest(userMessage = "帮我记一笔午饭")
@@ -377,7 +377,7 @@ class AIAssistantMessageExecutionCoordinatorTest {
     @Test
     fun execute_returnsConfirmationRequired_whenModificationFlowStartsConfirmation() = runTest {
         val reasoningResult = reasoningResult(AIReasoningEngine.UserIntent.MODIFY_TRANSACTION)
-        coEvery { aiReasoningEngine.reason(any(), any()) } returns reasoningResult
+        coEvery { aiReasoningEngine.reason(any(), any(), any()) } returns reasoningResult
         coEvery { messageOrchestrator.route(any(), any(), any(), any(), any(), any(), any(), any()) } returns
             AIAssistantMessageRoute.ModificationFlow(
                 request = ModificationExecutionRequest(
@@ -426,7 +426,7 @@ class AIAssistantMessageExecutionCoordinatorTest {
     @Test
     fun execute_returnsReplyResult_whenRouteIsModificationFlowAndConfirmationContinues() = runTest {
         val reasoningResult = reasoningResult(AIReasoningEngine.UserIntent.MODIFY_TRANSACTION)
-        coEvery { aiReasoningEngine.reason(any(), any()) } returns reasoningResult
+        coEvery { aiReasoningEngine.reason(any(), any(), any()) } returns reasoningResult
         coEvery { messageOrchestrator.route(any(), any(), any(), any(), any(), any(), any(), any()) } returns
             AIAssistantMessageRoute.ModificationFlow(
                 request = ModificationExecutionRequest(
@@ -474,7 +474,7 @@ class AIAssistantMessageExecutionCoordinatorTest {
         )
         val reasoningResult = reasoningResult(AIReasoningEngine.UserIntent.RECORD_TRANSACTION)
 
-        coEvery { aiReasoningEngine.reason(any(), any()) } returns reasoningResult
+        coEvery { aiReasoningEngine.reason(any(), any(), any()) } returns reasoningResult
         coEvery { messageOrchestrator.route(any(), any(), any(), any(), any(), any(), any(), any()) } returns
             AIAssistantMessageRoute.LocalActions(
                 actions = listOf(AIReasoningEngine.AIAction.RequestClarification("这笔是收入还是支出？")),

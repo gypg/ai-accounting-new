@@ -4,6 +4,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 internal sealed class RemoteResponseDecision {
+    data class QueryBeforeExecute(val envelope: AIAssistantActionEnvelope) : RemoteResponseDecision()
     data class ExecuteActions(val envelope: AIAssistantActionEnvelope) : RemoteResponseDecision()
     data class FallbackToLocalTransaction(val remoteReply: String) : RemoteResponseDecision()
     data class ReturnRemoteReply(val reply: String) : RemoteResponseDecision()
@@ -27,7 +28,11 @@ internal class AIAssistantRemoteResponseInterpreter {
         val sanitizedResponse = sanitizeRemoteResponse(remoteResponse)
         val actionEnvelope = extractActionEnvelope(sanitizedResponse)
         return if (actionEnvelope != null) {
-            RemoteResponseDecision.ExecuteActions(actionEnvelope)
+            if (requiresQueryBeforeExecution(actionEnvelope)) {
+                RemoteResponseDecision.QueryBeforeExecute(actionEnvelope)
+            } else {
+                RemoteResponseDecision.ExecuteActions(actionEnvelope)
+            }
         } else if (isTransactionRequest(userMessage)) {
             RemoteResponseDecision.FallbackToLocalTransaction(extractDisplayReply(sanitizedResponse))
         } else {
@@ -288,6 +293,10 @@ internal class AIAssistantRemoteResponseInterpreter {
         } else {
             trimmed
         }
+    }
+
+    private fun requiresQueryBeforeExecution(envelope: AIAssistantActionEnvelope): Boolean {
+        return envelope.actions.any { it is AIAssistantTypedAction.AddTransaction }
     }
 
     private fun sanitizeRemoteResponse(response: String): String {

@@ -30,6 +30,9 @@ internal class AIAssistantRemoteExecutionHandler(
                     recordUsageSuccess()
 
                     when (val decision = interpreter.interpret(userMessage = userMessage, remoteResponse = collected.response)) {
+                        is RemoteResponseDecision.QueryBeforeExecute -> {
+                            AIAssistantRemoteExecutionResult.QueryBeforeExecutionRequested(decision.envelope)
+                        }
                         is RemoteResponseDecision.ExecuteActions -> {
                             AIAssistantRemoteExecutionResult.ActionExecutionRequested(decision.envelope)
                         }

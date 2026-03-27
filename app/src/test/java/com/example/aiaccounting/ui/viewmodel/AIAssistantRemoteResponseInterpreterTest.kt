@@ -15,8 +15,8 @@ class AIAssistantRemoteResponseInterpreterTest {
             remoteResponse = "{\"action\":\"add_transaction\",\"amount\":25}"
         )
 
-        assertTrue(decision is RemoteResponseDecision.ExecuteActions)
-        val action = (decision as RemoteResponseDecision.ExecuteActions).envelope.actions.single()
+        assertTrue(decision is RemoteResponseDecision.QueryBeforeExecute)
+        val action = (decision as RemoteResponseDecision.QueryBeforeExecute).envelope.actions.single()
         assertTrue(action is AIAssistantTypedAction.AddTransaction)
     }
 
@@ -27,8 +27,8 @@ class AIAssistantRemoteResponseInterpreterTest {
             remoteResponse = "nullnull {\"action\":\"add_transaction\",\"amount\":25} null"
         )
 
-        assertTrue(decision is RemoteResponseDecision.ExecuteActions)
-        val action = (decision as RemoteResponseDecision.ExecuteActions).envelope.actions.single() as AIAssistantTypedAction.AddTransaction
+        assertTrue(decision is RemoteResponseDecision.QueryBeforeExecute)
+        val action = (decision as RemoteResponseDecision.QueryBeforeExecute).envelope.actions.single() as AIAssistantTypedAction.AddTransaction
         assertEquals(25.0, action.amount, 0.0)
     }
 
@@ -39,8 +39,8 @@ class AIAssistantRemoteResponseInterpreterTest {
             remoteResponse = "好的，下面是执行结果：{\"action\":\"add_transaction\",\"amount\":25}"
         )
 
-        assertTrue(decision is RemoteResponseDecision.ExecuteActions)
-        val action = (decision as RemoteResponseDecision.ExecuteActions).envelope.actions.single() as AIAssistantTypedAction.AddTransaction
+        assertTrue(decision is RemoteResponseDecision.QueryBeforeExecute)
+        val action = (decision as RemoteResponseDecision.QueryBeforeExecute).envelope.actions.single() as AIAssistantTypedAction.AddTransaction
         assertEquals(25.0, action.amount, 0.0)
     }
 
@@ -51,8 +51,8 @@ class AIAssistantRemoteResponseInterpreterTest {
             remoteResponse = "好的，我来处理。{\"action\":\"add_transaction\",\"amount\":25} 已帮你生成动作"
         )
 
-        assertTrue(decision is RemoteResponseDecision.ExecuteActions)
-        val action = (decision as RemoteResponseDecision.ExecuteActions).envelope.actions.single() as AIAssistantTypedAction.AddTransaction
+        assertTrue(decision is RemoteResponseDecision.QueryBeforeExecute)
+        val action = (decision as RemoteResponseDecision.QueryBeforeExecute).envelope.actions.single() as AIAssistantTypedAction.AddTransaction
         assertEquals(25.0, action.amount, 0.0)
     }
 
@@ -63,8 +63,8 @@ class AIAssistantRemoteResponseInterpreterTest {
             remoteResponse = "我会按你的要求执行：\n```json\n{\"action\":\"add_transaction\",\"amount\":25}\n```"
         )
 
-        assertTrue(decision is RemoteResponseDecision.ExecuteActions)
-        val action = (decision as RemoteResponseDecision.ExecuteActions).envelope.actions.single() as AIAssistantTypedAction.AddTransaction
+        assertTrue(decision is RemoteResponseDecision.QueryBeforeExecute)
+        val action = (decision as RemoteResponseDecision.QueryBeforeExecute).envelope.actions.single() as AIAssistantTypedAction.AddTransaction
         assertEquals(25.0, action.amount, 0.0)
     }
 
@@ -75,8 +75,8 @@ class AIAssistantRemoteResponseInterpreterTest {
             remoteResponse = "[{\"action\":\"add_transaction\",\"amount\":25}]"
         )
 
-        assertTrue(decision is RemoteResponseDecision.ExecuteActions)
-        assertTrue((decision as RemoteResponseDecision.ExecuteActions).envelope.actions.single() is AIAssistantTypedAction.AddTransaction)
+        assertTrue(decision is RemoteResponseDecision.QueryBeforeExecute)
+        assertTrue((decision as RemoteResponseDecision.QueryBeforeExecute).envelope.actions.single() is AIAssistantTypedAction.AddTransaction)
     }
 
     @Test
@@ -86,8 +86,8 @@ class AIAssistantRemoteResponseInterpreterTest {
             remoteResponse = "{\"data\":{\"action\":\"add_transaction\",\"amount\":25}}"
         )
 
-        assertTrue(decision is RemoteResponseDecision.ExecuteActions)
-        val action = (decision as RemoteResponseDecision.ExecuteActions).envelope.actions.single() as AIAssistantTypedAction.AddTransaction
+        assertTrue(decision is RemoteResponseDecision.QueryBeforeExecute)
+        val action = (decision as RemoteResponseDecision.QueryBeforeExecute).envelope.actions.single() as AIAssistantTypedAction.AddTransaction
         assertEquals(25.0, action.amount, 0.0)
     }
 
@@ -198,8 +198,8 @@ class AIAssistantRemoteResponseInterpreterTest {
             """.trimIndent()
         )
 
-        assertTrue(decision is RemoteResponseDecision.ExecuteActions)
-        val action = (decision as RemoteResponseDecision.ExecuteActions).envelope.actions.single() as AIAssistantTypedAction.AddTransaction
+        assertTrue(decision is RemoteResponseDecision.QueryBeforeExecute)
+        val action = (decision as RemoteResponseDecision.QueryBeforeExecute).envelope.actions.single() as AIAssistantTypedAction.AddTransaction
         assertEquals(12L, action.accountRef.id)
         assertEquals("日常卡", action.accountRef.name)
         assertEquals(34L, action.categoryRef.id)
@@ -222,8 +222,8 @@ class AIAssistantRemoteResponseInterpreterTest {
             """.trimIndent()
         )
 
-        assertTrue(decision is RemoteResponseDecision.ExecuteActions)
-        val action = (decision as RemoteResponseDecision.ExecuteActions).envelope.actions.single() as AIAssistantTypedAction.AddTransaction
+        assertTrue(decision is RemoteResponseDecision.QueryBeforeExecute)
+        val action = (decision as RemoteResponseDecision.QueryBeforeExecute).envelope.actions.single() as AIAssistantTypedAction.AddTransaction
         assertEquals("transfer", action.transactionTypeRaw)
         assertEquals(1L, action.accountRef.id)
         assertEquals(2L, action.transferAccountRef?.id)
@@ -245,8 +245,8 @@ class AIAssistantRemoteResponseInterpreterTest {
             """.trimIndent()
         )
 
-        assertTrue(decision is RemoteResponseDecision.ExecuteActions)
-        val action = (decision as RemoteResponseDecision.ExecuteActions).envelope.actions.single() as AIAssistantTypedAction.AddTransaction
+        assertTrue(decision is RemoteResponseDecision.QueryBeforeExecute)
+        val action = (decision as RemoteResponseDecision.QueryBeforeExecute).envelope.actions.single() as AIAssistantTypedAction.AddTransaction
         assertEquals("transfer", action.transactionTypeRaw)
         assertEquals(1L, action.accountRef.id)
         assertEquals(2L, action.transferAccountRef?.id)

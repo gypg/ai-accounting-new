@@ -330,6 +330,9 @@ class AIAssistantViewModel @Inject constructor(
             is AIAssistantRemoteExecutionResult.Timeout -> "请求超时，请稍后重试。"
             is AIAssistantRemoteExecutionResult.TransportFailure -> "处理请求时出错: ${result.message}"
             is AIAssistantRemoteExecutionResult.IncompleteResponse -> "响应不完整，请稍后重试。"
+            is AIAssistantRemoteExecutionResult.QueryBeforeExecutionRequested -> {
+                actionExecutor.executeQueryBeforeExecution(result.envelope)
+            }
             is AIAssistantRemoteExecutionResult.ActionExecutionRequested -> {
                 actionExecutor.executeAIActions(result.envelope)
             }

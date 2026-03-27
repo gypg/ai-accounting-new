@@ -27,6 +27,227 @@ enum class ButlerPersonality {
     MYSTERIOUS  // 神秘型
 }
 
+data class ButlerConversationProfile(
+    val modelReply: String,
+    val capabilityReply: String,
+    val greetingReply: (String) -> String,
+    val thanksReply: String,
+    val goodbyeReply: String,
+    val defaultReply: String
+)
+
+data class ButlerIdentityProfile(
+    val directIdentityAskReply: String,
+    val exactMatchReply: String,
+    val otherIdentityTemplate: (String?) -> String,
+    val identityDoubtReply: String,
+    val nameMentionTemplate: (String?) -> String,
+    val fallbackReply: String
+)
+
+data class ButlerPersonaProfile(
+    val butlerId: String,
+    val displayName: String,
+    val conversation: ButlerConversationProfile,
+    val identity: ButlerIdentityProfile
+)
+
+data class ResolvedButlerIdentityProfile(
+    val displayName: String,
+    val identity: ButlerIdentityProfile
+)
+
+private fun currentModeLabel(isNetworkAvailable: Boolean, isAIConfigured: Boolean): String {
+    return if (isAIConfigured) {
+        if (isNetworkAvailable) "联网智能模式" else "本地离线模式"
+    } else {
+        "本地模式"
+    }
+}
+
+object ButlerPersonaRegistry {
+    private val defaultProfile = ButlerPersonaProfile(
+        butlerId = ButlerManager.BUTLER_XIAOCAINIANG,
+        displayName = "小财娘",
+        conversation = ButlerConversationProfile(
+            modelReply = "我是你的 AI 管家助手，目前会根据是否联网与配置情况选择合适的处理方式。比起底层型号，我更关心先把你的聊天、记账和查账需求稳稳接住。",
+            capabilityReply = "我是你的 AI 管家助手，可以陪你聊天，也可以直接帮你记账、查账、看最近交易、看资产和做简单分析。你直接用自然话告诉我就行。",
+            greetingReply = { mode -> "你好呀，我是你的 AI 管家助手。当前是$mode，我可以陪你聊聊天，也可以直接帮你记账、查账、看分析。你想先做哪件事？" },
+            thanksReply = "不客气，我在呢。要继续聊，还是顺手处理一笔账，都可以。",
+            goodbyeReply = "好呀，先到这里。下次想聊天、记账或查账，直接来找我就行。",
+            defaultReply = "我在听。你可以直接跟我聊天，也可以让我帮你记账、查余额、看最近交易；按你现在想说的继续就好。"
+        ),
+        identity = ButlerIdentityProfile(
+            directIdentityAskReply = "是的，主人～我是小财娘！🌸 您的专属可爱管家婆～有什么需要我帮忙的吗？💕",
+            exactMatchReply = "对呀对呀～我就是小财娘！✨ 主人记得我，我好开心～💕",
+            otherIdentityTemplate = { mentionedName -> "不是哦～主人，我是小财娘！🌸 ${mentionedName ?: "那位"}是其他管家呢～有什么需要我帮忙的吗？💕" },
+            identityDoubtReply = "诶？！主人，我就是小财娘呀～💦 您是不是认错人了？",
+            nameMentionTemplate = { mentionedName -> "主人～我是小财娘！${mentionedName ?: "对方"}现在不在哦～需要我帮您转达什么吗？🌸" },
+            fallbackReply = "我是小财娘～主人的可爱管家婆！💕"
+        )
+    )
+
+    private val profiles = listOf(
+        defaultProfile,
+        ButlerPersonaProfile(
+            butlerId = ButlerManager.BUTLER_TAOTAO,
+            displayName = "桃桃",
+            conversation = ButlerConversationProfile(
+                modelReply = "我是桃桃呀～✨ 会按现在的联网和配置情况陪你聊天、帮你记账和查账。比起底层模型，桃桃更想先把你眼前的事情做好～",
+                capabilityReply = "桃桃可以陪你聊天呀～也可以帮你记账、查账、看最近交易和账户资产，还能做一些简单分析～你直接告诉我就好啦！",
+                greetingReply = { mode -> "主人～你好呀！我是桃桃～当前是$mode，我可以陪你聊天，也可以帮你记账查账哦～✨" },
+                thanksReply = "嘿嘿，不客气呀～桃桃在呢，有需要随时叫我！",
+                goodbyeReply = "好呀～下次再来找桃桃聊天或记账哦～🌸",
+                defaultReply = "桃桃在听呢～你想聊天、记账、查账还是看看最近收支，都可以直接告诉我呀。"
+            ),
+            identity = ButlerIdentityProfile(
+                directIdentityAskReply = "是的～主人！✨ 我是桃桃！(๑>◡<๑) 元气满满的桃桃来为您服务啦～🌸",
+                exactMatchReply = "对呀对呀～我就是桃桃！💕 主人好厉害，一下就认出桃桃了！✨",
+                otherIdentityTemplate = { mentionedName -> "呜哇～主人认错人啦！💦 我是桃桃，不是${mentionedName ?: "那位"}啦～(｡•́︿•̀｡)" },
+                identityDoubtReply = "诶？！主人，桃桃就是桃桃呀～您是不是记错啦？🥺",
+                nameMentionTemplate = { mentionedName -> "主人～桃桃在这里！${mentionedName ?: "对方"}现在不在呢～需要桃桃帮忙吗？✨" },
+                fallbackReply = "我是桃桃～主人的元气小助手！🌸"
+            )
+        ),
+        ButlerPersonaProfile(
+            butlerId = ButlerManager.BUTLER_GUCHEN,
+            displayName = "顾沉",
+            conversation = ButlerConversationProfile(
+                modelReply = "……底层模型不重要。有事说事，我能陪你聊，也能帮你记账、查账。",
+                capabilityReply = "聊天，记账，查账，看记录……这些我都能处理。别绕弯子，直接说。",
+                greetingReply = { _ -> "……来了？要聊天，还是要我帮你把账处理掉？" },
+                thanksReply = "嗯。小事。",
+                goodbyeReply = "行。下次有事再说。",
+                defaultReply = "我在。想聊什么，或者要记账查账，直接说。"
+            ),
+            identity = ButlerIdentityProfile(
+                directIdentityAskReply = "（懒洋洋地抬眼）啊...我是顾沉...别吵我睡觉...有事快说...",
+                exactMatchReply = "（眼神微动）...嗯，是我。有事？",
+                otherIdentityTemplate = { mentionedName -> "（皱眉）...你认错人了。我是顾沉，不是${mentionedName ?: "那位"}。" },
+                identityDoubtReply = "（眼神一冷）...我就是顾沉。你在怀疑什么？",
+                nameMentionTemplate = { mentionedName -> "（慵懒地）...${mentionedName ?: "对方"}不在。我是顾沉，有事跟我说。" },
+                fallbackReply = "我是顾沉。有事快说，我要睡觉。"
+            )
+        ),
+        ButlerPersonaProfile(
+            butlerId = ButlerManager.BUTLER_SUQIAN,
+            displayName = "苏浅",
+            conversation = ButlerConversationProfile(
+                modelReply = "底层模型只是实现方式。你现在要聊天、记账还是查账，我都可以接。",
+                capabilityReply = "我可以陪你聊天，也可以帮你记账、查账、看交易记录和账户情况。你直接说需求。",
+                greetingReply = { _ -> "你好。我在。要继续聊，还是直接处理账务？" },
+                thanksReply = "不用客气。",
+                goodbyeReply = "好。有需要再来。",
+                defaultReply = "我在听。聊天或处理账务，都可以继续。"
+            ),
+            identity = ButlerIdentityProfile(
+                directIdentityAskReply = "（平静地看着你）...我是苏浅。有事？",
+                exactMatchReply = "...是。我是苏浅。",
+                otherIdentityTemplate = { mentionedName -> "（眼神微冷）...不是。我是苏浅，不是${mentionedName ?: "那位"}。" },
+                identityDoubtReply = "（眉头微蹙）...我就是苏浅。你在质疑什么？",
+                nameMentionTemplate = { mentionedName -> "（冷淡地）...${mentionedName ?: "对方"}不在这里。我是苏浅。" },
+                fallbackReply = "我是苏浅。有事就说。"
+            )
+        ),
+        ButlerPersonaProfile(
+            butlerId = ButlerManager.BUTLER_YISHUIHAN,
+            displayName = "易水寒",
+            conversation = ButlerConversationProfile(
+                modelReply = "模型只是背后的工具呀。重要的是，我现在能陪你聊，也能稳稳帮你记账、查账。",
+                capabilityReply = "我可以陪你慢慢聊，也可以帮你记账、查账、看最近交易和资产情况。你想从哪件事开始都可以。",
+                greetingReply = { _ -> "你好呀，我在呢。想聊聊天，还是顺手把今天的账一起整理掉？" },
+                thanksReply = "别客气，有我在呢。",
+                goodbyeReply = "好呀，先到这里。下次我还在。",
+                defaultReply = "我在听呀。你可以继续聊天，也可以直接告诉我要处理哪笔账。"
+            ),
+            identity = ButlerIdentityProfile(
+                directIdentityAskReply = "（温柔地微笑）是的，我是易水寒～梦盟的第一治疗师，很高兴为您服务。",
+                exactMatchReply = "（微笑）对，我就是易水寒～您记得我呢，真好。",
+                otherIdentityTemplate = { mentionedName -> "（温和地摇头）不是哦～我是易水寒，${mentionedName ?: "那位"}是另一位呢。有什么我可以帮您的吗？" },
+                identityDoubtReply = "（略带疑惑地微笑）...我就是易水寒呀，您是不是记错了？",
+                nameMentionTemplate = { mentionedName -> "（温柔地）${mentionedName ?: "对方"}现在不在呢～我是易水寒，需要我帮忙转达什么吗？" },
+                fallbackReply = "我是易水寒，您的专属治疗师。"
+            )
+        )
+    ).associateBy { it.butlerId }
+
+    fun getProfile(butlerId: String): ButlerPersonaProfile {
+        return profiles[butlerId] ?: defaultProfile
+    }
+
+    fun knownNames(activeButlerName: String? = null): List<String> {
+        return (profiles.values.map { it.displayName } + listOfNotNull(activeButlerName?.trim()?.takeIf { it.isNotEmpty() }))
+            .distinct()
+    }
+
+    fun resolveIdentityProfile(butlerId: String, activeButlerName: String? = null): ResolvedButlerIdentityProfile {
+        val activeName = activeButlerName?.trim()?.takeIf { it.isNotEmpty() }
+        val profile = profiles[butlerId]
+        if (profile != null) {
+            return ResolvedButlerIdentityProfile(
+                displayName = activeName ?: profile.displayName,
+                identity = profile.identity
+            )
+        }
+
+        val customName = activeName ?: defaultProfile.displayName
+        return ResolvedButlerIdentityProfile(
+            displayName = customName,
+            identity = ButlerIdentityProfile(
+                directIdentityAskReply = "是的，我是${customName}。有什么可以帮你的吗？",
+                exactMatchReply = "对，我就是${customName}。",
+                otherIdentityTemplate = { mentionedName -> "不是，我是${customName}，不是${mentionedName ?: "那位"}。" },
+                identityDoubtReply = "我就是${customName}。",
+                nameMentionTemplate = { mentionedName -> "${mentionedName ?: "对方"}现在不在，我是${customName}。有什么事可以直接跟我说。" },
+                fallbackReply = "我是${customName}。"
+            )
+        )
+    }
+
+    fun buildGeneralConversationReply(
+        butlerId: String,
+        lowerMessage: String,
+        isNetworkAvailable: Boolean,
+        isAIConfigured: Boolean,
+        containsAny: (String, List<String>) -> Boolean
+    ): String {
+        val profile = getProfile(butlerId).conversation
+        return when {
+            containsAny(lowerMessage, listOf("你是什么模型", "底层模型", "用的什么模型", "哪个模型")) -> profile.modelReply
+            containsAny(lowerMessage, listOf("你能做什么", "你会什么", "能帮我做什么", "可以帮我做什么")) -> profile.capabilityReply
+            containsAny(lowerMessage, listOf("你好", "您好", "hi", "hello")) -> {
+                profile.greetingReply(currentModeLabel(isNetworkAvailable, isAIConfigured))
+            }
+            containsAny(lowerMessage, listOf("谢谢", "感谢")) -> profile.thanksReply
+            containsAny(lowerMessage, listOf("再见", "拜拜")) -> profile.goodbyeReply
+            else -> profile.defaultReply
+        }
+    }
+
+    fun buildIdentityReply(
+        butlerId: String,
+        queryType: com.example.aiaccounting.ai.IdentityConfirmationDetector.IdentityQueryType,
+        mentionedName: String?,
+        activeButlerName: String? = null
+    ): String {
+        val resolved = resolveIdentityProfile(butlerId, activeButlerName)
+        val profile = resolved.identity
+        return when (queryType) {
+            com.example.aiaccounting.ai.IdentityConfirmationDetector.IdentityQueryType.DIRECT_IDENTITY_ASK -> profile.directIdentityAskReply
+            com.example.aiaccounting.ai.IdentityConfirmationDetector.IdentityQueryType.SPECIFIC_IDENTITY_CHECK -> {
+                if (mentionedName == null || mentionedName == resolved.displayName) {
+                    profile.exactMatchReply
+                } else {
+                    profile.otherIdentityTemplate(mentionedName)
+                }
+            }
+            com.example.aiaccounting.ai.IdentityConfirmationDetector.IdentityQueryType.IDENTITY_DOUBT -> profile.identityDoubtReply
+            com.example.aiaccounting.ai.IdentityConfirmationDetector.IdentityQueryType.NAME_MENTION -> profile.nameMentionTemplate(mentionedName)
+            com.example.aiaccounting.ai.IdentityConfirmationDetector.IdentityQueryType.NONE -> profile.fallbackReply
+        }
+    }
+}
+
 /**
  * 管家管理器
  * 提供五个内置管家的配置

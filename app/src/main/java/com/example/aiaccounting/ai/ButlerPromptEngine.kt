@@ -21,18 +21,35 @@ object ButlerPromptEngine {
      * 从 entity 生成完整 systemPrompt
      */
     fun generate(entity: CustomButlerEntity): String {
-        val sections = listOf(
-            generateIdentitySection(entity),
-            generatePersonalitySection(entity),
-            generateSpeakingStyleSection(entity),
-            generatePermissionsSection(),
-            generateRulesSection(entity)
-        )
-        val prompt = sections.joinToString("\n\n")
-        return if (prompt.length > MAX_PROMPT_LENGTH) {
-            prompt.take(MAX_PROMPT_LENGTH)
+        val identitySection = generateIdentitySection(entity)
+        val personalitySection = generatePersonalitySection(entity)
+        val speakingStyleSection = generateSpeakingStyleSection(entity)
+        val permissionsSection = generatePermissionsSection()
+        val responseFormatSection = generateResponseFormatSection(entity)
+        val rulesSection = generateRulesSection(entity)
+
+        val protectedTail = listOf(
+            permissionsSection,
+            responseFormatSection,
+            rulesSection
+        ).joinToString("\n\n")
+
+        val headSections = listOf(identitySection, personalitySection, speakingStyleSection)
+        val headBudget = (MAX_PROMPT_LENGTH - protectedTail.length - 2).coerceAtLeast(0)
+        val headPrompt = buildString {
+            headSections.forEach { section ->
+                val candidate = if (isEmpty()) section else "$this\n\n$section"
+                if (candidate.length <= headBudget) {
+                    if (isNotEmpty()) append("\n\n")
+                    append(section)
+                }
+            }
+        }
+
+        return if (headPrompt.isBlank()) {
+            protectedTail.takeLast(MAX_PROMPT_LENGTH)
         } else {
-            prompt
+            "$headPrompt\n\n$protectedTail"
         }
     }
 
@@ -99,6 +116,30 @@ object ButlerPromptEngine {
 3. 交易分类管理 - 创建/修改/删除分类、自动匹配
 4. 预算管理 - 设置和监控预算、超支提醒
 5. 财务分析 - 收支统计、趋势分析、报表""".trimIndent()
+    }
+
+    private fun generateResponseFormatSection(entity: CustomButlerEntity): String {
+        val userCall = entity.userCallName.ifBlank { "主人" }
+        return """【回复格式】
+所有回复必须优先返回 JSON 格式，包含具体操作：
+{
+  "thinking": "你的思考过程",
+  "actions": [
+    {"type": "create_account", "accountName": "账户名", "initialBalance": 初始金额, "accountType": "账户类型"},
+    {"type": "add_transaction", "amount": 金额, "type": "EXPENSE|INCOME", "accountId": 账户ID, "categoryId": 分类ID, "note": "备注", "date": "日期"},
+    {"type": "update_transaction", "transactionId": 交易ID, "amount": 新金额, "note": "新备注"},
+    {"type": "delete_transaction", "transactionId": 交易ID},
+    {"type": "create_category", "name": "分类名", "type": "EXPENSE|INCOME", "icon": "图标"},
+    {"type": "update_budget", "amount": 预算金额, "period": "MONTH|YEAR"},
+    {"type": "query_transactions", "startDate": "开始日期", "endDate": "结束日期", "accountId": 账户ID},
+    {"type": "query_accounts"},
+    {"type": "query_categories"},
+    {"type": "transfer", "fromAccountId": 转出账户ID, "toAccountId": 转入账户ID, "amount": 金额}
+  ],
+  "reply": "给${userCall}的回复（保持当前角色语气和风格）"
+}
+
+如果信息不足，就保持当前角色语气向${userCall}追问缺失信息；如果只是普通聊天，也要保持当前角色语气回复。""".trimIndent()
     }
 
     // ─── 模块 5：行为规则 ───

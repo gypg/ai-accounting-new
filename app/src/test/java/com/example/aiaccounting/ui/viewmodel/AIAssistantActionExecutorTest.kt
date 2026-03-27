@@ -30,6 +30,48 @@ class AIAssistantActionExecutorTest {
     )
 
     @Test
+    fun executeQueryBeforeExecution_reportsQueriedAccountAndCategoryBeforeMutation() = runTest {
+        coEvery { aiLocalProcessor.ensureBasicCategoriesExist() } returns Unit
+        coEvery { accountRepository.getAllAccountsList() } returnsMany listOf(
+            listOf(Account(id = 12, name = "日常卡", type = AccountType.BANK)),
+            listOf(Account(id = 12, name = "日常卡", type = AccountType.BANK))
+        )
+        coEvery { categoryRepository.getAllCategoriesList() } returnsMany listOf(
+            listOf(Category(id = 34, name = "餐饮", type = TransactionType.EXPENSE)),
+            listOf(Category(id = 34, name = "餐饮", type = TransactionType.EXPENSE))
+        )
+        coEvery {
+            aiOperationExecutor.executeOperation(
+                match<AIOperation.AddTransaction> {
+                    it.accountId == 12L &&
+                        it.categoryId == 34L &&
+                        it.amount == 26.0
+                }
+            )
+        } returns AIOperationExecutor.AIOperationResult.Success("ok")
+
+        val result = executor.executeQueryBeforeExecution(
+            AIAssistantActionEnvelope(
+                actions = listOf(
+                    AIAssistantTypedAction.AddTransaction(
+                        amount = 26.0,
+                        transactionTypeRaw = "expense",
+                        accountRef = AIAssistantEntityReference(id = 12L, name = "日常卡", rawIdText = "12", kind = "account"),
+                        categoryRef = AIAssistantEntityReference(id = 34L, name = "餐饮", rawIdText = "34", kind = "category"),
+                        note = "工作餐",
+                        dateTimestamp = 0L
+                    )
+                )
+            )
+        )
+
+        assertTrue(result.contains("已先查询本地上下文，再执行记账"))
+        assertTrue(result.contains("账户查询：请求=日常卡，命中=日常卡"))
+        assertTrue(result.contains("分类查询：请求=餐饮，命中=餐饮"))
+        assertTrue(result.contains("已记账"))
+    }
+
+    @Test
     fun executeAIActions_reportsEachActionResult_whenBatchHasMixedOutcome() = runTest {
         coEvery { aiLocalProcessor.ensureBasicCategoriesExist() } returns Unit
         coEvery { accountRepository.getAllAccountsList() } returnsMany listOf(

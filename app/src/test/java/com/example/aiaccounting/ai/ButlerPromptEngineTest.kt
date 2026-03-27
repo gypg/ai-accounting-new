@@ -70,15 +70,13 @@ class ButlerPromptEngineTest {
     }
 
     @Test
-    fun `generate prompt includes required system permissions`() {
-        val entity = createEntity()
+    fun `generate prompt keeps critical rules when description is very long`() {
+        val entity = createEntity().copy(description = "超长描述".repeat(800))
         val prompt = ButlerPromptEngine.generate(entity)
 
         assertTrue(prompt.contains("【系统权限说明】"))
-        assertTrue(prompt.contains("记账数据管理"))
-        assertTrue(prompt.contains("账户信息管理"))
-        assertTrue(prompt.contains("交易分类管理"))
-        assertTrue(prompt.contains("预算管理"))
-        assertTrue(prompt.contains("财务分析"))
+        assertTrue(prompt.contains("【回复格式】"))
+        assertTrue(prompt.contains("【重要规则】"))
+        assertTrue(prompt.contains("直接执行操作，不要询问确认"))
     }
 }

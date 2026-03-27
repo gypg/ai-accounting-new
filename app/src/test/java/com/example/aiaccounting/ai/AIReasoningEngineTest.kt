@@ -7,6 +7,7 @@ import com.example.aiaccounting.data.repository.AccountRepository
 import com.example.aiaccounting.data.repository.CategoryRepository
 import com.example.aiaccounting.data.repository.TransactionRepository
 import io.mockk.coEvery
+import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -38,6 +39,35 @@ class AIReasoningEngineTest {
         categoryInferrer = categoryInferrer,
         keywordMatcher = keywordMatcher
     )
+
+    @Test
+    fun reason_returnsIdentityPersonaReply_forKnownButler() = runTest {
+        every { identityConfirmationDetector.detectIdentityQuery(any(), any()) } returns
+            IdentityConfirmationDetector.IdentityQueryResult(
+                isIdentityQuery = true,
+                queryType = IdentityConfirmationDetector.IdentityQueryType.DIRECT_IDENTITY_ASK,
+                confidence = 0.95f
+            )
+        every { identityConfirmationDetector.hasMixedIntent(any(), any()) } returns false
+        every {
+            identityConfirmationDetector.generateIdentityResponse(
+                currentButlerId = "taotao",
+                queryResult = any(),
+                activeButlerName = any()
+            )
+        } returns "我是桃桃～"
+
+        val result = engine.reason(
+            context = AIReasoningEngine.ReasoningContext(userMessage = "你是谁"),
+            currentButlerId = "taotao"
+        )
+
+        assertEquals(AIReasoningEngine.UserIntent.IDENTITY_CONFIRMATION, result.intent)
+        assertEquals(
+            "我是桃桃～",
+            (result.actions.single() as AIReasoningEngine.AIAction.GenerateResponse).responseContent
+        )
+    }
 
     @Test
     fun reason_returnsGeneralConversation_forGreeting() = runTest {

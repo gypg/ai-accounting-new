@@ -182,10 +182,31 @@
   - `task_plan.md`
   - `PROGRESS.md`
 
+### Phase 14: Module 6 First Segment Query-Before-Execute Hardening
+- **Status:** complete
+- **Actions taken:**
+  - Continued from interrupted Module 6 first segment and executed strict TDD closure for two regression risks found during review
+  - Added red/green regression tests for concise bookkeeping commands: support `记50午饭` and polite-prefix form `帮我记50午饭` while keeping reminder/chat boundaries
+  - Tightened `AILocalProcessor.isTransactionCommand()` concise intent detection to command-like prefix patterns, avoiding false positives such as `忘记50...`
+  - Added red/green regression test for custom butler name case mismatch (`activeButlerName="Alice"` vs message `你是alice吗`)
+  - Updated `IdentityConfirmationDetector` matching to normalize known-name comparison while preserving original-cased `mentionedName` in outputs
+  - Ran code-reviewer agent twice during TDD cycle and addressed all HIGH findings before final verification
+- Files created/modified:
+  - `app/src/main/java/com/example/aiaccounting/ai/AILocalProcessor.kt`
+  - `app/src/main/java/com/example/aiaccounting/ai/IdentityConfirmationDetector.kt`
+  - `app/src/test/java/com/example/aiaccounting/ai/AILocalProcessorTest.kt`
+  - `app/src/test/java/com/example/aiaccounting/ai/IdentityConfirmationDetectorTest.kt`
+  - `docs/DEVELOPMENT_DOCUMENT.md`
+  - `PROGRESS.md`
+
 ## Test Results
 | Test | Input | Expected | Actual | Status |
 |------|-------|----------|--------|--------|
 | Planning consistency review | `task_plan.md` vs `findings.md` vs `docs/DEVELOPMENT_DOCUMENT.md` | 近期/中期任务排序与既有结论一致，且未把外围能力误抬到高优先级 | 一致；规划文件已完成剩余 3 个 phase 收尾 | ✓ |
+| Module 6 segment-1 TDD: concise bookkeeping intent | `AILocalProcessorTest` new cases (`记50午饭`, `帮我记50午饭`, `我怕忘记50这件事`) | 前两者命中记账执行，后者保持普通聊天 | 全部通过 | ✓ |
+| Module 6 segment-1 TDD: identity name case mismatch | `IdentityConfirmationDetectorTest.detectIdentityQuery_whenActiveCustomLatinNameCaseDiff_stillMatchesSpecificIdentity` | `Alice/alice` 可匹配并保留原名输出 | 通过 | ✓ |
+| AI assistant targeted regression suite | Interpreter/Handler/Executor/LocalProcessor/Reasoning/Identity/Coordinator 定向集 | 不引入回归 | 全部通过 | ✓ |
+| Full unit + build verification | `./gradlew testDebugUnitTest --continue` + `./gradlew assembleDebug` | 单测与构建通过 | 全部通过 | ✓ |
 
 ## Error Log
 | Timestamp | Error | Attempt | Resolution |

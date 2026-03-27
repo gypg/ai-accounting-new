@@ -66,6 +66,28 @@ class AIAssistantActionExecutor @Inject constructor(
     }
   }
 
+  internal suspend fun executeQueryBeforeExecution(envelope: AIAssistantActionEnvelope): String {
+    return try {
+      val results = envelope.actions.mapIndexed { index, action ->
+        formatIndexedResult(index + 1, executeQueryBeforeExecutionAction(action))
+      }
+
+      val aiReply = envelope.reply.trim().removeDirtyNullWrappers()
+      if (aiReply.isNotBlank()) {
+        listOf(aiReply, results.joinToString("\n").trim())
+          .filter { it.isNotBlank() }
+          .joinToString("\n\n")
+      } else {
+        generateFriendlyResponse(results)
+      }
+    } catch (e: CancellationException) {
+      throw e
+    } catch (e: Exception) {
+      logError("执行AI查询前置编排失败", e)
+      "执行操作时出错: ${e.message}\n\n请尝试简化您的指令，或分多次发送。"
+    }
+  }
+
   /**
    * 执行单个动作
    */
@@ -78,6 +100,15 @@ class AIAssistantActionExecutor @Inject constructor(
       is AIAssistantTypedAction.Query -> aiLocalProcessor.handleQueryCommand(action.target)
       is AIAssistantTypedAction.CreateCategory -> executeCreateCategory(action, traceContext)
       is AIAssistantTypedAction.Unknown -> "未知的操作类型：${action.rawAction}"
+    }
+  }
+
+  private suspend fun executeQueryBeforeExecutionAction(action: AIAssistantTypedAction): String {
+    val traceContext = AITraceContext(sourceType = "AI_REMOTE")
+
+    return when (action) {
+      is AIAssistantTypedAction.AddTransaction -> executeAddTransactionWithQueryBeforeExecution(action, traceContext)
+      else -> executeSingleAction(action)
     }
   }
 
@@ -100,6 +131,75 @@ class AIAssistantActionExecutor @Inject constructor(
   }
 
   private suspend fun executeAddTransaction(action: AIAssistantTypedAction.AddTransaction, traceContext: AITraceContext): String {
+    val resolution = resolveAddTransactionExecution(action)
+    return resolution.failureMessage ?: executeResolvedAddTransaction(
+      amount = action.amount,
+      transactionType = resolution.transactionType,
+      account = resolution.account,
+      category = resolution.category,
+      note = action.note,
+      dateTimestamp = action.dateTimestamp,
+      traceContext = traceContext
+    )
+  }
+
+  private suspend fun executeAddTransactionWithQueryBeforeExecution(
+    action: AIAssistantTypedAction.AddTransaction,
+    traceContext: AITraceContext
+  ): String {
+    val resolution = resolveAddTransactionExecution(action)
+    val querySummary = buildQueryBeforeExecutionSummary(action, resolution)
+    val executionResult = resolution.failureMessage ?: executeResolvedAddTransaction(
+      amount = action.amount,
+      transactionType = resolution.transactionType,
+      account = resolution.account,
+      category = resolution.category,
+      note = action.note,
+      dateTimestamp = action.dateTimestamp,
+      traceContext = traceContext
+    )
+    return listOf(querySummary, executionResult)
+      .filter { it.isNotBlank() }
+      .joinToString("\n")
+  }
+
+  private suspend fun executeCreateCategory(action: AIAssistantTypedAction.CreateCategory, traceContext: AITraceContext): String {
+    val name = action.name
+
+    val categoryTypeStr = action.categoryTypeRaw.uppercase()
+
+    val txnType = when (categoryTypeStr) {
+      "INCOME", "收入" -> TransactionType.INCOME
+      "EXPENSE", "支出" -> TransactionType.EXPENSE
+      else -> TransactionType.EXPENSE
+    }
+
+    val parentId = action.parentId
+
+    if (name.isBlank()) {
+      return "创建分类失败：分类名称不能为空"
+    }
+
+    val operation = AIOperation.AddCategory(name = name, type = txnType, parentId = parentId, traceContext = traceContext)
+
+    return when (val result = aiOperationExecutor.executeOperation(operation)) {
+      is AIOperationExecutor.AIOperationResult.Success -> "✅ 已创建分类：$name"
+      is AIOperationExecutor.AIOperationResult.Error -> "❌ 创建分类失败：${result.error}"
+    }
+  }
+
+  private data class AddTransactionExecutionResolution(
+    val transactionType: TransactionType,
+    val account: com.example.aiaccounting.data.local.entity.Account? = null,
+    val category: com.example.aiaccounting.data.local.entity.Category? = null,
+    val failureMessage: String? = null,
+    val accountQuerySummary: String = "",
+    val categoryQuerySummary: String = ""
+  )
+
+  private suspend fun resolveAddTransactionExecution(
+    action: AIAssistantTypedAction.AddTransaction
+  ): AddTransactionExecutionResolution {
     val amount = action.amount
     val typeStr = action.transactionTypeRaw
     val transactionTypeStr = action.transactionTypeRaw
@@ -113,11 +213,11 @@ class AIAssistantActionExecutor @Inject constructor(
     val accountRef = action.accountRef
     val transferAccountRef = action.transferAccountRef
 
-    val note = action.note
-    val dateTimestamp = action.dateTimestamp
-
     if (amount <= 0) {
-      return "记账失败：金额必须大于0"
+      return AddTransactionExecutionResolution(
+        transactionType = TransactionType.EXPENSE,
+        failureMessage = "记账失败：金额必须大于0"
+      )
     }
 
     val effectiveTypeStr = transactionTypeStr.ifBlank { safeTypeStr.ifBlank { "expense" } }
@@ -131,7 +231,10 @@ class AIAssistantActionExecutor @Inject constructor(
     if (transactionType == TransactionType.TRANSFER) {
       val fromLabel = accountRef.name.ifBlank { accountRef.id?.let { "ID=$it" } ?: "源账户" }
       val toLabel = transferAccountRef?.name?.ifBlank { transferAccountRef.id?.let { "ID=$it" } ?: "目标账户" } ?: "目标账户"
-      return "记账失败：暂不支持执行转账语义，请改成两步操作或先使用普通收支记账。来源账户：$fromLabel，目标账户：$toLabel"
+      return AddTransactionExecutionResolution(
+        transactionType = transactionType,
+        failureMessage = "记账失败：暂不支持执行转账语义，请改成两步操作或先使用普通收支记账。来源账户：$fromLabel，目标账户：$toLabel"
+      )
     }
 
     val effectiveCategoryName = when {
@@ -167,13 +270,21 @@ class AIAssistantActionExecutor @Inject constructor(
     val account = accountResolution.account
       ?: accountResolution.creationError?.let {
         val requestedLabel = accountResolution.requestedLabel.orEmpty()
-        return if (requestedLabel.isNotBlank()) {
-          "记账失败：创建账户失败 - $requestedLabel：$it"
-        } else {
-          "记账失败：创建账户失败 - $it"
-        }
+        return AddTransactionExecutionResolution(
+          transactionType = transactionType,
+          failureMessage = if (requestedLabel.isNotBlank()) {
+            "记账失败：创建账户失败 - $requestedLabel：$it"
+          } else {
+            "记账失败：创建账户失败 - $it"
+          },
+          accountQuerySummary = buildAccountQuerySummary(accountRef, effectiveAccountName, accountResolution.account?.name)
+        )
       }
-      ?: return "记账失败：无法创建或找到账户"
+      ?: return AddTransactionExecutionResolution(
+        transactionType = transactionType,
+        failureMessage = "记账失败：无法创建或找到账户",
+        accountQuerySummary = buildAccountQuerySummary(accountRef, effectiveAccountName, null)
+      )
 
     val categoryResolution = AITransactionEntityResolver.resolveCategory(
       categoryRepository = categoryRepository,
@@ -191,19 +302,52 @@ class AIAssistantActionExecutor @Inject constructor(
     val category = categoryResolution.category
       ?: categoryResolution.creationError?.let {
         val requestedLabel = categoryResolution.requestedLabel.orEmpty()
-        return if (requestedLabel.isNotBlank()) {
-          "记账失败：创建分类失败 - $requestedLabel：$it"
-        } else {
-          "记账失败：创建分类失败 - $it"
-        }
+        return AddTransactionExecutionResolution(
+          transactionType = transactionType,
+          account = account,
+          failureMessage = if (requestedLabel.isNotBlank()) {
+            "记账失败：创建分类失败 - $requestedLabel：$it"
+          } else {
+            "记账失败：创建分类失败 - $it"
+          },
+          accountQuerySummary = buildAccountQuerySummary(accountRef, effectiveAccountName, account.name),
+          categoryQuerySummary = buildCategoryQuerySummary(categoryRef, effectiveCategoryName, categoryResolution.category?.name)
+        )
       }
-      ?: return "记账失败：无法创建或找到分类"
+      ?: return AddTransactionExecutionResolution(
+        transactionType = transactionType,
+        account = account,
+        failureMessage = "记账失败：无法创建或找到分类",
+        accountQuerySummary = buildAccountQuerySummary(accountRef, effectiveAccountName, account.name),
+        categoryQuerySummary = buildCategoryQuerySummary(categoryRef, effectiveCategoryName, null)
+      )
+
+    return AddTransactionExecutionResolution(
+      transactionType = transactionType,
+      account = account,
+      category = category,
+      accountQuerySummary = buildAccountQuerySummary(accountRef, effectiveAccountName, account.name),
+      categoryQuerySummary = buildCategoryQuerySummary(categoryRef, effectiveCategoryName, category.name)
+    )
+  }
+
+  private suspend fun executeResolvedAddTransaction(
+    amount: Double,
+    transactionType: TransactionType,
+    account: com.example.aiaccounting.data.local.entity.Account?,
+    category: com.example.aiaccounting.data.local.entity.Category?,
+    note: String,
+    dateTimestamp: Long,
+    traceContext: AITraceContext
+  ): String {
+    val resolvedAccount = account ?: return "记账失败：无法创建或找到账户"
+    val resolvedCategory = category ?: return "记账失败：无法创建或找到分类"
 
     val operation = AIOperation.AddTransaction(
       amount = amount,
       type = transactionType,
-      accountId = account.id,
-      categoryId = category.id,
+      accountId = resolvedAccount.id,
+      categoryId = resolvedCategory.id,
       date = dateTimestamp,
       note = note.ifBlank { "AI记账" },
       traceContext = traceContext
@@ -211,35 +355,60 @@ class AIAssistantActionExecutor @Inject constructor(
 
     return when (val result = aiOperationExecutor.executeOperation(operation)) {
       is AIOperationExecutor.AIOperationResult.Success ->
-        "✅ 已记账：${category.name} ${if (transactionType == TransactionType.INCOME) "收入" else "支出"} ¥$amount\n账户: ${account.name}\n分类: ${category.name}"
+        "✅ 已记账：${resolvedCategory.name} ${if (transactionType == TransactionType.INCOME) "收入" else "支出"} ¥$amount\n账户: ${resolvedAccount.name}\n分类: ${resolvedCategory.name}"
       is AIOperationExecutor.AIOperationResult.Error ->
         "❌ 记账失败：${result.error}"
     }
   }
 
-  private suspend fun executeCreateCategory(action: AIAssistantTypedAction.CreateCategory, traceContext: AITraceContext): String {
-    val name = action.name
-
-    val categoryTypeStr = action.categoryTypeRaw.uppercase()
-
-    val txnType = when (categoryTypeStr) {
-      "INCOME", "收入" -> TransactionType.INCOME
-      "EXPENSE", "支出" -> TransactionType.EXPENSE
-      else -> TransactionType.EXPENSE
+  private fun buildQueryBeforeExecutionSummary(
+    action: AIAssistantTypedAction.AddTransaction,
+    resolution: AddTransactionExecutionResolution
+  ): String {
+    val amount = action.amount
+    val direction = if (resolution.transactionType == TransactionType.INCOME) "收入" else "支出"
+    return buildString {
+      append("已先查询本地上下文，再执行记账：¥")
+      append(amount)
+      append(' ')
+      append(direction)
+      if (resolution.accountQuerySummary.isNotBlank()) {
+        append("\n")
+        append(resolution.accountQuerySummary)
+      }
+      if (resolution.categoryQuerySummary.isNotBlank()) {
+        append("\n")
+        append(resolution.categoryQuerySummary)
+      }
     }
+  }
 
-    val parentId = action.parentId
-
-    if (name.isBlank()) {
-      return "创建分类失败：分类名称不能为空"
+  private fun buildAccountQuerySummary(
+    accountRef: AIAssistantEntityReference,
+    requestedName: String,
+    resolvedName: String?
+  ): String {
+    val requested = requestedName.ifBlank {
+      accountRef.id?.let { "ID=$it" }
+        ?: accountRef.rawIdText.takeIf { it.isNotBlank() }
+        ?: "默认账户"
     }
+    val resolved = resolvedName ?: "未命中"
+    return "账户查询：请求=$requested，命中=$resolved"
+  }
 
-    val operation = AIOperation.AddCategory(name = name, type = txnType, parentId = parentId, traceContext = traceContext)
-
-    return when (val result = aiOperationExecutor.executeOperation(operation)) {
-      is AIOperationExecutor.AIOperationResult.Success -> "✅ 已创建分类：$name"
-      is AIOperationExecutor.AIOperationResult.Error -> "❌ 创建分类失败：${result.error}"
+  private fun buildCategoryQuerySummary(
+    categoryRef: AIAssistantEntityReference,
+    requestedName: String,
+    resolvedName: String?
+  ): String {
+    val requested = requestedName.ifBlank {
+      categoryRef.id?.let { "ID=$it" }
+        ?: categoryRef.rawIdText.takeIf { it.isNotBlank() }
+        ?: "自动分类"
     }
+    val resolved = resolvedName ?: "未命中"
+    return "分类查询：请求=$requested，命中=$resolved"
   }
 
   private fun logDebug(message: String) {

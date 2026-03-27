@@ -146,19 +146,24 @@ class AIReasoningEngine @Inject constructor(
      * 4. 记账操作
      * 5. 普通对话
      */
-    suspend fun reason(context: ReasoningContext, currentButlerId: String): ReasoningResult {
+    suspend fun reason(
+        context: ReasoningContext,
+        currentButlerId: String,
+        currentButlerName: String? = null
+    ): ReasoningResult {
         // 【第一步】检测身份确认询问（最高优先级）
-        val identityQueryResult = identityConfirmationDetector.detectIdentityQuery(context.userMessage)
+        val identityQueryResult = identityConfirmationDetector.detectIdentityQuery(context.userMessage, currentButlerName)
         
         if (identityQueryResult.isIdentityQuery) {
             // 生成身份确认回复
             val identityResponse = identityConfirmationDetector.generateIdentityResponse(
-                currentButlerId, 
-                identityQueryResult
+                currentButlerId,
+                identityQueryResult,
+                currentButlerName
             )
-            
+
             // 检查是否同时包含功能请求
-            val hasFunctionRequest = identityConfirmationDetector.hasMixedIntent(context.userMessage)
+            val hasFunctionRequest = identityConfirmationDetector.hasMixedIntent(context.userMessage, currentButlerName)
             
             return if (hasFunctionRequest) {
                 // 混合意图：先确认身份，然后处理功能请求

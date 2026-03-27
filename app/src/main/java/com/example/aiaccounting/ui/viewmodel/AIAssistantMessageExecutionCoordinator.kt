@@ -146,7 +146,8 @@ internal class AIAssistantMessageExecutionCoordinator(
                 userMessage = continuationRequest.resumedMessage,
                 conversationHistory = conversationHistory
             ),
-            currentButler.id
+            currentButler.id,
+            currentButler.name
         )
         val route = messageOrchestrator.route(
             reasoningResult = reasoningResult,
@@ -206,7 +207,7 @@ internal class AIAssistantMessageExecutionCoordinator(
             conversationHistory = conversationHistory
         )
 
-        val reasoningResult = aiReasoningEngine.reason(context, currentButler.id)
+        val reasoningResult = aiReasoningEngine.reason(context, currentButler.id, currentButler.name)
         val route = messageOrchestrator.route(
             reasoningResult = reasoningResult,
             userMessage = message,
