@@ -51,15 +51,14 @@ class AIAssistantRemoteExecutionHandlerTest {
         coEvery { usageSuccessRecorder() } returns Unit
         coEvery {
             interpreter.interpret(
-                userMessage = "你好",
                 remoteResponse = "好的，今天支出18元"
             )
         } returns RemoteResponseDecision.ReturnRemoteReply("好的，今天支出18元")
 
         val result = handler.execute(
-            userMessage = "你好",
             messages = messages,
-            config = config
+            config = config,
+            responseRequirement = AIAssistantRemoteResponseRequirement.ReplyAllowed
         )
 
         assertTrue(result is AIAssistantRemoteExecutionResult.RemoteReply)
@@ -78,9 +77,9 @@ class AIAssistantRemoteExecutionHandlerTest {
         coEvery { usageFailureRecorder() } returns Unit
 
         val result = handler.execute(
-            userMessage = "你好",
             messages = messages,
-            config = config
+            config = config,
+            responseRequirement = AIAssistantRemoteResponseRequirement.ReplyAllowed
         )
 
         assertTrue(result is AIAssistantRemoteExecutionResult.Timeout)
@@ -95,9 +94,9 @@ class AIAssistantRemoteExecutionHandlerTest {
         coEvery { usageFailureRecorder() } returns Unit
 
         val result = handler.execute(
-            userMessage = "你好",
             messages = messages,
-            config = config
+            config = config,
+            responseRequirement = AIAssistantRemoteResponseRequirement.ReplyAllowed
         )
 
         assertTrue(result is AIAssistantRemoteExecutionResult.TransportFailure)
@@ -117,9 +116,9 @@ class AIAssistantRemoteExecutionHandlerTest {
         coEvery { usageFailureRecorder() } returns Unit
 
         val result = handler.execute(
-            userMessage = "帮我记一笔午饭 25 元",
             messages = messages,
-            config = config
+            config = config,
+            responseRequirement = AIAssistantRemoteResponseRequirement.ReplyAllowed
         )
 
         assertTrue(result is AIAssistantRemoteExecutionResult.IncompleteResponse)
@@ -136,7 +135,6 @@ class AIAssistantRemoteExecutionHandlerTest {
         coEvery { usageSuccessRecorder() } returns Unit
         coEvery {
             interpreter.interpret(
-                userMessage = "帮我记一笔午饭 25 元",
                 remoteResponse = "{\"action\":\"add_transaction\",\"amount\":25}"
             )
         } returns RemoteResponseDecision.QueryBeforeExecute(
@@ -165,9 +163,9 @@ class AIAssistantRemoteExecutionHandlerTest {
         )
 
         val result = handler.execute(
-            userMessage = "帮我记一笔午饭 25 元",
             messages = messages,
-            config = config
+            config = config,
+            responseRequirement = AIAssistantRemoteResponseRequirement.ReplyAllowed
         )
 
         assertTrue(result is AIAssistantRemoteExecutionResult.QueryBeforeExecutionRequested)
@@ -186,7 +184,6 @@ class AIAssistantRemoteExecutionHandlerTest {
         coEvery { usageSuccessRecorder() } returns Unit
         coEvery {
             interpreter.interpret(
-                userMessage = "帮我记一笔午饭 25 元",
                 remoteResponse = "{\"action\":\"add_transaction\",\"amount\":25}"
             )
         } returns RemoteResponseDecision.ExecuteActions(
@@ -215,9 +212,9 @@ class AIAssistantRemoteExecutionHandlerTest {
         )
 
         val result = handler.execute(
-            userMessage = "帮我记一笔午饭 25 元",
             messages = messages,
-            config = config
+            config = config,
+            responseRequirement = AIAssistantRemoteResponseRequirement.ReplyAllowed
         )
 
         assertTrue(result is AIAssistantRemoteExecutionResult.ActionExecutionRequested)
@@ -227,7 +224,7 @@ class AIAssistantRemoteExecutionHandlerTest {
     }
 
     @Test
-    fun execute_returnsLocalFallbackRequested_whenInterpreterRequestsFallback() = runTest {
+    fun execute_returnsTransactionActionMissing_whenRequirementRequiresActionEnvelope_butInterpreterReturnsRemoteReply() = runTest {
         val handler = handlerWithStream {
             flow {
                 emit("好的，我来帮你处理。")
@@ -236,22 +233,41 @@ class AIAssistantRemoteExecutionHandlerTest {
         coEvery { usageSuccessRecorder() } returns Unit
         coEvery {
             interpreter.interpret(
-                userMessage = "帮我记一笔午饭 25 元",
                 remoteResponse = "好的，我来帮你处理。"
             )
-        } returns RemoteResponseDecision.FallbackToLocalTransaction("好的，我来帮你处理。")
+        } returns RemoteResponseDecision.ReturnRemoteReply("好的，我来帮你处理。")
 
         val result = handler.execute(
-            userMessage = "帮我记一笔午饭 25 元",
             messages = messages,
-            config = config
+            config = config,
+            responseRequirement = AIAssistantRemoteResponseRequirement.ActionEnvelopeRequired
         )
 
-        assertTrue(result is AIAssistantRemoteExecutionResult.LocalFallbackRequested)
-        assertEquals(
-            "好的，我来帮你处理。",
-            (result as AIAssistantRemoteExecutionResult.LocalFallbackRequested).remoteReply
-        )
+        assertTrue(result is AIAssistantRemoteExecutionResult.TransactionActionMissing)
         coVerify(exactly = 1) { usageSuccessRecorder() }
+    }
+
+    @Test
+    fun execute_returnsRemoteReply_whenRequirementAllowsReply_andInterpreterReturnsRemoteReply() = runTest {
+        val handler = handlerWithStream {
+            flow {
+                emit("你好呀")
+            }
+        }
+        coEvery { usageSuccessRecorder() } returns Unit
+        coEvery {
+            interpreter.interpret(
+                remoteResponse = "你好呀"
+            )
+        } returns RemoteResponseDecision.ReturnRemoteReply("你好呀")
+
+        val result = handler.execute(
+            messages = messages,
+            config = config,
+            responseRequirement = AIAssistantRemoteResponseRequirement.ReplyAllowed
+        )
+
+        assertTrue(result is AIAssistantRemoteExecutionResult.RemoteReply)
+        assertEquals("你好呀", (result as AIAssistantRemoteExecutionResult.RemoteReply).reply)
     }
 }

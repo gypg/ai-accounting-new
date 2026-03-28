@@ -510,7 +510,7 @@ AI记账是一款面向中国大陆个人用户的智能记账 Android 应用。
 #### 2026-03-25 review 修复补充：wrapped JSON / local failure / `记` 误判
 - 已根据 code review 再补 3 个回归修复：
   - `AIAssistantRemoteResponseInterpreter` 现在允许“短前置说明 + JSON action”命中 action 执行，只要文本中可提取出合法 action JSON，就会把提取出的 JSON 片段传给执行器；不再因为前面多一句“好的，下面是执行结果：”而丢失结构化执行信息。
-  - `combineRemoteAndLocalReply()` 不再只靠 `❌` emoji 判断本地失败；现在 `错误:`、`记账失败:`、`创建账户失败:`、`创建分类失败:`、`执行操作时出错:` 等本地失败文案也会压制远程“已收到”类话术，避免成功口吻和失败结果并存。
+  - （历史说明，已被 2026-03-28 的 M1+M3 收口替代）此前 `combineRemoteAndLocalReply()` 用于远端文本 + 本地兜底合并；当前主链已移除该路径。
   - `AILocalProcessor` 不再把裸 `记` 当成记账触发词；已收紧为 `记账 / 记一笔 / 记一下 / 记下 / 记录一笔 / 花了 / 收入 / 支出 / 消费 / 转账 / 工资 / 奖金 / 报销` 等更明确的交易短语，避免“你记得我吗？”这类普通聊天误进记账分支。
 - **补充产品约束（2026-03-25）**：多笔动作执行时，若账户不存在，AI 管家应直接创建账户；若分类不存在，AI 管家应直接创建分类，并在语义足够时支持直接创建子分类；AI 管家对所有记账相关操作默认拥有直接执行能力，不应退化为只能建议或只做半自动确认。
 - 新增回归测试：
@@ -635,7 +635,7 @@ AI记账是一款面向中国大陆个人用户的智能记账 Android 应用。
   - 覆盖 timeout 时返回 `Timeout` 语义结果并保留失败 usage 记录
   - 覆盖异常时返回 `TransportFailure` 语义结果
   - 覆盖不完整响应时返回 `IncompleteResponse` 并记录失败 usage
-  - 覆盖远程文本回退为 `LocalFallbackRequested`
+  - （历史说明，已被 2026-03-28 的 M1+M3 收口替代）曾覆盖远程文本回退为 `LocalFallbackRequested`
   - 覆盖 `ExecuteActions` 分支返回 `ActionExecutionRequested`
 - `AIAssistantRemoteResponseIntegrityCheckerTest`
   - 覆盖空响应
@@ -942,6 +942,113 @@ AI记账是一款面向中国大陆个人用户的智能记账 Android 应用。
 ### 5.3 建议后续手工复核的文档
 - `BUILD.md`：历史 Windows 路径和签名示例较旧
 - `RELEASE_CHECKLIST.md`：已同步核心流程，但仍建议发布前按真实商店流程再次逐项核查
+
+### 5.4 对话系统双模式改造执行计划（2026-03-28）
+
+#### 背景目标
+- 建立明确的“分析 -> 路由 -> 执行”对话处理流程。
+- 远端模式启用时：除 OCR 外，非 OCR 回复统一走远端，禁止本地聊天兜底干扰。
+- 本地模式启用时：本地 AI 仍保持聊天与记账能力完整可用。
+- OCR 保持本地链路并与文本主链路解耦。
+
+#### 模块拆分
+1. **M1 模式合同层（Engine Mode Contract）**
+   - 统一远端模式/本地模式判定，先判模式再路由。
+   - 修复远端可用但被配置短路的问题。
+
+2. **M2 两阶段对话处理（Intent Analysis -> Route Planning）**
+   - 显式输出顶层意图：`DAILY_CHAT` / `BOOKKEEPING` / `OCR_IMAGE`。
+   - 路由层只做执行路径选择，不重复做意图识别。
+
+3. **M3 远端优先收口（非 OCR）**
+   - 移除非 OCR 场景本地聊天兜底分支。
+   - 远端异常统一失败语义，不再隐式回落本地聊天。
+
+4. **M4 记账执行链收口（Bookkeeping Tool Workflow）**
+   - 统一“远端动作语义 -> 本地工具执行器落库”主链。
+   - 避免多套记账执行逻辑导致结果漂移。
+
+5. **M5 本地模式保真（Local Mode Preservation）**
+   - 保留本地模式独立可用能力（聊天+记账）。
+   - 避免本地模式误触发远端依赖。
+
+6. **M6 OCR 边界隔离**
+   - 图片消息维持本地 OCR 专用链路。
+   - OCR 与文本主链路互不干扰。
+
+7. **M7 测试与回归矩阵**
+   - 覆盖普通聊天、单笔/多笔记账、转账、远端异常、OCR。
+   - 确保双模式策略不回归。
+
+8. **M8 冗余清理与文档同步**
+   - 清理未接入主链路或职责重复代码。
+   - 更新开发文档与记忆索引，保证可交接。
+
+#### 验收标准
+- 远端模式下非 OCR 的本地聊天兜底触发率为 0。
+- 本地模式下聊天与记账操作完整可用。
+- 记账执行结果在金额/账户/分类/类型维度可核对且稳定。
+- OCR 链路可用且不影响文本对话链路。
+
+#### M1 + M3 已完成实现（2026-03-28）
+- `AIAssistantMessageOrchestrator` 已新增 `AIAssistantEngineMode` 并统一路由判定，远端可用时不再受 builtin 开关短路。
+- 远端执行链已移除 `FallbackToLocalTransaction / LocalFallbackRequested`，非 OCR 不再回退本地聊天。
+- 新增 `TransactionActionMissing` 语义：当记账请求未返回可执行动作 JSON 时，统一返回安全失败提示，避免“看起来成功但未落库”。
+- 收紧记账请求识别，降低普通对话被误判为记账失败的风险（如无金额的“买杯咖啡”保持普通对话回复）。
+
+#### M2 已完成实现（2026-03-28）
+- `AIAssistantMessageOrchestrator` 已引入显式两阶段合同：先 `analyze(...)`（Analysis），再 `route(analysis)`（Routing）。
+- 新增 `AIAssistantMessageAnalysis` 与顶层意图 `AIAssistantTopLevelIntent`（`DAILY_CHAT` / `BOOKKEEPING` / `OCR_IMAGE`），路由层改为消费分析产物，不再直接重复识别。
+- `AIAssistantMessageExecutionCoordinator` 在新消息与澄清续执行两条主路径都改为 `analyze -> route`，保留原有澄清/确认/远端执行语义。
+- 补充 OCR 图片消息识别回归（`data:image/...` 与图片 URL），修复 URL 正则匹配转义问题。
+
+#### M4 已完成实现（2026-03-28）
+- 远端执行请求新增显式合同字段 `AIAssistantRemoteResponseRequirement`（`ReplyAllowed` / `ActionEnvelopeRequired`），由路由层在 `RemoteExecutionRequest` 中下发。
+- `AIAssistantMessageOrchestrator` 在 `BOOKKEEPING + Remote` 路径强制 `ActionEnvelopeRequired`；`DAILY_CHAT + Remote` 保持 `ReplyAllowed`（`OCR_IMAGE` 已在 M6 收口为本地链路）。
+- `AIAssistantRemoteResponseInterpreter` 去除“基于用户文本判断是否记账请求”的缺失动作判定，职责收口为“解析动作 envelope / 返回远端文本”。
+- `AIAssistantRemoteExecutionHandler` 变为合同执行点：仅当请求为 `ActionEnvelopeRequired` 且远端返回纯文本时，统一产出 `TransactionActionMissing`。
+- `AIAssistantMessageExecutionCoordinator` 续执行路径增加 `enforceContinuationRouteContract(...)`：若澄清触发器属于交易类（金额/类型/账户/分类/日期），即使二次分析偏向聊天，也强制远端续执行请求保持 `ActionEnvelopeRequired`，避免“看起来回复成功但未执行记账”。
+- `AIAssistantRemoteExecutionResult.TransactionActionMissing` 收敛为 `data object`，消除未被消费的 `remoteReply` 载荷。
+
+#### M5 已完成实现（2026-03-28）
+- `AIAssistantMessageExecutionCoordinator` 新增 `enforceLocalModeRouteContract(...)`，在本地模式下若路由误返回 `RemoteOrLocalFallback`，统一降级为 `LocalActions`，确保不触发远端依赖。
+- 该保真收口已覆盖新消息路径与澄清续执行路径：均在 `analyze -> route` 后执行本地模式合同兜底。
+- 目标语义：本地模式保持聊天与记账可独立可用，且不会因路由漂移触发远端 `processWithRemoteAI(...)`。
+- 补充 M5 定向回归：
+  - `AIAssistantMessageOrchestratorTest` 新增本地模式下 DAILY_CHAT / BOOKKEEPING 均走 `LocalActions` 的断言。
+  - `AIAssistantMessageExecutionCoordinatorTest` 新增本地模式新消息与澄清续执行场景“不触发远端调用”的断言。
+
+#### M6 已完成实现（2026-03-28）
+- `AIAssistantMessageOrchestrator` 路由合同收口：`OCR_IMAGE` 顶层意图统一走 `LocalActions`，不再在远端模式下进入 `RemoteOrLocalFallback`。
+- `AIAssistantMessageExecutionCoordinator` 的 `enforceLocalModeRouteContract(...)` 扩展为 OCR 边界兜底：当顶层意图为 `OCR_IMAGE` 且路由为 `RemoteOrLocalFallback` 时，统一改写为本地执行，避免触发远端依赖。
+- 结果语义：OCR 与文本远端链路解耦，OCR 维持本地链路，不受远端模式扰动。
+- 补充 M6 定向回归：
+  - `AIAssistantMessageOrchestratorTest` 新增/更新 OCR 断言：即使远端可用，`OCR_IMAGE` 仍返回 `LocalActions`。
+  - `AIAssistantMessageExecutionCoordinatorTest` 新增 OCR 场景：即使分析为 Remote 且路由误给 fallback，也不触发 `processWithRemoteAI(...)`。
+
+#### M7 已完成实现（2026-03-28）
+- 按回归矩阵补齐关键覆盖：普通聊天、单笔/批量记账、转账、远端异常、OCR 双模式边界。
+- `AIAssistantMessageExecutionCoordinatorTest` 新增：
+  - 记账远端执行路径会携带 `ActionEnvelopeRequired` 合同；
+  - 远端记账异常与远端聊天异常均不会隐式回落本地 `executeActions(...)`（保持远端优先策略语义一致）。
+- `AIAssistantActionExecutorTest` 新增：转账批量 mixed outcome 回归（一条成功一条失败）下继续逐条执行并返回逐项反馈，避免批处理中断回归。
+- 与既有 M5/M6 回归共同形成双模式保护网：
+  - 本地模式不触发远端依赖；
+  - OCR 维持本地链路；
+  - 远端模式异常不隐式回退本地聊天/记账。
+
+#### M8 已完成实现（2026-03-28）
+- 清理冗余测试：`AIAssistantMessageOrchestratorTest` 中 OCR 远端可用场景的重复断言已去重，保留单一语义用例，降低维护噪音。
+- 清理文档语义漂移：M4 条目中旧描述 `DAILY_CHAT/OCR + Remote` 已修正为 `DAILY_CHAT + Remote`，并显式标注 OCR 已在 M6 收口为本地链路。
+- 回归验证：M5/M6/M7 相关矩阵用例重跑通过，确认去冗余不影响双模式行为合同。
+
+#### 本次定向回归
+- `AIAssistantMessageOrchestratorTest`
+- `AIAssistantMessageExecutionCoordinatorTest`
+- `AIAssistantActionExecutorTest`
+- `AIAssistantRemoteExecutionHandlerTest`
+- `AIAssistantImageMessageHandlerTest`
+- 以上测试均已在本地通过。
 
 ---
 

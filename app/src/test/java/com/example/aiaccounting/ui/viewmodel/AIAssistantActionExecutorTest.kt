@@ -612,6 +612,75 @@ class AIAssistantActionExecutorTest {
     }
 
     @Test
+    fun executeAIActions_continuesBatch_whenTransferBatchHasMixedOutcome() = runTest {
+        coEvery { aiLocalProcessor.ensureBasicCategoriesExist() } returns Unit
+        coEvery { accountRepository.getAllAccountsList() } returnsMany listOf(
+            listOf(
+                Account(id = 1, name = "微信", type = AccountType.WECHAT, balance = 200.0),
+                Account(id = 2, name = "支付宝", type = AccountType.ALIPAY, balance = 50.0)
+            ),
+            listOf(
+                Account(id = 1, name = "微信", type = AccountType.WECHAT, balance = 200.0),
+                Account(id = 2, name = "支付宝", type = AccountType.ALIPAY, balance = 50.0)
+            )
+        )
+        coEvery { categoryRepository.getAllCategoriesList() } returnsMany listOf(
+            listOf(Category(id = 3, name = "转账", type = TransactionType.TRANSFER)),
+            listOf(Category(id = 3, name = "转账", type = TransactionType.TRANSFER))
+        )
+        coEvery {
+            aiOperationExecutor.executeOperation(
+                match<AIOperation.AddTransaction> {
+                    it.type == TransactionType.TRANSFER &&
+                        it.accountId == 1L &&
+                        it.transferAccountId == 2L &&
+                        it.amount == 100.0
+                }
+            )
+        } returns AIOperationExecutor.AIOperationResult.Success("ok")
+
+        val result = executor.executeAIActions(
+            """
+            {
+              "actions": [
+                {
+                  "action":"add_transaction",
+                  "amount":100,
+                  "transactionType":"transfer",
+                  "accountRef":{"id":1,"name":"微信","kind":"account"},
+                  "transferAccountRef":{"id":2,"name":"支付宝","kind":"account"},
+                  "note":"转账成功样本"
+                },
+                {
+                  "action":"add_transaction",
+                  "amount":50,
+                  "transactionType":"transfer",
+                  "accountRef":{"id":1,"name":"微信","kind":"account"},
+                  "transferAccountRef":{"id":1,"name":"微信","kind":"account"},
+                  "note":"转账失败样本"
+                }
+              ]
+            }
+            """.trimIndent()
+        )
+
+        assertTrue(result.contains("1."))
+        assertTrue(result.contains("2."))
+        assertTrue(result.contains("已转账") || result.contains("已记账"))
+        assertTrue(result.contains("不能相同") || result.contains("失败") || result.contains("相同账户"))
+        coVerify(exactly = 1) {
+            aiOperationExecutor.executeOperation(
+                match<AIOperation.AddTransaction> {
+                    it.type == TransactionType.TRANSFER &&
+                        it.accountId == 1L &&
+                        it.transferAccountId == 2L &&
+                        it.amount == 100.0
+                }
+            )
+        }
+    }
+
+    @Test
     fun executeAIActions_keepsSingleRemoteTraceContext_forAutoCreatedEntitiesAndTransaction() = runTest {
         coEvery { aiLocalProcessor.ensureBasicCategoriesExist() } returns Unit
         coEvery { accountRepository.getAllAccountsList() } returnsMany listOf(

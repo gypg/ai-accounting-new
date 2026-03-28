@@ -13,9 +13,9 @@ internal class AIAssistantRemoteExecutionHandler(
 ) {
 
     suspend fun execute(
-        userMessage: String,
         messages: List<ChatMessage>,
-        config: AIConfig
+        config: AIConfig,
+        responseRequirement: AIAssistantRemoteResponseRequirement
     ): AIAssistantRemoteExecutionResult {
         return try {
             when (val collected = streamCollector.collect(messages, config)) {
@@ -29,18 +29,19 @@ internal class AIAssistantRemoteExecutionHandler(
 
                     recordUsageSuccess()
 
-                    when (val decision = interpreter.interpret(userMessage = userMessage, remoteResponse = collected.response)) {
+                    when (val decision = interpreter.interpret(remoteResponse = collected.response)) {
                         is RemoteResponseDecision.QueryBeforeExecute -> {
                             AIAssistantRemoteExecutionResult.QueryBeforeExecutionRequested(decision.envelope)
                         }
                         is RemoteResponseDecision.ExecuteActions -> {
                             AIAssistantRemoteExecutionResult.ActionExecutionRequested(decision.envelope)
                         }
-                        is RemoteResponseDecision.FallbackToLocalTransaction -> {
-                            AIAssistantRemoteExecutionResult.LocalFallbackRequested(decision.remoteReply)
-                        }
                         is RemoteResponseDecision.ReturnRemoteReply -> {
-                            AIAssistantRemoteExecutionResult.RemoteReply(decision.reply)
+                            if (responseRequirement == AIAssistantRemoteResponseRequirement.ActionEnvelopeRequired) {
+                                AIAssistantRemoteExecutionResult.TransactionActionMissing
+                            } else {
+                                AIAssistantRemoteExecutionResult.RemoteReply(decision.reply)
+                            }
                         }
                     }
                 }

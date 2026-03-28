@@ -35,7 +35,6 @@ internal class AIAssistantMessageExecutionCoordinator(
         currentButler: Butler,
         conversationHistory: List<String>,
         isNetworkAvailable: Boolean,
-        currentUseBuiltinConfig: Boolean,
         currentAIConfig: AIConfig,
         pendingInteractionState: PendingInteractionState?,
         continuePendingClarification: (String, String) -> ClarificationFlowResult,
@@ -43,7 +42,7 @@ internal class AIAssistantMessageExecutionCoordinator(
         restorePendingClarification: (PendingClarificationState) -> Unit,
         handleModificationConfirmation: suspend (String, String) -> ModificationFlowResult,
         handleTransactionModification: suspend (String, String) -> ModificationFlowResult,
-        processWithRemoteAI: suspend (String) -> String
+        processWithRemoteAI: suspend (RemoteExecutionRequest) -> String
     ): AIAssistantMessageExecutionResult {
         return when (pendingInteractionState) {
             is PendingInteractionState.Clarification -> {
@@ -52,7 +51,6 @@ internal class AIAssistantMessageExecutionCoordinator(
                     currentButler = currentButler,
                     conversationHistory = conversationHistory,
                     isNetworkAvailable = isNetworkAvailable,
-                    currentUseBuiltinConfig = currentUseBuiltinConfig,
                     currentAIConfig = currentAIConfig,
                     pendingState = pendingInteractionState.state,
                     continuePendingClarification = continuePendingClarification,
@@ -75,7 +73,6 @@ internal class AIAssistantMessageExecutionCoordinator(
                 currentButler = currentButler,
                 conversationHistory = conversationHistory,
                 isNetworkAvailable = isNetworkAvailable,
-                currentUseBuiltinConfig = currentUseBuiltinConfig,
                 currentAIConfig = currentAIConfig,
                 pendingInteractionState = null,
                 handleModificationConfirmation = handleModificationConfirmation,
@@ -90,7 +87,6 @@ internal class AIAssistantMessageExecutionCoordinator(
         currentButler: Butler,
         conversationHistory: List<String>,
         isNetworkAvailable: Boolean,
-        currentUseBuiltinConfig: Boolean,
         currentAIConfig: AIConfig,
         pendingState: PendingClarificationState,
         continuePendingClarification: (String, String) -> ClarificationFlowResult,
@@ -98,7 +94,7 @@ internal class AIAssistantMessageExecutionCoordinator(
         restorePendingClarification: (PendingClarificationState) -> Unit,
         handleModificationConfirmation: suspend (String, String) -> ModificationFlowResult,
         handleTransactionModification: suspend (String, String) -> ModificationFlowResult,
-        processWithRemoteAI: suspend (String) -> String
+        processWithRemoteAI: suspend (RemoteExecutionRequest) -> String
     ): AIAssistantMessageExecutionResult {
         return when (val clarificationResult = continuePendingClarification(message, currentButler.id)) {
             is ClarificationFlowResult.RequestClarification -> {
@@ -116,7 +112,6 @@ internal class AIAssistantMessageExecutionCoordinator(
                         currentButler = currentButler,
                         conversationHistory = conversationHistory,
                         isNetworkAvailable = isNetworkAvailable,
-                        currentUseBuiltinConfig = currentUseBuiltinConfig,
                         currentAIConfig = currentAIConfig,
                         handleModificationConfirmation = handleModificationConfirmation,
                         handleTransactionModification = handleTransactionModification,
@@ -135,11 +130,10 @@ internal class AIAssistantMessageExecutionCoordinator(
         currentButler: Butler,
         conversationHistory: List<String>,
         isNetworkAvailable: Boolean,
-        currentUseBuiltinConfig: Boolean,
         currentAIConfig: AIConfig,
         handleModificationConfirmation: suspend (String, String) -> ModificationFlowResult,
         handleTransactionModification: suspend (String, String) -> ModificationFlowResult,
-        processWithRemoteAI: suspend (String) -> String
+        processWithRemoteAI: suspend (RemoteExecutionRequest) -> String
     ): AIAssistantMessageExecutionResult {
         val reasoningResult = aiReasoningEngine.reason(
             AIReasoningEngine.ReasoningContext(
@@ -151,15 +145,23 @@ internal class AIAssistantMessageExecutionCoordinator(
             currentButler.id,
             currentButler.name
         )
-        val route = messageOrchestrator.route(
+        val analysis = messageOrchestrator.analyze(
             reasoningResult = reasoningResult,
             userMessage = continuationRequest.resumedMessage,
             butlerId = currentButler.id,
             isNetworkAvailable = isNetworkAvailable,
-            isBuiltinConfigEnabled = currentUseBuiltinConfig,
             isAIEnabled = currentAIConfig.isEnabled,
             hasApiKey = currentAIConfig.apiKey.isNotBlank(),
             pendingInteractionState = null
+        )
+        val analyzedRoute = messageOrchestrator.route(analysis)
+        val continuationContractRoute = enforceContinuationRouteContract(
+            route = analyzedRoute,
+            trigger = continuationRequest.trigger
+        )
+        val route = enforceLocalModeRouteContract(
+            route = continuationContractRoute,
+            analysis = analysis
         )
         val continuationPayload = AIAssistantContinuationPayload(
             originalMessage = continuationRequest.originalMessage,
@@ -175,7 +177,7 @@ internal class AIAssistantMessageExecutionCoordinator(
         return when (val decision = messageOrchestrator.decideContinuation(route, continuationPayload)) {
             is AIAssistantContinuationDecision.RequestSecondRemote -> {
                 AIAssistantMessageExecutionResult.Reply(
-                    message = processWithRemoteAI(decision.request.userMessage),
+                    message = processWithRemoteAI(decision.request),
                     stage = decision.request.stage
                 )
             }
@@ -197,12 +199,11 @@ internal class AIAssistantMessageExecutionCoordinator(
         currentButler: Butler,
         conversationHistory: List<String>,
         isNetworkAvailable: Boolean,
-        currentUseBuiltinConfig: Boolean,
         currentAIConfig: AIConfig,
         pendingInteractionState: PendingInteractionState?,
         handleModificationConfirmation: suspend (String, String) -> ModificationFlowResult,
         handleTransactionModification: suspend (String, String) -> ModificationFlowResult,
-        processWithRemoteAI: suspend (String) -> String
+        processWithRemoteAI: suspend (RemoteExecutionRequest) -> String
     ): AIAssistantMessageExecutionResult {
         val context = AIReasoningEngine.ReasoningContext(
             userMessage = message,
@@ -212,15 +213,18 @@ internal class AIAssistantMessageExecutionCoordinator(
         )
 
         val reasoningResult = aiReasoningEngine.reason(context, currentButler.id, currentButler.name)
-        val route = messageOrchestrator.route(
+        val analysis = messageOrchestrator.analyze(
             reasoningResult = reasoningResult,
             userMessage = message,
             butlerId = currentButler.id,
             isNetworkAvailable = isNetworkAvailable,
-            isBuiltinConfigEnabled = currentUseBuiltinConfig,
             isAIEnabled = currentAIConfig.isEnabled,
             hasApiKey = currentAIConfig.apiKey.isNotBlank(),
             pendingInteractionState = pendingInteractionState
+        )
+        val route = enforceLocalModeRouteContract(
+            route = messageOrchestrator.route(analysis),
+            analysis = analysis
         )
 
         return executeResolvedRoute(
@@ -238,7 +242,7 @@ internal class AIAssistantMessageExecutionCoordinator(
         message: String,
         handleModificationConfirmation: suspend (String, String) -> ModificationFlowResult,
         handleTransactionModification: suspend (String, String) -> ModificationFlowResult,
-        processWithRemoteAI: suspend (String) -> String,
+        processWithRemoteAI: suspend (RemoteExecutionRequest) -> String,
         continuationPayload: AIAssistantContinuationPayload?
     ): AIAssistantMessageExecutionResult {
         return when (route) {
@@ -260,7 +264,7 @@ internal class AIAssistantMessageExecutionCoordinator(
             }
             is AIAssistantMessageRoute.RemoteOrLocalFallback -> {
                 AIAssistantMessageExecutionResult.Reply(
-                    message = processWithRemoteAI(route.request.userMessage),
+                    message = processWithRemoteAI(route.request),
                     stage = route.request.stage
                 )
             }
@@ -275,6 +279,48 @@ internal class AIAssistantMessageExecutionCoordinator(
                     continuationPayload = continuationPayload
                 )
             }
+        }
+    }
+
+    private fun enforceLocalModeRouteContract(
+        route: AIAssistantMessageRoute,
+        analysis: AIAssistantMessageAnalysis
+    ): AIAssistantMessageRoute {
+        return if (route is AIAssistantMessageRoute.RemoteOrLocalFallback) {
+            if (
+                analysis.engineMode == AIAssistantEngineMode.Local ||
+                analysis.topLevelIntent == AIAssistantTopLevelIntent.OCR_IMAGE
+            ) {
+                AIAssistantMessageRoute.LocalActions(
+                    actions = analysis.reasoningResult.actions,
+                    stage = AIAssistantInteractionStage.Execution
+                )
+            } else {
+                route
+            }
+        } else {
+            route
+        }
+    }
+
+    private fun enforceContinuationRouteContract(
+        route: AIAssistantMessageRoute,
+        trigger: ClarificationTrigger
+    ): AIAssistantMessageRoute {
+        val isBookkeepingTrigger = trigger == ClarificationTrigger.TRANSACTION_AMOUNT ||
+            trigger == ClarificationTrigger.TRANSACTION_TYPE ||
+            trigger == ClarificationTrigger.TRANSACTION_ACCOUNT ||
+            trigger == ClarificationTrigger.TRANSACTION_CATEGORY ||
+            trigger == ClarificationTrigger.TRANSACTION_DATE
+
+        return if (isBookkeepingTrigger && route is AIAssistantMessageRoute.RemoteOrLocalFallback) {
+            AIAssistantMessageRoute.RemoteOrLocalFallback(
+                route.request.copy(
+                    responseRequirement = AIAssistantRemoteResponseRequirement.ActionEnvelopeRequired
+                )
+            )
+        } else {
+            route
         }
     }
 

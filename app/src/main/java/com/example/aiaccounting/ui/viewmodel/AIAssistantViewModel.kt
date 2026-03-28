@@ -6,7 +6,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.aiaccounting.ai.AIOperationExecutor
 import com.example.aiaccounting.ai.AIReasoningEngine
-import com.example.aiaccounting.ai.AILocalProcessor
 import com.example.aiaccounting.ai.AIMessageParser
 import com.example.aiaccounting.ai.TransactionModificationHandler
 import com.example.aiaccounting.data.model.AIConfig
@@ -48,13 +47,14 @@ class AIAssistantViewModel @Inject constructor(
     private val butlerRepository: ButlerRepository,
     private val aiReasoningEngine: AIReasoningEngine,
     private val transactionModificationHandler: TransactionModificationHandler,
-    private val aiLocalProcessor: AILocalProcessor,
     private val actionExecutor: AIAssistantActionExecutor
 ) : ViewModel() {
 
     private companion object {
         private const val USER_SAFE_PROCESSING_ERROR = "抱歉，处理你的请求时出现了一些问题，请稍后重试。"
         private const val USER_SAFE_REMOTE_TRANSPORT_ERROR = "服务暂时不可用，请稍后重试。"
+        private const val USER_SAFE_REMOTE_EXECUTION_MISSING_ERROR = "未收到可执行的记账指令，请稍后重试。"
+        private const val USER_SAFE_REMOTE_EMPTY_REPLY = "暂时没有可用回复，请稍后重试。"
         private const val USER_SAFE_UI_ERROR = "操作暂时不可用，请稍后重试。"
         private const val USER_SAFE_IMAGE_PROCESSING_ERROR = "图片处理暂时失败，请稍后重试。"
     }
@@ -122,7 +122,6 @@ class AIAssistantViewModel @Inject constructor(
 
     // 当前AI配置
     private var currentAIConfig: AIConfig = AIConfig()
-    private var currentUseBuiltinConfig: Boolean = false
 
     init {
         viewModelScope.launch {
@@ -166,9 +165,8 @@ class AIAssistantViewModel @Inject constructor(
 
     private fun loadAIConfig() {
         viewModelScope.launch {
-            configNetworkCoordinator.observeConfig().collect { (config, useBuiltin) ->
+            configNetworkCoordinator.observeConfig().collect { (config, _) ->
                 currentAIConfig = config
-                currentUseBuiltinConfig = useBuiltin
                 _uiState.update {
                     it.copy(
                         isAIConfigured = config.isEnabled && config.apiKey.isNotBlank(),
@@ -258,7 +256,6 @@ class AIAssistantViewModel @Inject constructor(
                 currentButler = currentButler,
                 conversationHistory = getRecentConversationHistory(),
                 isNetworkAvailable = isNetworkAvailable,
-                currentUseBuiltinConfig = currentUseBuiltinConfig,
                 currentAIConfig = currentAIConfig,
                 pendingInteractionState = pendingInteractionLifecycle.currentState(),
                 continuePendingClarification = pendingInteractionLifecycle::continueClarification,
@@ -267,7 +264,7 @@ class AIAssistantViewModel @Inject constructor(
                 restorePendingClarification = pendingInteractionLifecycle::restoreClarification,
                 handleModificationConfirmation = ::handleModificationConfirmation,
                 handleTransactionModification = ::handleTransactionModification,
-                processWithRemoteAI = ::processWithRemoteAI
+                processWithRemoteAI = ::processRemoteExecutionRequest
             )
         ) {
             is AIAssistantMessageExecutionResult.Reply -> result.message
@@ -324,16 +321,16 @@ class AIAssistantViewModel @Inject constructor(
     /**
      * 使用远程大模型处理消息
      */
-    private suspend fun processWithRemoteAI(message: String): String {
+    private suspend fun processRemoteExecutionRequest(request: RemoteExecutionRequest): String {
         val accounts = accountRepository.getAllAccountsList()
         val categories = categoryRepository.getAllCategoriesList()
         val currentButler = butlerCoordinator.resolveCurrentButler(_uiState.value.currentButler)
-        val messages = promptBuilder.buildMessages(message, currentButler, accounts, categories)
+        val messages = promptBuilder.buildMessages(request.userMessage, currentButler, accounts, categories)
 
         return when (val result = remoteExecutionHandler.execute(
-            userMessage = message,
             messages = messages,
-            config = currentAIConfig
+            config = currentAIConfig,
+            responseRequirement = request.responseRequirement
         )) {
             is AIAssistantRemoteExecutionResult.Timeout -> "请求超时，请稍后重试。"
             is AIAssistantRemoteExecutionResult.TransportFailure -> USER_SAFE_REMOTE_TRANSPORT_ERROR
@@ -344,28 +341,11 @@ class AIAssistantViewModel @Inject constructor(
             is AIAssistantRemoteExecutionResult.ActionExecutionRequested -> {
                 actionExecutor.executeAIActions(result.envelope)
             }
-            is AIAssistantRemoteExecutionResult.LocalFallbackRequested -> {
-                val localResult = processWithLocalAI(message)
-                remoteResponseInterpreter.combineRemoteAndLocalReply(
-                    remoteReply = result.remoteReply,
-                    localResult = localResult
-                )
+            is AIAssistantRemoteExecutionResult.TransactionActionMissing -> USER_SAFE_REMOTE_EXECUTION_MISSING_ERROR
+            is AIAssistantRemoteExecutionResult.RemoteReply -> {
+                result.reply.takeIf { it.isNotBlank() } ?: USER_SAFE_REMOTE_EMPTY_REPLY
             }
-            is AIAssistantRemoteExecutionResult.RemoteReply -> result.reply
         }
-    }
-
-    /**
-     * 使用本地AI处理消息
-     */
-    private suspend fun processWithLocalAI(message: String): String {
-        val currentButler = butlerCoordinator.resolveCurrentButler(_uiState.value.currentButler)
-        return aiLocalProcessor.processMessage(
-            message = message,
-            isNetworkAvailable = _uiState.value.isNetworkAvailable,
-            isAIConfigured = currentAIConfig.isEnabled && currentAIConfig.apiKey.isNotBlank(),
-            currentButlerId = currentButler.id
-        )
     }
 
     private fun clearPendingInteractionStates() {

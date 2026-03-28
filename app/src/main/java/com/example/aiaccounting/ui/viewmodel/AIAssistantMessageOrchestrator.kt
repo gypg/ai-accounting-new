@@ -1,7 +1,6 @@
 package com.example.aiaccounting.ui.viewmodel
 
 import com.example.aiaccounting.ai.AIReasoningEngine
-import com.example.aiaccounting.ai.TransactionModificationHandler
 
 internal enum class AIAssistantInteractionStage {
     Analysis,
@@ -24,10 +23,16 @@ internal data class AIAssistantContinuationPayload(
     val nextStep: AIAssistantContinuationStep
 )
 
+internal enum class AIAssistantRemoteResponseRequirement {
+    ReplyAllowed,
+    ActionEnvelopeRequired
+}
+
 internal data class RemoteExecutionRequest(
     val userMessage: String,
     val continuationPayload: AIAssistantContinuationPayload? = null,
-    val stage: AIAssistantInteractionStage = AIAssistantInteractionStage.Execution
+    val stage: AIAssistantInteractionStage = AIAssistantInteractionStage.Execution,
+    val responseRequirement: AIAssistantRemoteResponseRequirement = AIAssistantRemoteResponseRequirement.ReplyAllowed
 )
 
 internal data class ModificationExecutionRequest(
@@ -53,15 +58,38 @@ internal sealed class AIAssistantContinuationDecision {
     data class RequestSecondRemote(val request: RemoteExecutionRequest) : AIAssistantContinuationDecision()
 }
 
+internal enum class AIAssistantEngineMode {
+    Remote,
+    Local
+}
+
+internal enum class AIAssistantTopLevelIntent {
+    DAILY_CHAT,
+    BOOKKEEPING,
+    OCR_IMAGE
+}
+
+internal data class AIAssistantMessageAnalysis(
+    val reasoningResult: AIReasoningEngine.ReasoningResult,
+    val topLevelIntent: AIAssistantTopLevelIntent,
+    val userMessage: String,
+    val butlerId: String,
+    val pendingInteractionState: PendingInteractionState?,
+    val engineMode: AIAssistantEngineMode,
+    val hasClarificationAction: Boolean
+)
+
 internal class AIAssistantMessageOrchestrator {
-    fun shouldUseRemoteAI(
+    fun resolveEngineMode(
         isNetworkAvailable: Boolean,
-        isBuiltinConfigEnabled: Boolean,
         isAIEnabled: Boolean,
         hasApiKey: Boolean
-    ): Boolean {
-        if (isBuiltinConfigEnabled) return false
-        return isNetworkAvailable && isAIEnabled && hasApiKey
+    ): AIAssistantEngineMode {
+        return if (isNetworkAvailable && isAIEnabled && hasApiKey) {
+            AIAssistantEngineMode.Remote
+        } else {
+            AIAssistantEngineMode.Local
+        }
     }
 
     fun decideContinuation(
@@ -89,40 +117,58 @@ internal class AIAssistantMessageOrchestrator {
         }
     }
 
-    fun route(
+    fun analyze(
         reasoningResult: AIReasoningEngine.ReasoningResult,
         userMessage: String,
         butlerId: String,
         isNetworkAvailable: Boolean,
-        isBuiltinConfigEnabled: Boolean,
         isAIEnabled: Boolean,
         hasApiKey: Boolean,
         pendingInteractionState: PendingInteractionState?
-    ): AIAssistantMessageRoute {
+    ): AIAssistantMessageAnalysis {
+        return AIAssistantMessageAnalysis(
+            reasoningResult = reasoningResult,
+            topLevelIntent = resolveTopLevelIntent(reasoningResult.intent, userMessage),
+            userMessage = userMessage,
+            butlerId = butlerId,
+            pendingInteractionState = pendingInteractionState,
+            engineMode = resolveEngineMode(
+                isNetworkAvailable = isNetworkAvailable,
+                isAIEnabled = isAIEnabled,
+                hasApiKey = hasApiKey
+            ),
+            hasClarificationAction = reasoningResult.actions.any {
+                it is AIReasoningEngine.AIAction.RequestClarification
+            }
+        )
+    }
+
+    fun route(analysis: AIAssistantMessageAnalysis): AIAssistantMessageRoute {
+        val pendingInteractionState = analysis.pendingInteractionState
         if (pendingInteractionState is PendingInteractionState.Modification) {
             return AIAssistantMessageRoute.ModificationFlow(
                 request = ModificationExecutionRequest(
-                    message = userMessage,
-                    butlerId = butlerId,
+                    message = analysis.userMessage,
+                    butlerId = analysis.butlerId,
                     pendingState = pendingInteractionState.state,
                     stage = AIAssistantInteractionStage.Confirmation
                 )
             )
         }
 
-        if (reasoningResult.actions.any { it is AIReasoningEngine.AIAction.RequestClarification }) {
+        if (analysis.hasClarificationAction) {
             return AIAssistantMessageRoute.LocalActions(
-                actions = reasoningResult.actions,
+                actions = analysis.reasoningResult.actions,
                 stage = AIAssistantInteractionStage.Clarification
             )
         }
 
-        return when (reasoningResult.intent) {
+        return when (analysis.reasoningResult.intent) {
             AIReasoningEngine.UserIntent.IDENTITY_CONFIRMATION,
             AIReasoningEngine.UserIntent.QUERY_INFORMATION,
             AIReasoningEngine.UserIntent.ANALYZE_DATA -> {
                 AIAssistantMessageRoute.LocalActions(
-                    actions = reasoningResult.actions,
+                    actions = analysis.reasoningResult.actions,
                     stage = AIAssistantInteractionStage.Execution
                 )
             }
@@ -131,8 +177,8 @@ internal class AIAssistantMessageOrchestrator {
             AIReasoningEngine.UserIntent.DELETE_TRANSACTION -> {
                 AIAssistantMessageRoute.ModificationFlow(
                     request = ModificationExecutionRequest(
-                        message = userMessage,
-                        butlerId = butlerId,
+                        message = analysis.userMessage,
+                        butlerId = analysis.butlerId,
                         pendingState = null,
                         stage = AIAssistantInteractionStage.Confirmation
                     )
@@ -144,24 +190,98 @@ internal class AIAssistantMessageOrchestrator {
             AIReasoningEngine.UserIntent.MANAGE_ACCOUNT,
             AIReasoningEngine.UserIntent.MANAGE_CATEGORY,
             AIReasoningEngine.UserIntent.UNKNOWN -> {
-                if (
-                    shouldUseRemoteAI(
-                        isNetworkAvailable = isNetworkAvailable,
-                        isBuiltinConfigEnabled = isBuiltinConfigEnabled,
-                        isAIEnabled = isAIEnabled,
-                        hasApiKey = hasApiKey
-                    )
-                ) {
-                    AIAssistantMessageRoute.RemoteOrLocalFallback(
-                        RemoteExecutionRequest(userMessage = userMessage)
-                    )
-                } else {
-                    AIAssistantMessageRoute.LocalActions(
-                        actions = reasoningResult.actions,
-                        stage = AIAssistantInteractionStage.Execution
-                    )
+                when (analysis.topLevelIntent) {
+                    AIAssistantTopLevelIntent.DAILY_CHAT -> {
+                        if (analysis.engineMode == AIAssistantEngineMode.Remote) {
+                            AIAssistantMessageRoute.RemoteOrLocalFallback(
+                                RemoteExecutionRequest(
+                                    userMessage = analysis.userMessage,
+                                    responseRequirement = AIAssistantRemoteResponseRequirement.ReplyAllowed
+                                )
+                            )
+                        } else {
+                            AIAssistantMessageRoute.LocalActions(
+                                actions = analysis.reasoningResult.actions,
+                                stage = AIAssistantInteractionStage.Execution
+                            )
+                        }
+                    }
+                    AIAssistantTopLevelIntent.OCR_IMAGE -> {
+                        AIAssistantMessageRoute.LocalActions(
+                            actions = analysis.reasoningResult.actions,
+                            stage = AIAssistantInteractionStage.Execution
+                        )
+                    }
+                    AIAssistantTopLevelIntent.BOOKKEEPING -> {
+                        if (analysis.engineMode == AIAssistantEngineMode.Remote) {
+                            AIAssistantMessageRoute.RemoteOrLocalFallback(
+                                RemoteExecutionRequest(
+                                    userMessage = analysis.userMessage,
+                                    responseRequirement = AIAssistantRemoteResponseRequirement.ActionEnvelopeRequired
+                                )
+                            )
+                        } else {
+                            AIAssistantMessageRoute.LocalActions(
+                                actions = analysis.reasoningResult.actions,
+                                stage = AIAssistantInteractionStage.Execution
+                            )
+                        }
+                    }
                 }
             }
         }
+    }
+
+    fun route(
+        reasoningResult: AIReasoningEngine.ReasoningResult,
+        userMessage: String,
+        butlerId: String,
+        isNetworkAvailable: Boolean,
+        isAIEnabled: Boolean,
+        hasApiKey: Boolean,
+        pendingInteractionState: PendingInteractionState?
+    ): AIAssistantMessageRoute {
+        val analysis = analyze(
+            reasoningResult = reasoningResult,
+            userMessage = userMessage,
+            butlerId = butlerId,
+            isNetworkAvailable = isNetworkAvailable,
+            isAIEnabled = isAIEnabled,
+            hasApiKey = hasApiKey,
+            pendingInteractionState = pendingInteractionState
+        )
+        return route(analysis)
+    }
+
+    private fun resolveTopLevelIntent(
+        reasoningIntent: AIReasoningEngine.UserIntent,
+        userMessage: String
+    ): AIAssistantTopLevelIntent {
+        if (looksLikeOcrImageMessage(userMessage)) {
+            return AIAssistantTopLevelIntent.OCR_IMAGE
+        }
+
+        return when (reasoningIntent) {
+            AIReasoningEngine.UserIntent.GENERAL_CONVERSATION,
+            AIReasoningEngine.UserIntent.IDENTITY_CONFIRMATION,
+            AIReasoningEngine.UserIntent.UNKNOWN -> AIAssistantTopLevelIntent.DAILY_CHAT
+            AIReasoningEngine.UserIntent.RECORD_TRANSACTION,
+            AIReasoningEngine.UserIntent.MODIFY_TRANSACTION,
+            AIReasoningEngine.UserIntent.DELETE_TRANSACTION,
+            AIReasoningEngine.UserIntent.QUERY_INFORMATION,
+            AIReasoningEngine.UserIntent.ANALYZE_DATA,
+            AIReasoningEngine.UserIntent.MANAGE_ACCOUNT,
+            AIReasoningEngine.UserIntent.MANAGE_CATEGORY -> AIAssistantTopLevelIntent.BOOKKEEPING
+        }
+    }
+
+    private fun looksLikeOcrImageMessage(message: String): Boolean {
+        val trimmed = message.trim()
+        if (trimmed.isEmpty()) {
+            return false
+        }
+
+        val imageFileRegex = Regex("""(?:https?|file)://\S+\.(png|jpg|jpeg|webp|gif)\b""", RegexOption.IGNORE_CASE)
+        return trimmed.startsWith("data:image/") || imageFileRegex.containsMatchIn(trimmed)
     }
 }

@@ -6,7 +6,6 @@ import org.json.JSONObject
 internal sealed class RemoteResponseDecision {
     data class QueryBeforeExecute(val envelope: AIAssistantActionEnvelope) : RemoteResponseDecision()
     data class ExecuteActions(val envelope: AIAssistantActionEnvelope) : RemoteResponseDecision()
-    data class FallbackToLocalTransaction(val remoteReply: String) : RemoteResponseDecision()
     data class ReturnRemoteReply(val reply: String) : RemoteResponseDecision()
 }
 
@@ -16,44 +15,23 @@ internal class AIAssistantRemoteResponseInterpreter {
         "\"(?:type|action)\"\\s*:\\s*\"(add_transaction|transfer|create_account|query|query_accounts|query_categories|query_transactions|create_category)\""
     )
 
-    private val transactionKeywords = listOf(
-        "花了", "收入", "支出", "消费", "买", "卖", "转账", "付", "赚", "工资", "奖金", "红包", "退款", "报销"
-    )
-    private val transactionPhrases = listOf("记账", "记个账", "记一笔", "记下", "记录一笔")
     private val fencedJsonRegex = Regex("```(?:json)?\\s*([\\s\\S]*?)\\s*```")
     private val dirtyNullWrapperRegex = Regex("^(?:null\\s*)+")
     private val trailingDirtyNullWrapperRegex = Regex("(?:\\s*null)+$")
 
-    fun interpret(userMessage: String, remoteResponse: String): RemoteResponseDecision {
+    fun interpret(remoteResponse: String): RemoteResponseDecision {
         val sanitizedResponse = sanitizeRemoteResponse(remoteResponse)
         val actionEnvelope = extractActionEnvelope(sanitizedResponse)
+        val displayReply = extractDisplayReply(sanitizedResponse)
         return if (actionEnvelope != null) {
             if (requiresQueryBeforeExecution(actionEnvelope)) {
                 RemoteResponseDecision.QueryBeforeExecute(actionEnvelope)
             } else {
                 RemoteResponseDecision.ExecuteActions(actionEnvelope)
             }
-        } else if (isTransactionRequest(userMessage)) {
-            RemoteResponseDecision.FallbackToLocalTransaction(extractDisplayReply(sanitizedResponse))
         } else {
-            RemoteResponseDecision.ReturnRemoteReply(extractDisplayReply(sanitizedResponse))
+            RemoteResponseDecision.ReturnRemoteReply(displayReply)
         }
-    }
-
-    fun combineRemoteAndLocalReply(remoteReply: String, localResult: String): String {
-        return when {
-            isLocalFailure(localResult) -> localResult
-            remoteReply.isBlank() -> localResult
-            else -> "$remoteReply\n\n$localResult"
-        }
-    }
-
-    private fun isActionCommand(response: String): Boolean {
-        val candidate = extractExecutableJsonCandidate(response.trim()) ?: return false
-
-        return candidate.contains("\"action\"") ||
-            candidate.contains("\"actions\"") ||
-            actionTypeRegex.containsMatchIn(candidate)
     }
 
     private fun extractExecutableJsonCandidate(response: String): String? {
@@ -431,16 +409,6 @@ internal class AIAssistantRemoteResponseInterpreter {
         return builder.toString()
     }
 
-    private fun isLocalFailure(localResult: String): Boolean {
-        val normalized = localResult.trim()
-        return normalized.contains("❌") ||
-            normalized.startsWith("错误") ||
-            normalized.startsWith("记账失败") ||
-            normalized.startsWith("创建账户失败") ||
-            normalized.startsWith("创建分类失败") ||
-            normalized.startsWith("执行操作时出错")
-    }
-
     private fun String.removeDirtyNullWrappers(): String {
         return trim()
             .replace(Regex("^(?:null\\s*)+"), "")
@@ -448,9 +416,4 @@ internal class AIAssistantRemoteResponseInterpreter {
             .trim()
     }
 
-    private fun isTransactionRequest(message: String): Boolean {
-        val lowerMessage = message.lowercase()
-        return transactionPhrases.any { lowerMessage.contains(it) } ||
-            transactionKeywords.any { lowerMessage.contains(it) }
-    }
 }
