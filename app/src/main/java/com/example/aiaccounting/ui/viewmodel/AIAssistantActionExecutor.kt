@@ -27,6 +27,13 @@ class AIAssistantActionExecutor @Inject constructor(
   private val aiLocalProcessor: AILocalProcessor
 ) {
 
+  private companion object {
+    private const val USER_SAFE_EXECUTION_ERROR = "执行操作时出错，请稍后重试"
+    private const val USER_SAFE_ACCOUNT_CREATE_ERROR = "❌ 创建账户失败：请稍后重试"
+    private const val USER_SAFE_CATEGORY_CREATE_ERROR = "❌ 创建分类失败：请稍后重试"
+    private const val USER_SAFE_ADD_TRANSACTION_ERROR = "❌ 记账失败：请稍后重试"
+  }
+
   private val responseInterpreter = AIAssistantRemoteResponseInterpreter()
 
   /**
@@ -40,14 +47,14 @@ class AIAssistantActionExecutor @Inject constructor(
       throw e
     } catch (e: Exception) {
       logError("执行AI操作失败", e)
-      "执行操作时出错: ${e.message}\n\n请尝试简化您的指令，或分多次发送。"
+      USER_SAFE_EXECUTION_ERROR
     }
   }
 
   internal suspend fun executeAIActions(envelope: AIAssistantActionEnvelope): String {
     return try {
       val results = envelope.actions.mapIndexed { index, action ->
-        formatIndexedResult(index + 1, executeSingleAction(action))
+        formatIndexedResult(index + 1, executeActionSafely(action, ::executeSingleAction))
       }
 
       val aiReply = envelope.reply.trim().removeDirtyNullWrappers()
@@ -62,14 +69,14 @@ class AIAssistantActionExecutor @Inject constructor(
       throw e
     } catch (e: Exception) {
       logError("执行AI操作失败", e)
-      "执行操作时出错: ${e.message}\n\n请尝试简化您的指令，或分多次发送。"
+      USER_SAFE_EXECUTION_ERROR
     }
   }
 
   internal suspend fun executeQueryBeforeExecution(envelope: AIAssistantActionEnvelope): String {
     return try {
       val results = envelope.actions.mapIndexed { index, action ->
-        formatIndexedResult(index + 1, executeQueryBeforeExecutionAction(action))
+        formatIndexedResult(index + 1, executeActionSafely(action, ::executeQueryBeforeExecutionAction))
       }
 
       val aiReply = envelope.reply.trim().removeDirtyNullWrappers()
@@ -84,7 +91,7 @@ class AIAssistantActionExecutor @Inject constructor(
       throw e
     } catch (e: Exception) {
       logError("执行AI查询前置编排失败", e)
-      "执行操作时出错: ${e.message}\n\n请尝试简化您的指令，或分多次发送。"
+      USER_SAFE_EXECUTION_ERROR
     }
   }
 
@@ -93,7 +100,13 @@ class AIAssistantActionExecutor @Inject constructor(
    */
   private suspend fun executeSingleAction(action: AIAssistantTypedAction): String {
     val traceContext = AITraceContext(sourceType = "AI_REMOTE")
+    return executeSingleAction(action, traceContext)
+  }
 
+  private suspend fun executeSingleAction(
+    action: AIAssistantTypedAction,
+    traceContext: AITraceContext
+  ): String {
     return when (action) {
       is AIAssistantTypedAction.CreateAccount -> executeCreateAccount(action, traceContext)
       is AIAssistantTypedAction.AddTransaction -> executeAddTransaction(action, traceContext)
@@ -108,7 +121,7 @@ class AIAssistantActionExecutor @Inject constructor(
 
     return when (action) {
       is AIAssistantTypedAction.AddTransaction -> executeAddTransactionWithQueryBeforeExecution(action, traceContext)
-      else -> executeSingleAction(action)
+      else -> executeSingleAction(action, traceContext)
     }
   }
 
@@ -126,12 +139,15 @@ class AIAssistantActionExecutor @Inject constructor(
 
     return when (val result = aiOperationExecutor.executeOperation(operation)) {
       is AIOperationExecutor.AIOperationResult.Success -> "✅ 已创建账户：$name，余额：¥$balance"
-      is AIOperationExecutor.AIOperationResult.Error -> "❌ 创建账户失败：${result.error}"
+      is AIOperationExecutor.AIOperationResult.Error -> {
+        logError("创建账户失败: $name, error=${result.error}", IllegalStateException(result.error))
+        USER_SAFE_ACCOUNT_CREATE_ERROR
+      }
     }
   }
 
   private suspend fun executeAddTransaction(action: AIAssistantTypedAction.AddTransaction, traceContext: AITraceContext): String {
-    val resolution = resolveAddTransactionExecution(action)
+    val resolution = resolveAddTransactionExecution(action, traceContext)
     return resolution.failureMessage ?: if (resolution.transactionType == TransactionType.TRANSFER) {
       executeResolvedTransfer(
         amount = action.amount,
@@ -164,7 +180,7 @@ class AIAssistantActionExecutor @Inject constructor(
     action: AIAssistantTypedAction.AddTransaction,
     traceContext: AITraceContext
   ): String {
-    val resolution = resolveAddTransactionExecution(action)
+    val resolution = resolveAddTransactionExecution(action, traceContext)
     val querySummary = buildQueryBeforeExecutionSummary(action, resolution)
     val executionResult = resolution.failureMessage ?: if (resolution.transactionType == TransactionType.TRANSFER) {
       executeResolvedTransfer(
@@ -218,7 +234,10 @@ class AIAssistantActionExecutor @Inject constructor(
 
     return when (val result = aiOperationExecutor.executeOperation(operation)) {
       is AIOperationExecutor.AIOperationResult.Success -> "✅ 已创建分类：$name"
-      is AIOperationExecutor.AIOperationResult.Error -> "❌ 创建分类失败：${result.error}"
+      is AIOperationExecutor.AIOperationResult.Error -> {
+        logError("创建分类失败: $name, error=${result.error}", IllegalStateException(result.error))
+        USER_SAFE_CATEGORY_CREATE_ERROR
+      }
     }
   }
 
@@ -237,7 +256,8 @@ class AIAssistantActionExecutor @Inject constructor(
   )
 
   private suspend fun resolveAddTransactionExecution(
-    action: AIAssistantTypedAction.AddTransaction
+    action: AIAssistantTypedAction.AddTransaction,
+    traceContext: AITraceContext
   ): AddTransactionExecutionResolution {
     val amount = action.amount
     val typeStr = action.transactionTypeRaw
@@ -305,7 +325,7 @@ class AIAssistantActionExecutor @Inject constructor(
         logDebug("解析转账字段已提取")
       }
 
-      aiLocalProcessor.ensureBasicCategoriesExist()
+      aiLocalProcessor.ensureBasicCategoriesExist(traceContext)
 
       val accountResolution = AITransactionEntityResolver.resolveAccount(
         accountRepository = accountRepository,
@@ -317,17 +337,22 @@ class AIAssistantActionExecutor @Inject constructor(
         enableFuzzyNameMatch = true,
         enableTypeMatch = true,
         excludeArchived = true,
-        allowExplicitFallbackCreation = true
+        allowExplicitFallbackCreation = true,
+        traceContext = traceContext
       )
       val sourceAccount = accountResolution.account
         ?: accountResolution.creationError?.let {
           val requestedLabel = accountResolution.requestedLabel.orEmpty()
+          logError(
+            "转账来源账户解析失败: requested=$requestedLabel, error=$it",
+            IllegalStateException(it)
+          )
           return AddTransactionExecutionResolution(
             transactionType = transactionType,
             failureMessage = if (requestedLabel.isNotBlank()) {
-              "记账失败：创建账户失败 - $requestedLabel：$it"
+              "记账失败：创建账户失败 - $requestedLabel"
             } else {
-              "记账失败：创建账户失败 - $it"
+              "记账失败：创建账户失败"
             },
             accountQuerySummary = buildAccountQuerySummary(accountRef, effectiveAccountName, accountResolution.account?.name)
           )
@@ -348,18 +373,23 @@ class AIAssistantActionExecutor @Inject constructor(
         enableFuzzyNameMatch = true,
         enableTypeMatch = true,
         excludeArchived = true,
-        allowExplicitFallbackCreation = true
+        allowExplicitFallbackCreation = true,
+        traceContext = traceContext
       )
       val targetAccount = targetAccountResolution.account
         ?: targetAccountResolution.creationError?.let {
           val requestedLabel = targetAccountResolution.requestedLabel.orEmpty()
+          logError(
+            "转账目标账户解析失败: requested=$requestedLabel, error=$it",
+            IllegalStateException(it)
+          )
           return AddTransactionExecutionResolution(
             transactionType = transactionType,
             account = sourceAccount,
             failureMessage = if (requestedLabel.isNotBlank()) {
-              "记账失败：创建账户失败 - $requestedLabel：$it"
+              "记账失败：创建账户失败 - $requestedLabel"
             } else {
-              "记账失败：创建账户失败 - $it"
+              "记账失败：创建账户失败"
             },
             accountQuerySummary = buildAccountQuerySummary(accountRef, effectiveAccountName, sourceAccount.name),
             transferAccountQuerySummary = buildTransferAccountQuerySummary(targetRef, effectiveTargetAccountName, targetAccountResolution.account?.name)
@@ -397,19 +427,24 @@ class AIAssistantActionExecutor @Inject constructor(
         fallbackCategoryName = "转账",
         emergencyCategoryName = "转账",
         allowAnyTypeFallback = false,
-        allowExplicitFallbackCreation = true
+        allowExplicitFallbackCreation = true,
+        traceContext = traceContext
       )
       val transferCategory = transferCategoryResolution.category
         ?: transferCategoryResolution.creationError?.let {
           val requestedLabel = transferCategoryResolution.requestedLabel.orEmpty()
+          logError(
+            "转账分类解析失败: requested=$requestedLabel, error=$it",
+            IllegalStateException(it)
+          )
           return AddTransactionExecutionResolution(
             transactionType = transactionType,
             account = sourceAccount,
             transferAccount = targetAccount,
             failureMessage = if (requestedLabel.isNotBlank()) {
-              "记账失败：创建分类失败 - $requestedLabel：$it"
+              "记账失败：创建分类失败 - $requestedLabel"
             } else {
-              "记账失败：创建分类失败 - $it"
+              "记账失败：创建分类失败"
             },
             accountQuerySummary = buildAccountQuerySummary(accountRef, effectiveAccountName, sourceAccount.name),
             transferAccountQuerySummary = buildTransferAccountQuerySummary(targetRef, effectiveTargetAccountName, targetAccount.name),
@@ -456,7 +491,7 @@ class AIAssistantActionExecutor @Inject constructor(
       logDebug("解析交易字段已提取")
     }
 
-    aiLocalProcessor.ensureBasicCategoriesExist()
+    aiLocalProcessor.ensureBasicCategoriesExist(traceContext)
 
     val accountResolution = AITransactionEntityResolver.resolveAccount(
       accountRepository = accountRepository,
@@ -468,17 +503,22 @@ class AIAssistantActionExecutor @Inject constructor(
       enableFuzzyNameMatch = true,
       enableTypeMatch = true,
       excludeArchived = true,
-      allowExplicitFallbackCreation = true
+      allowExplicitFallbackCreation = true,
+      traceContext = traceContext
     )
     val account = accountResolution.account
       ?: accountResolution.creationError?.let {
         val requestedLabel = accountResolution.requestedLabel.orEmpty()
+        logError(
+          "记账账户解析失败: requested=$requestedLabel, error=$it",
+          IllegalStateException(it)
+        )
         return AddTransactionExecutionResolution(
           transactionType = transactionType,
           failureMessage = if (requestedLabel.isNotBlank()) {
-            "记账失败：创建账户失败 - $requestedLabel：$it"
+            "记账失败：创建账户失败 - $requestedLabel"
           } else {
-            "记账失败：创建账户失败 - $it"
+            "记账失败：创建账户失败"
           },
           accountQuerySummary = buildAccountQuerySummary(accountRef, effectiveAccountName, accountResolution.account?.name)
         )
@@ -500,18 +540,23 @@ class AIAssistantActionExecutor @Inject constructor(
       },
       emergencyCategoryName = null,
       allowAnyTypeFallback = true,
-      allowExplicitFallbackCreation = true
+      allowExplicitFallbackCreation = true,
+      traceContext = traceContext
     )
     val category = categoryResolution.category
       ?: categoryResolution.creationError?.let {
         val requestedLabel = categoryResolution.requestedLabel.orEmpty()
+        logError(
+          "记账分类解析失败: requested=$requestedLabel, error=$it",
+          IllegalStateException(it)
+        )
         return AddTransactionExecutionResolution(
           transactionType = transactionType,
           account = account,
           failureMessage = if (requestedLabel.isNotBlank()) {
-            "记账失败：创建分类失败 - $requestedLabel：$it"
+            "记账失败：创建分类失败 - $requestedLabel"
           } else {
-            "记账失败：创建分类失败 - $it"
+            "记账失败：创建分类失败"
           },
           accountQuerySummary = buildAccountQuerySummary(accountRef, effectiveAccountName, account.name),
           categoryQuerySummary = buildCategoryQuerySummary(categoryRef, effectiveCategoryName, categoryResolution.category?.name)
@@ -582,8 +627,13 @@ class AIAssistantActionExecutor @Inject constructor(
             append(it)
           }
         }
-      is AIOperationExecutor.AIOperationResult.Error ->
-        "❌ 记账失败：${result.error}"
+      is AIOperationExecutor.AIOperationResult.Error -> {
+        logError(
+          "执行记账失败: account=${resolvedAccount.id}, category=${resolvedCategory.id}, error=${result.error}",
+          IllegalStateException(result.error)
+        )
+        USER_SAFE_ADD_TRANSACTION_ERROR
+      }
     }
   }
 
@@ -642,8 +692,13 @@ class AIAssistantActionExecutor @Inject constructor(
             append(it)
           }
         }
-      is AIOperationExecutor.AIOperationResult.Error ->
-        "❌ 记账失败：${result.error}"
+      is AIOperationExecutor.AIOperationResult.Error -> {
+        logError(
+          "执行转账失败: source=${resolvedSource.id}, target=${resolvedTarget.id}, category=${resolvedCategory.id}, error=${result.error}",
+          IllegalStateException(result.error)
+        )
+        USER_SAFE_ADD_TRANSACTION_ERROR
+      }
     }
   }
 
@@ -717,6 +772,20 @@ class AIAssistantActionExecutor @Inject constructor(
     }
     val resolved = resolvedName ?: "未命中"
     return "目标账户查询：请求=$requested，命中=$resolved"
+  }
+
+  private suspend fun executeActionSafely(
+    action: AIAssistantTypedAction,
+    executor: suspend (AIAssistantTypedAction) -> String
+  ): String {
+    return try {
+      executor(action)
+    } catch (e: CancellationException) {
+      throw e
+    } catch (e: Exception) {
+      logError("批量动作执行失败: ${action.javaClass.simpleName}", e)
+      "❌ 执行失败：请稍后重试"
+    }
   }
 
   private fun logDebug(message: String) {

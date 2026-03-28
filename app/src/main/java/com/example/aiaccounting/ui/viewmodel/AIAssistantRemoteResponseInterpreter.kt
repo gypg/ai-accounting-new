@@ -13,7 +13,7 @@ internal sealed class RemoteResponseDecision {
 internal class AIAssistantRemoteResponseInterpreter {
 
     private val actionTypeRegex = Regex(
-        "\"type\"\\s*:\\s*\"(add_transaction|transfer|create_account|query|query_accounts|query_categories|query_transactions|create_category)\""
+        "\"(?:type|action)\"\\s*:\\s*\"(add_transaction|transfer|create_account|query|query_accounts|query_categories|query_transactions|create_category)\""
     )
 
     private val transactionKeywords = listOf(
@@ -157,43 +157,63 @@ internal class AIAssistantRemoteResponseInterpreter {
     private fun parseTypedAction(actionJson: JSONObject): AIAssistantTypedAction {
         val actionName = normalizeActionName(actionJson)
         return when (actionName) {
-            "add_transaction", "transfer" -> AIAssistantTypedAction.AddTransaction(
-                amount = actionJson.optDouble("amount", 0.0),
-                transactionTypeRaw = actionJson.optString(
-                    "transactionType",
-                    actionJson.optString(
-                        "type",
-                        if (actionName == "transfer") "transfer" else "expense"
-                    )
-                ),
-                categoryRef = parseEntityReference(
-                    actionJson = actionJson,
-                    objectKey = "categoryRef",
-                    legacyNameKey = "category",
-                    legacyIdKey = "categoryId",
-                    defaultKind = "category"
-                ),
-                accountRef = parseEntityReference(
+            "add_transaction", "transfer" -> {
+                val accountRef = parseEntityReference(
                     actionJson = actionJson,
                     objectKey = "accountRef",
                     legacyNameKey = "account",
                     legacyIdKey = "accountId",
                     defaultKind = "account"
-                ),
-                transferAccountRef = parseOptionalEntityReference(
+                )
+                val legacyTransferRef = parseOptionalEntityReference(
                     actionJson = actionJson,
                     objectKey = "transferAccountRef",
                     legacyNameKey = "transferAccount",
                     legacyIdKey = "transferAccountId",
                     defaultKind = "account"
-                ),
-                note = actionJson.optString("note", ""),
-                dateTimestamp = actionJson.optLong("date", System.currentTimeMillis())
-            )
+                )
+                val fromAccountId = actionJson.optLong("fromAccountId").takeIf { it > 0 }
+                val toAccountId = actionJson.optLong("toAccountId").takeIf { it > 0 }
+                val normalizedAccountRef = if (fromAccountId != null && accountRef.id == null) {
+                    accountRef.copy(id = fromAccountId, rawIdText = actionJson.optString("fromAccountId", accountRef.rawIdText))
+                } else {
+                    accountRef
+                }
+                val transferAccountRef = legacyTransferRef ?: toAccountId?.let {
+                    AIAssistantEntityReference(
+                        id = it,
+                        name = "",
+                        rawIdText = actionJson.optString("toAccountId", ""),
+                        kind = "account"
+                    )
+                }
+
+                AIAssistantTypedAction.AddTransaction(
+                    amount = actionJson.optDouble("amount", 0.0),
+                    transactionTypeRaw = actionJson.optString(
+                        "transactionType",
+                        actionJson.optString(
+                            "type",
+                            if (actionName == "transfer") "transfer" else "expense"
+                        )
+                    ),
+                    categoryRef = parseEntityReference(
+                        actionJson = actionJson,
+                        objectKey = "categoryRef",
+                        legacyNameKey = "category",
+                        legacyIdKey = "categoryId",
+                        defaultKind = "category"
+                    ),
+                    accountRef = normalizedAccountRef,
+                    transferAccountRef = transferAccountRef,
+                    note = actionJson.optString("note", ""),
+                    dateTimestamp = actionJson.optLong("date", System.currentTimeMillis())
+                )
+            }
             "create_account" -> AIAssistantTypedAction.CreateAccount(
-                name = actionJson.optString("name", ""),
+                name = actionJson.optString("name", actionJson.optString("accountName", "")),
                 accountTypeRaw = actionJson.optString("accountType", actionJson.optString("type", "OTHER")),
-                balance = actionJson.optDouble("balance", 0.0)
+                balance = actionJson.optDouble("balance", actionJson.optDouble("initialBalance", 0.0))
             )
             "create_category" -> AIAssistantTypedAction.CreateCategory(
                 name = actionJson.optString("name", actionJson.optString("categoryName", "")),
@@ -208,10 +228,10 @@ internal class AIAssistantRemoteResponseInterpreter {
                 }
             )
             "query" -> AIAssistantTypedAction.Query(
-                target = actionJson.optString("target", when (actionJson.optString("type", "").trim()) {
-                    "query_accounts" -> "accounts"
-                    "query_categories" -> "categories"
-                    "query_transactions" -> "transactions"
+                target = actionJson.optString("target", when {
+                    actionJson.optString("type", "").trim() == "query_accounts" || actionJson.optString("action", "").trim() == "query_accounts" -> "accounts"
+                    actionJson.optString("type", "").trim() == "query_categories" || actionJson.optString("action", "").trim() == "query_categories" -> "categories"
+                    actionJson.optString("type", "").trim() == "query_transactions" || actionJson.optString("action", "").trim() == "query_transactions" -> "transactions"
                     else -> ""
                 })
             )
@@ -270,7 +290,10 @@ internal class AIAssistantRemoteResponseInterpreter {
     private fun normalizeActionName(actionJson: JSONObject): String {
         val explicitAction = actionJson.optString("action", "").trim()
         if (explicitAction.isNotBlank()) {
-            return explicitAction
+            return when (explicitAction) {
+                "query_accounts", "query_categories", "query_transactions" -> "query"
+                else -> explicitAction
+            }
         }
 
         return when (actionJson.optString("type", "").trim()) {
@@ -288,17 +311,27 @@ internal class AIAssistantRemoteResponseInterpreter {
     }
 
     private fun extractDisplayReply(response: String): String {
-        val trimmed = response.trim()
+        val trimmed = response.trim().removeDirtyNullWrappers()
         if (trimmed.isEmpty()) {
             return trimmed
         }
 
-        val jsonCandidate = extractActionJsonCandidate(trimmed)
-        return if (jsonCandidate != null && trimmed == jsonCandidate) {
-            trimmed
-        } else {
-            trimmed
+        val withoutFencedJson = trimmed.replace(fencedJsonRegex, " ").trim()
+        val withoutInlineJson = stripDisplayJsonLikeSegments(withoutFencedJson)
+            .removeDirtyNullWrappers()
+            .replace(Regex("\\s{2,}"), " ")
+            .trim()
+
+        if (withoutInlineJson.isNotBlank()) {
+            return withoutInlineJson
         }
+
+        val likelyJsonGarbage = trimmed.contains("```") ||
+            trimmed.contains("\"action\"") ||
+            trimmed.contains("\"actions\"") ||
+            trimmed.contains('{') ||
+            trimmed.contains('[')
+        return if (likelyJsonGarbage) "" else trimmed
     }
 
     private fun requiresQueryBeforeExecution(envelope: AIAssistantActionEnvelope): Boolean {
@@ -373,6 +406,29 @@ internal class AIAssistantRemoteResponseInterpreter {
             candidateText.startsWith("[") -> extractBracketedJson(candidateText, '[', ']')
             else -> null
         }
+    }
+
+    private fun stripDisplayJsonLikeSegments(text: String): String {
+        if (text.isBlank()) {
+            return text
+        }
+
+        val builder = StringBuilder()
+        var index = 0
+        while (index < text.length) {
+            val ch = text[index]
+            if (ch == '{' || ch == '[') {
+                val closeChar = if (ch == '{') '}' else ']'
+                val segment = extractBracketedJson(text.substring(index), ch, closeChar)
+                if (segment != null) {
+                    index += segment.length
+                    continue
+                }
+            }
+            builder.append(ch)
+            index += 1
+        }
+        return builder.toString()
     }
 
     private fun isLocalFailure(localResult: String): Boolean {

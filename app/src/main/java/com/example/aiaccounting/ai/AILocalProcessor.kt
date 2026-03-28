@@ -24,6 +24,13 @@ class AILocalProcessor @Inject constructor(
     private val aiOperationExecutor: AIOperationExecutor
 ) {
 
+    private companion object {
+        private const val USER_SAFE_QUERY_ERROR = "错误: 查询失败，请稍后重试"
+        private const val USER_SAFE_OPERATION_ERROR = "错误: 操作失败，请稍后重试"
+        private const val USER_SAFE_TRANSACTION_ERROR = "❌ 记账失败：请稍后重试"
+        private const val USER_SAFE_ACCOUNT_CREATE_ERROR = "创建默认账户失败，请稍后重试"
+    }
+
     suspend fun processMessage(
         message: String,
         isNetworkAvailable: Boolean,
@@ -57,16 +64,30 @@ class AILocalProcessor @Inject constructor(
         return handleGeneralConversation(message, isNetworkAvailable, isAIConfigured, currentButlerId)
     }
 
-    suspend fun ensureBasicCategoriesExist() {
+    suspend fun ensureBasicCategoriesExist(
+        traceContext: AITraceContext = AITraceContext(sourceType = "AI_LOCAL")
+    ) {
         val categories = categoryRepository.getAllCategoriesList()
         if (categories.isEmpty()) {
             val expenseCategories = listOf("餐饮", "交通", "购物", "娱乐", "居住", "医疗", "其他支出")
             val incomeCategories = listOf("工资", "奖金", "投资", "兼职", "其他收入")
             expenseCategories.forEach { name ->
-                aiOperationExecutor.executeOperation(AIOperation.AddCategory(name = name, type = TransactionType.EXPENSE))
+                aiOperationExecutor.executeOperation(
+                    AIOperation.AddCategory(
+                        name = name,
+                        type = TransactionType.EXPENSE,
+                        traceContext = traceContext
+                    )
+                )
             }
             incomeCategories.forEach { name ->
-                aiOperationExecutor.executeOperation(AIOperation.AddCategory(name = name, type = TransactionType.INCOME))
+                aiOperationExecutor.executeOperation(
+                    AIOperation.AddCategory(
+                        name = name,
+                        type = TransactionType.INCOME,
+                        traceContext = traceContext
+                    )
+                )
             }
         }
     }
@@ -88,6 +109,17 @@ class AILocalProcessor @Inject constructor(
                 if (categories.isEmpty()) "暂无分类信息"
                 else "📁 分类列表：\n" +
                     categories.joinToString("\n") { "• ${it.name} (${if (it.type == TransactionType.INCOME) "收入" else "支出"})" }
+            }
+            "transactions" -> {
+                when (val result = aiOperationExecutor.executeOperation(AIOperation.QueryData("transactions", 10))) {
+                    is AIOperationResult.Success -> result.message
+                    is AIOperationResult.Error -> {
+                        runCatching {
+                            Log.e("AILocalProcessor", "查询交易失败: ${result.error}")
+                        }
+                        "错误: 查询失败，请稍后重试"
+                    }
+                }
             }
             else -> "查询完成"
         }
@@ -125,7 +157,8 @@ class AILocalProcessor @Inject constructor(
             TransactionType.INCOME else TransactionType.EXPENSE
 
         if (amount != null) {
-            ensureBasicCategoriesExist()
+            val traceContext = AITraceContext(sourceType = "AI_LOCAL")
+            ensureBasicCategoriesExist(traceContext)
 
             val accountResolution = AITransactionEntityResolver.resolveAccount(
                 accountRepository = accountRepository,
@@ -133,10 +166,15 @@ class AILocalProcessor @Inject constructor(
                 fallbackAccountName = "默认账户",
                 fallbackAccountType = AccountType.CASH,
                 allowExplicitFallbackCreation = true,
-                traceContext = AITraceContext(sourceType = "AI_LOCAL")
+                traceContext = traceContext
             )
             val defaultAccount = accountResolution.account
-                ?: accountResolution.creationError?.let { return "创建默认账户失败: $it" }
+                ?: accountResolution.creationError?.let {
+                    runCatching {
+                        Log.e("AILocalProcessor", "创建默认账户失败: $it")
+                    }
+                    return USER_SAFE_ACCOUNT_CREATE_ERROR
+                }
                 ?: return "无法创建账户，请手动创建账户后再试。"
 
             val categoryResolution = AITransactionEntityResolver.resolveCategory(
@@ -145,7 +183,7 @@ class AILocalProcessor @Inject constructor(
                 transactionType = type,
                 fallbackCategoryName = if (type == TransactionType.INCOME) "其他收入" else "其他支出",
                 emergencyCategoryName = if (type == TransactionType.INCOME) "收入" else "支出",
-                traceContext = AITraceContext(sourceType = "AI_LOCAL")
+                traceContext = traceContext
             )
             val defaultCategory = categoryResolution.category
                 ?: categoryResolution.terminalCreationError?.let {
@@ -156,13 +194,17 @@ class AILocalProcessor @Inject constructor(
             val operation = AIOperation.AddTransaction(
                 amount = amount, type = type,
                 accountId = defaultAccount.id, categoryId = defaultCategory.id, note = message,
-                traceContext = AITraceContext(sourceType = "AI_LOCAL")
+                traceContext = traceContext
             )
             return when (val result = aiOperationExecutor.executeOperation(operation)) {
                 is AIOperationResult.Success ->
                     "✅ ${result.message}\n账户: ${defaultAccount.name}\n分类: ${defaultCategory.name}\n您可以说「查看最近交易」来确认记录。"
-                is AIOperationResult.Error ->
-                    "❌ 记账失败: ${result.error}"
+                is AIOperationResult.Error -> {
+                    runCatching {
+                        Log.e("AILocalProcessor", "本地记账失败: ${result.error}")
+                    }
+                    USER_SAFE_TRANSACTION_ERROR
+                }
             }
         }
         return "我没有识别到金额。请告诉我具体的金额，比如：\n- 花了50元买咖啡\n- 今天收入5000元工资\n- 支出200元超市购物"
@@ -185,7 +227,12 @@ class AILocalProcessor @Inject constructor(
                 val operation = AIOperation.QueryData("transactions", extractNumber(lowerMessage) ?: 10)
                 when (val result = aiOperationExecutor.executeOperation(operation)) {
                     is AIOperationResult.Success -> result.message
-                    is AIOperationResult.Error -> "错误: ${result.error}"
+                    is AIOperationResult.Error -> {
+                        runCatching {
+                            Log.e("AILocalProcessor", "本地查询交易失败: ${result.error}")
+                        }
+                        USER_SAFE_QUERY_ERROR
+                    }
                 }
             }
             containsAny(lowerMessage, listOf("账户", "银行卡")) -> {
@@ -210,10 +257,16 @@ class AILocalProcessor @Inject constructor(
                 val name = extractAccountName(message)
                 if (name != null) {
                     val type = extractAccountType(lowerMessage)
-                    val operation = AIOperation.AddAccount(name = name, type = type, balance = extractAmount(lowerMessage) ?: 0.0, traceContext = AITraceContext(sourceType = "AI_LOCAL"))
+                    val traceContext = AITraceContext(sourceType = "AI_LOCAL")
+                    val operation = AIOperation.AddAccount(name = name, type = type, balance = extractAmount(lowerMessage) ?: 0.0, traceContext = traceContext)
                     when (val result = aiOperationExecutor.executeOperation(operation)) {
                         is AIOperationResult.Success -> result.message
-                        is AIOperationResult.Error -> "错误: ${result.error}"
+                        is AIOperationResult.Error -> {
+                            runCatching {
+                                Log.e("AILocalProcessor", "处理账户命令失败: ${result.error}")
+                            }
+                            USER_SAFE_OPERATION_ERROR
+                        }
                     }
                 } else "请告诉我账户名称，比如：\n- 添加一个现金账户\n- 新建银行卡账户余额10000元"
             }
@@ -239,10 +292,16 @@ class AILocalProcessor @Inject constructor(
                 val name = extractCategoryName(message)
                 val type = if (containsAny(lowerMessage, listOf("收入"))) TransactionType.INCOME else TransactionType.EXPENSE
                 if (name != null) {
-                    val operation = AIOperation.AddCategory(name = name, type = type, traceContext = AITraceContext(sourceType = "AI_LOCAL"))
+                    val traceContext = AITraceContext(sourceType = "AI_LOCAL")
+                    val operation = AIOperation.AddCategory(name = name, type = type, traceContext = traceContext)
                     when (val result = aiOperationExecutor.executeOperation(operation)) {
                         is AIOperationResult.Success -> result.message
-                        is AIOperationResult.Error -> "错误: ${result.error}"
+                        is AIOperationResult.Error -> {
+                            runCatching {
+                                Log.e("AILocalProcessor", "处理分类命令失败: ${result.error}")
+                            }
+                            USER_SAFE_OPERATION_ERROR
+                        }
                     }
                 } else "请告诉我分类名称，比如：\n- 添加餐饮分类\n- 新建交通支出分类"
             }
@@ -270,7 +329,12 @@ class AILocalProcessor @Inject constructor(
         val operation = AIOperation.ExportData(format = "excel")
         return when (val result = aiOperationExecutor.executeOperation(operation)) {
             is AIOperationResult.Success -> result.message + "\n请前往设置 > 数据备份页面完成导出操作。"
-            is AIOperationResult.Error -> "错误: ${result.error}"
+            is AIOperationResult.Error -> {
+                runCatching {
+                    Log.e("AILocalProcessor", "处理导出命令失败: ${result.error}")
+                }
+                USER_SAFE_OPERATION_ERROR
+            }
         }
     }
 

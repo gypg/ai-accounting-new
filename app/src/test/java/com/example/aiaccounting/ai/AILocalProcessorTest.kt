@@ -9,6 +9,7 @@ import com.example.aiaccounting.data.repository.CategoryRepository
 import io.mockk.coEvery
 import io.mockk.mockk
 import kotlinx.coroutines.test.runTest
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -164,6 +165,27 @@ class AILocalProcessorTest {
     }
 
     @Test
+    fun handleQueryCommand_returnsRecentTransactions_whenTargetIsTransactions() = runTest {
+        coEvery { aiOperationExecutor.executeOperation(match<AIOperation.QueryData> { it.queryType == "transactions" && it.limit == 10 }) } returns
+            AIOperationExecutor.AIOperationResult.Success("最近10笔交易:\n2026-03-27: -18.0")
+
+        val result = processor.handleQueryCommand("transactions")
+
+        assertTrue(result.contains("最近10笔交易"))
+    }
+
+    @Test
+    fun handleQueryCommand_returnsSanitizedFailure_whenTransactionsQueryFails() = runTest {
+        coEvery { aiOperationExecutor.executeOperation(match<AIOperation.QueryData> { it.queryType == "transactions" && it.limit == 10 }) } returns
+            AIOperationExecutor.AIOperationResult.Error("internal db timeout")
+
+        val result = processor.handleQueryCommand("transactions")
+
+        assertTrue(result.contains("查询失败，请稍后重试"))
+        assertTrue(!result.contains("internal db timeout"))
+    }
+
+    @Test
     fun processMessage_createsDefaultAccountAndCategory_whenTransactionNeedsFallbackEntities() = runTest {
         coEvery { categoryRepository.getAllCategoriesList() } returnsMany listOf(
             emptyList(),
@@ -230,5 +252,50 @@ class AILocalProcessorTest {
         assertTrue(result.contains("已记录这笔支出"))
         assertTrue(result.contains("账户: 默认账户"))
         assertTrue(result.contains("分类: 其他支出"))
+    }
+
+    @Test
+    fun processMessage_keepsSingleLocalTraceContext_forAutoCreatedEntitiesAndTransaction() = runTest {
+        coEvery { categoryRepository.getAllCategoriesList() } returnsMany listOf(
+            emptyList(),
+            emptyList(),
+            listOf(Category(id = 7, name = "其他支出", type = TransactionType.EXPENSE))
+        )
+        coEvery { accountRepository.getAllAccountsList() } returnsMany listOf(
+            emptyList(),
+            listOf(Account(id = 3, name = "默认账户", type = AccountType.CASH))
+        )
+
+        val executedOperations = mutableListOf<AIOperation>()
+        coEvery { aiOperationExecutor.executeOperation(capture(executedOperations)) } answers {
+            when (firstArg<AIOperation>()) {
+                is AIOperation.AddAccount,
+                is AIOperation.AddCategory,
+                is AIOperation.AddTransaction -> AIOperationExecutor.AIOperationResult.Success("ok")
+                else -> AIOperationExecutor.AIOperationResult.Success("ok")
+            }
+        }
+
+        processor.processMessage(
+            message = "今天午饭花了18元",
+            isNetworkAvailable = false,
+            isAIConfigured = false
+        )
+
+        val createdAccount = executedOperations.filterIsInstance<AIOperation.AddAccount>().first { it.name == "默认账户" }
+        val createdCategory = executedOperations.filterIsInstance<AIOperation.AddCategory>().first { it.name == "其他支出" }
+        val addedTransaction = executedOperations.filterIsInstance<AIOperation.AddTransaction>().single()
+
+        assertEquals("AI_LOCAL", createdAccount.traceContext.sourceType)
+        assertEquals("AI_LOCAL", createdCategory.traceContext.sourceType)
+        assertEquals("AI_LOCAL", addedTransaction.traceContext.sourceType)
+        assertEquals(
+            1,
+            setOf(
+                createdAccount.traceContext.traceId,
+                createdCategory.traceContext.traceId,
+                addedTransaction.traceContext.traceId
+            ).size
+        )
     }
 }

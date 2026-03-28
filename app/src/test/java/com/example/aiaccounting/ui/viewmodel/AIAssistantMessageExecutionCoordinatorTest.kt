@@ -299,6 +299,35 @@ class AIAssistantMessageExecutionCoordinatorTest {
     }
 
     @Test
+    fun execute_keepsReplyStage_whenRouteReturnsClarificationStageFinish() = runTest {
+        val pendingState = pendingClarificationState()
+
+        val result = coordinator.execute(
+            message = "先取消",
+            currentButler = butler,
+            conversationHistory = emptyList(),
+            isNetworkAvailable = true,
+            currentUseBuiltinConfig = false,
+            currentAIConfig = AIConfig(isEnabled = true, apiKey = "key"),
+            pendingInteractionState = PendingInteractionState.Clarification(pendingState),
+            continuePendingClarification = { _, _ -> ClarificationFlowResult.Finish("已取消", shouldClearPending = true) },
+            clearPendingClarificationAfterSuccessfulContinuation = {},
+            restorePendingClarification = {},
+            handleModificationConfirmation = { _, _ -> ModificationFlowResult.Finish("不会走到这里") },
+            handleTransactionModification = { _, _ -> ModificationFlowResult.Finish("不会走到这里") },
+            processWithRemoteAI = { "不会走到这里" }
+        )
+
+        assertEquals(
+            AIAssistantMessageExecutionResult.Reply(
+                message = "已取消",
+                stage = AIAssistantInteractionStage.Reply
+            ),
+            result
+        )
+    }
+
+    @Test
     fun execute_returnsClarificationRequired_whenLocalActionsContainRequestClarification() = runTest {
         val reasoningResult = reasoningResult(AIReasoningEngine.UserIntent.RECORD_TRANSACTION)
         coEvery { aiReasoningEngine.reason(any(), any(), any()) } returns reasoningResult

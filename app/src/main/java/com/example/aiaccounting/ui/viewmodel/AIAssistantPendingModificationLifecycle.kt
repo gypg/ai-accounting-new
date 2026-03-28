@@ -1,8 +1,11 @@
 package com.example.aiaccounting.ui.viewmodel
 
+import com.example.aiaccounting.data.model.ButlerPersonaRegistry
+
 internal class AIAssistantPendingModificationLifecycle(
     private val modificationCoordinator: AIAssistantModificationCoordinator
 ) {
+
     private var pendingState: PendingModificationState? = null
 
     fun currentState(): PendingModificationState? = pendingState
@@ -23,7 +26,7 @@ internal class AIAssistantPendingModificationLifecycle(
 
     suspend fun continuePending(message: String, butlerId: String): ModificationFlowResult {
         val currentPendingState = pendingState
-            ?: return ModificationFlowResult.Finish("抱歉，没有待确认的操作。")
+            ?: return ModificationFlowResult.Finish(ButlerPersonaRegistry.buildModificationNoPendingReply())
         return when (val result = modificationCoordinator.continueModification(message, butlerId, currentPendingState)) {
             is ModificationFlowResult.Finish -> {
                 if (result.shouldClearPending) {

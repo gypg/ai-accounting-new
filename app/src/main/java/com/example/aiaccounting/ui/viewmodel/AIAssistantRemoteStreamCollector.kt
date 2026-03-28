@@ -18,6 +18,9 @@ internal class AIAssistantRemoteStreamCollector(
     private val recordUsageFailure: suspend () -> Unit,
     private val timeoutMillis: Long = 60_000L
 ) {
+    private companion object {
+        private const val USER_SAFE_TRANSPORT_FAILURE = "服务暂时不可用，请稍后重试。"
+    }
 
     suspend fun collect(messages: List<ChatMessage>, config: AIConfig): RemoteStreamCollectionResult {
         return try {
@@ -35,7 +38,7 @@ internal class AIAssistantRemoteStreamCollector(
             throw e
         } catch (e: Exception) {
             recordUsageFailure()
-            RemoteStreamCollectionResult.Failure(e.message ?: "未知错误")
+            RemoteStreamCollectionResult.Failure(USER_SAFE_TRANSPORT_FAILURE)
         }
     }
 }

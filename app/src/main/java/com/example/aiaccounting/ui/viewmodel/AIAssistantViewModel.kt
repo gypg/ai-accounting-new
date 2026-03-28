@@ -11,6 +11,7 @@ import com.example.aiaccounting.ai.AIMessageParser
 import com.example.aiaccounting.ai.TransactionModificationHandler
 import com.example.aiaccounting.data.model.AIConfig
 import com.example.aiaccounting.data.model.Butler
+import com.example.aiaccounting.data.model.ButlerPersonaRegistry
 import com.example.aiaccounting.data.repository.AIConfigRepository
 import com.example.aiaccounting.data.repository.AIConversationRepository
 import com.example.aiaccounting.data.repository.AIUsageRepository
@@ -50,6 +51,13 @@ class AIAssistantViewModel @Inject constructor(
     private val aiLocalProcessor: AILocalProcessor,
     private val actionExecutor: AIAssistantActionExecutor
 ) : ViewModel() {
+
+    private companion object {
+        private const val USER_SAFE_PROCESSING_ERROR = "抱歉，处理你的请求时出现了一些问题，请稍后重试。"
+        private const val USER_SAFE_REMOTE_TRANSPORT_ERROR = "服务暂时不可用，请稍后重试。"
+        private const val USER_SAFE_UI_ERROR = "操作暂时不可用，请稍后重试。"
+        private const val USER_SAFE_IMAGE_PROCESSING_ERROR = "图片处理暂时失败，请稍后重试。"
+    }
 
     private val butlerCoordinator = AIAssistantButlerCoordinator(butlerRepository)
     private val configNetworkCoordinator = AIAssistantConfigNetworkCoordinator(
@@ -138,7 +146,7 @@ class AIAssistantViewModel @Inject constructor(
                         throw e
                     } catch (e: Exception) {
                         // 兜底：不阻塞启动流程
-                        _uiState.update { it.copy(error = e.message) }
+                        _uiState.update { it.copy(error = USER_SAFE_UI_ERROR) }
                     }
                 }
         }
@@ -221,8 +229,8 @@ class AIAssistantViewModel @Inject constructor(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                _uiState.update { it.copy(isLoading = false, error = e.message) }
-                val errorMessage = "抱歉，处理您的请求时出现了错误: ${e.message}"
+                _uiState.update { it.copy(isLoading = false, error = USER_SAFE_UI_ERROR) }
+                val errorMessage = USER_SAFE_PROCESSING_ERROR
                 conversationRepository.addAssistantMessage(errorMessage)
                 sessionId?.let {
                     chatSessionRepository.addMessage(it, com.example.aiaccounting.data.local.entity.MessageRole.ASSISTANT, errorMessage)
@@ -328,7 +336,7 @@ class AIAssistantViewModel @Inject constructor(
             config = currentAIConfig
         )) {
             is AIAssistantRemoteExecutionResult.Timeout -> "请求超时，请稍后重试。"
-            is AIAssistantRemoteExecutionResult.TransportFailure -> "处理请求时出错: ${result.message}"
+            is AIAssistantRemoteExecutionResult.TransportFailure -> USER_SAFE_REMOTE_TRANSPORT_ERROR
             is AIAssistantRemoteExecutionResult.IncompleteResponse -> "响应不完整，请稍后重试。"
             is AIAssistantRemoteExecutionResult.QueryBeforeExecutionRequested -> {
                 actionExecutor.executeQueryBeforeExecution(result.envelope)
@@ -375,19 +383,12 @@ class AIAssistantViewModel @Inject constructor(
                 clearPendingInteractionStates()
                 conversationRepository.clearAllConversations()
                 val currentButler = butlerCoordinator.resolveCurrentButler(_uiState.value.currentButler)
-                val welcomeMessage = when (currentButler.id) {
-                    "xiaocainiang" -> "主人~你好呀！🌸 小财娘在这里等着为您服务呢~\n有什么记账或理财的需求，随时告诉我哦~💕✨"
-                    "taotao" -> "主人～你好呀！✨ 桃桃在这里等着为你服务呢～\n有什么需要帮忙的，随时告诉桃桃哦～🌸💕"
-                    "guchen" -> "（懒洋洋地）啊...你来了...\n有什么事快说，说完我好继续睡觉...\n不过既然来了，你的财务就交给我吧。"
-                    "suqian" -> "（平静地看着你）...\n有事就说。\n你的财务，我会处理好的。"
-                    "yishuihan" -> "（温柔地微笑）你好呀～\n别紧张，有我在呢。\n有什么财务上的需要，随时告诉我。"
-                    else -> "你好！我是你的AI记账助手。\n有什么记账或理财的需求，随时告诉我。"
-                }
+                val welcomeMessage = ButlerPersonaRegistry.buildWelcomeReply(currentButler.id)
                 conversationRepository.addAssistantMessage(welcomeMessage)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                _uiState.update { it.copy(error = e.message) }
+                _uiState.update { it.copy(error = USER_SAFE_UI_ERROR) }
             }
         }
     }
@@ -413,7 +414,7 @@ class AIAssistantViewModel @Inject constructor(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                _uiState.update { it.copy(error = e.message) }
+                _uiState.update { it.copy(error = USER_SAFE_UI_ERROR) }
             }
         }
     }
@@ -432,14 +433,7 @@ class AIAssistantViewModel @Inject constructor(
                         clearPendingInteractionStates()
                         conversationRepository.clearAllConversations()
                         val currentButler = butlerCoordinator.resolveCurrentButler(_uiState.value.currentButler)
-                        val welcomeMessage = when (currentButler.id) {
-                            "xiaocainiang" -> "主人~你好呀！🌸 小财娘在这里等着为您服务呢~\n有什么记账或理财的需求，随时告诉我哦~💕✨"
-                            "taotao" -> "主人～你好呀！✨ 桃桃在这里等着为你服务呢～\n有什么需要帮忙的，随时告诉桃桃哦～🌸💕"
-                            "guchen" -> "（懒洋洋地）啊...你来了...\n有什么事快说，说完我好继续睡觉...\n不过既然来了，你的财务就交给我吧。"
-                            "suqian" -> "（平静地看着你）...\n有事就说。\n你的财务，我会处理好的。"
-                            "yishuihan" -> "（温柔地微笑）你好呀～\n别紧张，有我在呢。\n有什么财务上的需要，随时告诉我。"
-                            else -> "你好！我是你的AI记账助手。\n有什么记账或理财的需求，随时告诉我。"
-                        }
+                        val welcomeMessage = ButlerPersonaRegistry.buildWelcomeReply(currentButler.id)
                         conversationRepository.addAssistantMessage(welcomeMessage)
                     }
 
@@ -465,7 +459,7 @@ class AIAssistantViewModel @Inject constructor(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                _uiState.update { it.copy(error = e.message) }
+                _uiState.update { it.copy(error = USER_SAFE_UI_ERROR) }
             }
         }
     }
@@ -480,7 +474,7 @@ class AIAssistantViewModel @Inject constructor(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                _uiState.update { it.copy(error = e.message) }
+                _uiState.update { it.copy(error = USER_SAFE_UI_ERROR) }
             }
         }
     }
@@ -525,10 +519,8 @@ class AIAssistantViewModel @Inject constructor(
                 throw e
             } catch (e: Exception) {
                 aiUsageRepository.recordCall(success = false)
-                _uiState.update { it.copy(isLoading = false, error = e.message) }
-                conversationRepository.addAssistantMessage(
-                    "处理图片时出错: ${e.message}"
-                )
+                _uiState.update { it.copy(isLoading = false, error = USER_SAFE_UI_ERROR) }
+                conversationRepository.addAssistantMessage(USER_SAFE_IMAGE_PROCESSING_ERROR)
             }
         }
     }

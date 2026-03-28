@@ -213,9 +213,15 @@ object ButlerPersonaRegistry {
     ): String {
         val profile = getProfile(butlerId).conversation
         return when {
-            containsAny(lowerMessage, listOf("你是什么模型", "底层模型", "用的什么模型", "哪个模型")) -> profile.modelReply
-            containsAny(lowerMessage, listOf("你能做什么", "你会什么", "能帮我做什么", "可以帮我做什么")) -> profile.capabilityReply
-            containsAny(lowerMessage, listOf("你好", "您好", "hi", "hello")) -> {
+            containsAny(
+                lowerMessage,
+                listOf("你是什么模型", "什么模型", "底层模型", "底层是什么模型", "用的什么模型", "哪个模型", "啥模型")
+            ) -> profile.modelReply
+            containsAny(
+                lowerMessage,
+                listOf("你能做什么", "你会什么", "能帮我做什么", "可以帮我做什么", "你都能干嘛", "都能干嘛")
+            ) -> profile.capabilityReply
+            containsAny(lowerMessage, listOf("你好", "您好", "哈喽", "嗨", "hi", "hello")) -> {
                 profile.greetingReply(currentModeLabel(isNetworkAvailable, isAIConfigured))
             }
             containsAny(lowerMessage, listOf("谢谢", "感谢")) -> profile.thanksReply
@@ -244,6 +250,85 @@ object ButlerPersonaRegistry {
             com.example.aiaccounting.ai.IdentityConfirmationDetector.IdentityQueryType.IDENTITY_DOUBT -> profile.identityDoubtReply
             com.example.aiaccounting.ai.IdentityConfirmationDetector.IdentityQueryType.NAME_MENTION -> profile.nameMentionTemplate(mentionedName)
             com.example.aiaccounting.ai.IdentityConfirmationDetector.IdentityQueryType.NONE -> profile.fallbackReply
+        }
+    }
+
+    fun buildClarificationNoPendingReply(): String {
+        return "当前没有进行中的补充问题，我们继续聊你想做的事吧。"
+    }
+
+    fun buildClarificationCancellationReply(butlerId: String): String {
+        return when (butlerId) {
+            "xiaocainiang" -> "好的主人～已取消这次补充。🌸"
+            "taotao" -> "好的～这次先不继续啦！✨"
+            "guchen" -> "（懒洋洋地）...行，那就先这样。"
+            "suqian" -> "（平静地）...已取消。"
+            "yishuihan" -> "（微笑）好的，已为您取消这次补充。"
+            else -> "已取消这次补充。"
+        }
+    }
+
+    fun buildModificationNoPendingReply(): String {
+        return "当前没有进行中的确认操作，我们可以继续处理新的需求。"
+    }
+
+    fun buildModificationCancellationReply(butlerId: String): String {
+        return when (butlerId) {
+            "xiaocainiang" -> "好的主人～已取消修改。🌸"
+            "taotao" -> "好的～取消啦！✨"
+            "guchen" -> "（翻个身）...不改了？...我继续睡了..."
+            "suqian" -> "（平静地）...已取消。"
+            "yishuihan" -> "（微笑）好的，已为您取消。"
+            else -> "已取消修改。"
+        }
+    }
+
+    fun buildModificationNotFoundReply(): String {
+        return "抱歉，没有找到相关的交易记录。请提供更详细的信息，比如交易金额或时间。"
+    }
+
+    fun buildModificationCannotGenerateReply(): String {
+        return "抱歉，无法生成修改确认信息。"
+    }
+
+    fun buildModificationInstructionReply(): String {
+        return "请回复\"确认\"执行修改，或回复\"取消\"放弃修改。"
+    }
+
+    fun buildModificationFailureReply(): String {
+        return "修改没有成功，请稍后重试。"
+    }
+
+    fun buildModificationConfirmationReply(butlerId: String, baseMessage: String): String {
+        return when (butlerId) {
+            "xiaocainiang" -> "主人～$baseMessage 💕\n小财娘会帮您仔细核对的！"
+            "taotao" -> "主人～$baseMessage ✨\n桃桃会认真处理的！"
+            "guchen" -> "（懒洋洋地）...$baseMessage\n...改完让我继续睡..."
+            "suqian" -> "（平静地）...$baseMessage\n...确认后我会处理。"
+            "yishuihan" -> "（温柔地）$baseMessage\n请确认后我会为您更新。"
+            else -> baseMessage
+        }
+    }
+
+    fun buildModificationSuccessReply(butlerId: String, fallbackMessage: String): String {
+        return when (butlerId) {
+            "xiaocainiang" -> "主人～已经帮您修改好啦！🌸 记录已经更新，请查收～💕"
+            "taotao" -> "改好啦～✨ 已经帮您更新记录啦！(◕‿◕✿)"
+            "guchen" -> "（叹气）...改好了...哈啊...别吵我睡觉..."
+            "suqian" -> "（平静地）...已修改。"
+            "yishuihan" -> "（微笑）已经为您更新好了，请查看。"
+            else -> fallbackMessage
+        }
+    }
+
+    fun buildWelcomeReply(butlerId: String): String {
+        return when (butlerId) {
+            "xiaocainiang" -> "主人~你好呀！🌸 小财娘在这里等着为您服务呢~\n有什么记账或理财的需求，随时告诉我哦~💕✨"
+            "taotao" -> "主人～你好呀！✨ 桃桃在这里等着为你服务呢～\n有什么需要帮忙的，随时告诉桃桃哦～🌸💕"
+            "guchen" -> "（懒洋洋地）啊...你来了...\n有什么事快说，说完我好继续睡觉...\n不过既然来了，你的财务就交给我吧。"
+            "suqian" -> "（平静地看着你）...\n有事就说。\n你的财务，我会处理好的。"
+            "yishuihan" -> "（温柔地微笑）你好呀～\n别紧张，有我在呢。\n有什么财务上的需要，随时告诉我。"
+            else -> "你好！我是你的AI记账助手。\n有什么记账或理财的需求，随时告诉我。"
         }
     }
 }

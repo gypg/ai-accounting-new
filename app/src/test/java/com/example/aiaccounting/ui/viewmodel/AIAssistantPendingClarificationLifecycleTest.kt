@@ -73,7 +73,7 @@ class AIAssistantPendingClarificationLifecycleTest {
     fun continuePending_returnsFallbackFinish_whenNoPendingStateExists() {
         val result = lifecycle.continuePending("25元", "xiaocainiang")
 
-        assertEquals(ClarificationFlowResult.Finish("抱歉，没有待补充的信息。"), result)
+        assertEquals(ClarificationFlowResult.Finish("当前没有进行中的补充问题，我们继续聊你想做的事吧。"), result)
     }
 
     @Test
@@ -339,6 +339,153 @@ class AIAssistantPendingClarificationLifecycleTest {
         assertNotNull(lifecycle.currentState())
         lifecycle.clearAfterSuccessfulContinuation()
         assertNull(lifecycle.currentState())
+    }
+
+    @Test
+    fun continuePending_mergesOriginalMessage_whenUserProvidesCustomAccountName() {
+        lifecycle.seedForTest(
+            PendingClarificationState(
+                originalMessage = "帮我记一笔午饭 25 元 支出",
+                question = "这笔记到哪个账户呢？比如现金、微信、支付宝或银行卡。",
+                trigger = ClarificationTrigger.TRANSACTION_ACCOUNT
+            )
+        )
+
+        val result = lifecycle.continuePending("旅行卡", "xiaocainiang")
+
+        assertEquals(
+            ClarificationFlowResult.ContinueWithPayload(
+                ClarificationContinuationRequest(
+                    originalMessage = "帮我记一笔午饭 25 元 支出",
+                    resumedMessage = "帮我记一笔午饭 25 元 支出 旅行卡",
+                    trigger = ClarificationTrigger.TRANSACTION_ACCOUNT
+                )
+            ),
+            result
+        )
+    }
+
+    @Test
+    fun continuePending_mergesOriginalMessage_whenUserProvidesCustomCategoryName() {
+        lifecycle.seedForTest(
+            PendingClarificationState(
+                originalMessage = "帮我记一笔 25 元 支出 今天",
+                question = "这笔记到哪个分类呢？比如餐饮、交通或购物。",
+                trigger = ClarificationTrigger.TRANSACTION_CATEGORY
+            )
+        )
+
+        val result = lifecycle.continuePending("宠物用品", "xiaocainiang")
+
+        assertEquals(
+            ClarificationFlowResult.ContinueWithPayload(
+                ClarificationContinuationRequest(
+                    originalMessage = "帮我记一笔 25 元 支出 今天",
+                    resumedMessage = "帮我记一笔 25 元 支出 今天 宠物用品",
+                    trigger = ClarificationTrigger.TRANSACTION_CATEGORY
+                )
+            ),
+            result
+        )
+    }
+
+    @Test
+    fun continuePending_mergesOriginalMessage_whenUserProvidesCustomAccountNameWithoutKeyword() {
+        lifecycle.seedForTest(
+            PendingClarificationState(
+                originalMessage = "帮我记一笔午饭 25 元 支出",
+                question = "这笔记到哪个账户呢？比如现金、微信、支付宝或银行卡。",
+                trigger = ClarificationTrigger.TRANSACTION_ACCOUNT
+            )
+        )
+
+        val result = lifecycle.continuePending("旅游基金", "xiaocainiang")
+
+        assertEquals(
+            ClarificationFlowResult.ContinueWithPayload(
+                ClarificationContinuationRequest(
+                    originalMessage = "帮我记一笔午饭 25 元 支出",
+                    resumedMessage = "帮我记一笔午饭 25 元 支出 旅游基金",
+                    trigger = ClarificationTrigger.TRANSACTION_ACCOUNT
+                )
+            ),
+            result
+        )
+    }
+
+    @Test
+    fun continuePending_reasksQuestion_whenCategoryReplyLooksLikeAccount() {
+        lifecycle.seedForTest(
+            PendingClarificationState(
+                originalMessage = "帮我记一笔 25 元 支出 今天",
+                question = "这笔记到哪个分类呢？比如餐饮、交通或购物。",
+                trigger = ClarificationTrigger.TRANSACTION_CATEGORY
+            )
+        )
+
+        val result = lifecycle.continuePending("微信", "xiaocainiang")
+
+        assertEquals(
+            ClarificationFlowResult.RequestClarification(
+                pendingState = PendingClarificationState(
+                    originalMessage = "帮我记一笔 25 元 支出 今天",
+                    question = "这笔记到哪个分类呢？比如餐饮、交通或购物。",
+                    trigger = ClarificationTrigger.TRANSACTION_CATEGORY
+                ),
+                reply = "这笔记到哪个分类呢？比如餐饮、交通或购物。"
+            ),
+            result
+        )
+    }
+
+    @Test
+    fun continuePending_reasksQuestion_whenAccountReplyIsWeakAcknowledgement() {
+        lifecycle.seedForTest(
+            PendingClarificationState(
+                originalMessage = "帮我记一笔午饭 25 元 支出",
+                question = "这笔记到哪个账户呢？比如现金、微信、支付宝或银行卡。",
+                trigger = ClarificationTrigger.TRANSACTION_ACCOUNT
+            )
+        )
+
+        val result = lifecycle.continuePending("ok", "xiaocainiang")
+
+        assertEquals(
+            ClarificationFlowResult.RequestClarification(
+                pendingState = PendingClarificationState(
+                    originalMessage = "帮我记一笔午饭 25 元 支出",
+                    question = "这笔记到哪个账户呢？比如现金、微信、支付宝或银行卡。",
+                    trigger = ClarificationTrigger.TRANSACTION_ACCOUNT
+                ),
+                reply = "这笔记到哪个账户呢？比如现金、微信、支付宝或银行卡。"
+            ),
+            result
+        )
+    }
+
+    @Test
+    fun continuePending_reasksQuestion_whenAccountReplyIsWeakAcknowledgementWithPunctuation() {
+        lifecycle.seedForTest(
+            PendingClarificationState(
+                originalMessage = "帮我记一笔午饭 25 元 支出",
+                question = "这笔记到哪个账户呢？比如现金、微信、支付宝或银行卡。",
+                trigger = ClarificationTrigger.TRANSACTION_ACCOUNT
+            )
+        )
+
+        val result = lifecycle.continuePending("好的。", "xiaocainiang")
+
+        assertEquals(
+            ClarificationFlowResult.RequestClarification(
+                pendingState = PendingClarificationState(
+                    originalMessage = "帮我记一笔午饭 25 元 支出",
+                    question = "这笔记到哪个账户呢？比如现金、微信、支付宝或银行卡。",
+                    trigger = ClarificationTrigger.TRANSACTION_ACCOUNT
+                ),
+                reply = "这笔记到哪个账户呢？比如现金、微信、支付宝或银行卡。"
+            ),
+            result
+        )
     }
 
     @Test

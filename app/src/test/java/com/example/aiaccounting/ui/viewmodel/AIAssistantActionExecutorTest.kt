@@ -13,6 +13,7 @@ import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
 import kotlinx.coroutines.test.runTest
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -117,6 +118,29 @@ class AIAssistantActionExecutorTest {
     }
 
     @Test
+    fun executeAIActions_continuesBatch_whenFirstActionThrows_andReturnsPerItemFailure() = runTest {
+        coEvery { aiLocalProcessor.handleQueryCommand("accounts") } throws IllegalStateException("db boom")
+        coEvery { aiLocalProcessor.handleQueryCommand("categories") } returns "分类列表：餐饮"
+
+        val result = executor.executeAIActions(
+            """
+            {
+              "actions": [
+                {"action":"query","target":"accounts"},
+                {"action":"query","target":"categories"}
+              ]
+            }
+            """.trimIndent()
+        )
+
+        assertTrue(result.contains("1."))
+        assertTrue(result.contains("2."))
+        assertTrue(result.contains("失败") || result.contains("出错"))
+        assertTrue(!result.contains("db boom"))
+        assertTrue(result.contains("分类列表：餐饮"))
+    }
+
+    @Test
     fun executeAIActions_autoCreatesMissingExplicitAccount_andReportsItInUserResult() = runTest {
         coEvery { aiLocalProcessor.ensureBasicCategoriesExist() } returns Unit
         coEvery { accountRepository.getAllAccountsList() } returnsMany listOf(
@@ -218,7 +242,7 @@ class AIAssistantActionExecutorTest {
         )
 
         assertTrue(result.contains("ID=999"))
-        assertTrue(result.contains("未找到指定账户"))
+        assertTrue(result.contains("创建账户失败"))
     }
 
     @Test
@@ -236,7 +260,7 @@ class AIAssistantActionExecutorTest {
         )
 
         assertTrue(result.contains("ID=999"))
-        assertTrue(result.contains("未找到指定分类"))
+        assertTrue(result.contains("创建分类失败"))
     }
 
 
@@ -348,6 +372,18 @@ class AIAssistantActionExecutorTest {
         assertTrue(result.contains("最近交易：1笔"))
     }
 
+    @Test
+    fun executeAIActions_executesQueryActionAlias_fromRawActionPayload() = runTest {
+        coEvery { aiLocalProcessor.handleQueryCommand("accounts") } returns "账户列表：微信"
+
+        val result = executor.executeAIActions(
+            """
+            {"action":"query_accounts"}
+            """.trimIndent()
+        )
+
+        assertTrue(result.contains("账户列表：微信"))
+    }
 
     @Test
     fun executeAIActions_prefersTypedEntityReferences_whenRawNamesConflict() = runTest {
@@ -573,6 +609,51 @@ class AIAssistantActionExecutorTest {
         assertTrue(result.contains("自动创建账户") && result.contains("旅行卡"))
         assertTrue(result.contains("自动创建分类") && result.contains("夜宵"))
         assertTrue(result.contains("已记账"))
+    }
+
+    @Test
+    fun executeAIActions_keepsSingleRemoteTraceContext_forAutoCreatedEntitiesAndTransaction() = runTest {
+        coEvery { aiLocalProcessor.ensureBasicCategoriesExist() } returns Unit
+        coEvery { accountRepository.getAllAccountsList() } returnsMany listOf(
+            emptyList(),
+            listOf(Account(id = 21, name = "旅行卡", type = AccountType.BANK))
+        )
+        coEvery { categoryRepository.getAllCategoriesList() } returnsMany listOf(
+            emptyList(),
+            listOf(Category(id = 35, name = "夜宵", type = TransactionType.EXPENSE))
+        )
+
+        val executedOperations = mutableListOf<AIOperation>()
+        coEvery { aiOperationExecutor.executeOperation(capture(executedOperations)) } answers {
+            when (firstArg<AIOperation>()) {
+                is AIOperation.AddAccount -> AIOperationExecutor.AIOperationResult.Success("created")
+                is AIOperation.AddCategory -> AIOperationExecutor.AIOperationResult.Success("created")
+                is AIOperation.AddTransaction -> AIOperationExecutor.AIOperationResult.Success("ok")
+                else -> AIOperationExecutor.AIOperationResult.Success("ok")
+            }
+        }
+
+        executor.executeAIActions(
+            """
+            {"action":"add_transaction","amount":25,"type":"expense","account":"旅行卡","category":"夜宵","note":"加班餐"}
+            """.trimIndent()
+        )
+
+        val addAccount = executedOperations.filterIsInstance<AIOperation.AddAccount>().single()
+        val addCategory = executedOperations.filterIsInstance<AIOperation.AddCategory>().single()
+        val addTransaction = executedOperations.filterIsInstance<AIOperation.AddTransaction>().single()
+
+        assertEquals("AI_REMOTE", addAccount.traceContext.sourceType)
+        assertEquals("AI_REMOTE", addCategory.traceContext.sourceType)
+        assertEquals("AI_REMOTE", addTransaction.traceContext.sourceType)
+        assertEquals(
+            1,
+            setOf(
+                addAccount.traceContext.traceId,
+                addCategory.traceContext.traceId,
+                addTransaction.traceContext.traceId
+            ).size
+        )
     }
 
     @Test

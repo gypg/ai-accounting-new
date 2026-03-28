@@ -71,7 +71,9 @@ class AIAssistantRemoteStreamCollectorTest {
         val result = collector.collect(messages, config)
 
         assertTrue(result is RemoteStreamCollectionResult.Failure)
-        assertEquals("boom", (result as RemoteStreamCollectionResult.Failure).message)
+        val message = (result as RemoteStreamCollectionResult.Failure).message
+        assertEquals("服务暂时不可用，请稍后重试。", message)
+        assertTrue(!message.contains("boom"))
         coVerify(exactly = 1) { usageFailureRecorder() }
     }
 }

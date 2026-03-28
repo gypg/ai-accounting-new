@@ -53,7 +53,7 @@ class AIAssistantPendingModificationLifecycleTest {
     fun continuePending_returnsFallbackFinish_whenNoPendingStateExists() = runTest {
         val result = lifecycle.continuePending("确认", "xiaocainiang")
 
-        assertEquals(ModificationFlowResult.Finish("抱歉，没有待确认的操作。"), result)
+        assertEquals(ModificationFlowResult.Finish("当前没有进行中的确认操作，我们可以继续处理新的需求。"), result)
     }
 
     @Test
@@ -87,12 +87,12 @@ class AIAssistantPendingModificationLifecycleTest {
         lifecycle.seedForTest(pendingState())
         coEvery {
             modificationCoordinator.continueModification("确认", "xiaocainiang", any())
-        } returns ModificationFlowResult.Finish("修改失败：数据库忙，请稍后重试", shouldClearPending = false)
+        } returns ModificationFlowResult.Finish("修改没有成功，请稍后重试。", shouldClearPending = false)
 
         val result = lifecycle.continuePending("确认", "xiaocainiang")
 
         assertEquals(
-            ModificationFlowResult.Finish("修改失败：数据库忙，请稍后重试", shouldClearPending = false),
+            ModificationFlowResult.Finish("修改没有成功，请稍后重试。", shouldClearPending = false),
             result
         )
         assertNotNull(lifecycle.currentState())

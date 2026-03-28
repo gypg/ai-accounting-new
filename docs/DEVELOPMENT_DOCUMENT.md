@@ -43,6 +43,214 @@ AI记账是一款面向中国大陆个人用户的智能记账 Android 应用。
 
 ### 2.2 AI 助手文本消息主链路最新状态
 
+#### 2026-03-28 模块 F 完成：人格统一收口（聊天/澄清/确认/欢迎文案单一来源）
+- 已完成模块 F 收口，目标是在不改变执行链语义的前提下，把用户可见人格文案统一收口到 `ButlerPersonaRegistry`，避免多处硬编码导致的人格漂移。
+- 本轮改动：
+  - `data/model/Butler.kt`
+    - 扩展 `ButlerPersonaRegistry`，新增统一文案入口：
+      - 澄清无 pending / 取消文案；
+      - 修改确认无 pending / 取消 / 失败 / 指令 / 找不到记录 / 无法生成确认文案；
+      - 修改确认与修改成功人格包装文案；
+      - 新会话欢迎语文案。
+    - `buildGeneralConversationReply` 补齐问候/能力/模型变体关键字（含 `哈喽/嗨/啥模型/你都能干嘛`），保持历史命中行为不回退。
+  - `ai/AIReasoningEngine.kt`
+    - 普通聊天回复改为统一走 `ButlerPersonaRegistry.buildGeneralConversationReply(...)`；
+    - `ReasoningContext` 新增 `isNetworkAvailable/isAIConfigured`，并在聊天回复中使用真实模式标签；
+    - 修复 mixed-intent 场景：当动作列表中含 `RequestClarification` 时，会保留澄清前的人格 `GenerateResponse`（如身份确认）再输出澄清问题，不再被直接吞掉。
+  - `ui/viewmodel/AIAssistantPendingClarificationLifecycle.kt`
+    - 无 pending 与取消文案改为统一从 `ButlerPersonaRegistry` 获取；
+    - 自定义账户/分类实体回答判定收紧：不再用“任意字母数字”直接通过，改为更具体的实体名形态判断，降低把“好的呢/行呀”等口语误当实体并自动补建脏数据的风险。
+  - `ui/viewmodel/AIAssistantPendingModificationLifecycle.kt`
+    - 无 pending 确认文案改为统一从 `ButlerPersonaRegistry` 获取。
+  - `ui/viewmodel/AIAssistantModificationCoordinator.kt`
+    - 找不到记录、无法生成确认、取消、失败、确认提示等用户文案统一走 `ButlerPersonaRegistry`。
+  - `ai/TransactionModificationHandler.kt`
+    - `generatePersonalityConfirmationMessage` / `generatePersonalitySuccessMessage` 改为委托 `ButlerPersonaRegistry`，消除重复硬编码。
+  - `ui/viewmodel/AIAssistantViewModel.kt`
+    - `createNewSession` 与 `deleteSession` 两处欢迎语改为统一走 `ButlerPersonaRegistry.buildWelcomeReply(...)`，去除重复分支。
+  - `ui/viewmodel/AIAssistantMessageExecutionCoordinator.kt`
+    - 调用推理时注入 `ReasoningContext` 的 `isNetworkAvailable/isAIConfigured`，确保人格问候中的模式描述与实际状态一致。
+- 本轮验证：
+  - 定向回归：
+    - `./gradlew :app:testDebugUnitTest --tests "com.example.aiaccounting.ai.AIReasoningEngineTest" --tests "com.example.aiaccounting.ai.AILocalProcessorTest" --tests "com.example.aiaccounting.ui.viewmodel.AIAssistantPendingClarificationLifecycleTest" --tests "com.example.aiaccounting.ui.viewmodel.AIAssistantPendingModificationLifecycleTest" --tests "com.example.aiaccounting.ui.viewmodel.AIAssistantMessageExecutionCoordinatorTest"` ✅
+  - 全量单测：
+    - `./gradlew :app:testDebugUnitTest` ✅
+  - 代码审查：
+    - 初轮 review 提出的 2 个 HIGH（mixed-intent 文案吞没、实体判定过宽）与 1 个 MEDIUM（模式标签硬编码）均已修复；最终 review 结论：无 CRITICAL/HIGH/MEDIUM。✅
+- 当前状态：模块 F 已完成收口；人格文案来源已统一，聊天/澄清/确认/欢迎语在本地链路保持风格一致，同时执行语义与阶段编排未回退。
+
+#### 2026-03-28 模块 E 完成：对话闭环产品化收口（澄清/确认连续性 + 文案脱敏）
+- 已完成模块 E 收口，目标是把“澄清 → 继续执行 / 取消”“确认 → 执行 / 重试 / 取消”的对话闭环做成用户可连续操作的产品路径，同时消除会话层用户可见 raw 错误文本。
+- 本轮改动：
+  - `AIAssistantPendingClarificationLifecycle`
+    - 无 pending 澄清时文案收口为自然引导：`当前没有进行中的补充问题，我们继续聊你想做的事吧。`
+    - 澄清门控扩展为“固定关键词 + 自定义实体”并存：支持自定义账户/分类名继续续执行，不再仅限内置词表。
+    - 新增弱确认词过滤（含标点归一化）：`ok / 好的。 / yes!` 等不会误当作账户/分类实体通过。
+    - 分类澄清时显式排除账户类回答（如“微信”），避免分类缺口误通过。
+  - `AIAssistantPendingModificationLifecycle`
+    - 无 pending 确认文案收口：`当前没有进行中的确认操作，我们可以继续处理新的需求。`
+  - `AIAssistantModificationCoordinator`
+    - 修改/删除失败文案统一收口：`修改没有成功，请稍后重试。`，不再透出底层失败细节。
+  - `AIAssistantRemoteStreamCollector`
+    - 远程传输异常统一收口：`服务暂时不可用，请稍后重试。`，避免 `boom`/栈信息泄漏。
+  - `AIAssistantViewModel`
+    - 会话主链与图片链异常统一使用安全 UI 错误提示（`USER_SAFE_UI_ERROR`）；
+    - 用户消息流中的失败回复分别收口到 `USER_SAFE_PROCESSING_ERROR` / `USER_SAFE_IMAGE_PROCESSING_ERROR`；
+    - 移除用户可见路径中 `${e.message}` 直出。
+  - `AIReasoningEngine`
+    - 分类管理（创建分类/子分类）失败文案收口为用户安全提示，不拼接 `${result.error}`；
+    - 转账目标账户推断去掉短长度限制，降低“已给目标账户但被误判缺失”的失败概率。
+- 本轮新增/更新回归测试：
+  - `AIAssistantPendingClarificationLifecycleTest`
+    - 覆盖无 pending 新文案；
+    - 覆盖自定义账户/分类可继续；
+    - 覆盖弱确认词（含标点）会重问；
+    - 覆盖分类澄清中账户词会重问。
+  - `AIAssistantPendingModificationLifecycleTest`
+    - 覆盖无 pending 新文案与失败文案收口。
+  - `AIAssistantRemoteExecutionHandlerTest` / `AIAssistantRemoteStreamCollectorTest`
+    - 覆盖传输异常统一安全文案且不泄漏原始异常。
+  - `AIAssistantMessageExecutionCoordinatorTest`
+    - 覆盖澄清结束态保持 `Reply` stage 语义。
+- 本轮验证：
+  - 定向回归：
+    - `./gradlew :app:testDebugUnitTest --tests "com.example.aiaccounting.ui.viewmodel.AIAssistantRemoteExecutionHandlerTest" --tests "com.example.aiaccounting.ui.viewmodel.AIAssistantRemoteStreamCollectorTest" --tests "com.example.aiaccounting.ui.viewmodel.AIAssistantPendingClarificationLifecycleTest" --tests "com.example.aiaccounting.ui.viewmodel.AIAssistantPendingModificationLifecycleTest" --tests "com.example.aiaccounting.ui.viewmodel.AIAssistantMessageExecutionCoordinatorTest"` ✅
+    - `./gradlew :app:testDebugUnitTest --tests "com.example.aiaccounting.ui.viewmodel.AIAssistantPendingClarificationLifecycleTest" --tests "com.example.aiaccounting.ui.viewmodel.AIAssistantPendingInteractionLifecycleTest" --tests "com.example.aiaccounting.ui.viewmodel.AIAssistantMessageExecutionCoordinatorTest"` ✅
+  - 全量单测：
+    - `./gradlew :app:testDebugUnitTest` ✅
+  - 代码审查：
+    - 经过多轮 code-review 修复后，模块 E 范围最终结论：无 CRITICAL/HIGH，ready to merge ✅。
+- 当前状态：模块 E 已完成收口；对话闭环在“可继续、可取消、可重试、错误可读且不泄漏”方面已稳定。
+
+#### 2026-03-27 模块 D 完成：AI 留痕统一与错误脱敏收口
+- 已完成模块 D 收口，目标是把本地与远程执行链中“自动补建实体 + 最终交易入账”的 trace 语义彻底统一，并补齐用户可见错误脱敏，避免底层异常文本泄漏到会话回复。
+- 本轮改动：
+  - `AIAssistantActionExecutor`
+    - 统一 `AITraceContext(sourceType = "AI_REMOTE")` 在单次动作内贯穿解析与执行：自动补建账户/分类、转账目标账户补建、最终 `AddTransaction` 共享同一 `traceId`。
+    - `executeSingleAction()` 与 `executeQueryBeforeExecutionAction()` 已消除“同一动作内重复创建 traceContext”分叉，保证 query-before-execution 非交易动作也复用同一上下文。
+    - 新增执行层用户安全错误常量：`USER_SAFE_EXECUTION_ERROR / USER_SAFE_ACCOUNT_CREATE_ERROR / USER_SAFE_CATEGORY_CREATE_ERROR / USER_SAFE_ADD_TRANSACTION_ERROR`。
+    - 顶层 try-catch、批量动作异常兜底、创建账户/分类失败、记账/转账写入失败均改为用户可见脱敏文案；底层错误细节仅写日志。
+    - 实体解析失败反馈保持必要业务可操作信息（如请求实体标签 `ID=...`），同时移除原始底层错误拼接，避免泄漏内部实现细节。
+  - `AIReasoningEngine`
+    - 本地 `executeRecordTransaction()` 新增统一 `AITraceContext(sourceType = "AI_LOCAL")`，并传递到显式账户补建、分类补建、转账目标账户补建以及最终交易写入，确保本地链路 trace 连续性。
+  - `AILocalProcessor`
+    - `ensureBasicCategoriesExist()` 新增 `traceContext` 参数，基础分类自动补建可复用调用方上下文。
+    - 本地交易主链 `handleTransactionCommand()` 在“补建账户/分类 + 最终入账”中共享同一 `traceContext`。
+    - 本地查询/账户管理/分类管理/导出及交易失败路径已统一用户可见脱敏文案（`USER_SAFE_*`），底层错误仅日志保留。
+- 本轮新增/更新回归测试：
+  - `AIAssistantActionExecutorTest`
+    - 新增 `executeAIActions_keepsSingleRemoteTraceContext_forAutoCreatedEntitiesAndTransaction`，验证远程自动补建账户/分类与最终入账共享同一 `traceId` 且 `sourceType=AI_REMOTE`。
+    - 更新批量异常用例，断言不再泄漏 `db boom` 等内部异常文本。
+    - 适配显式 ID 缺失场景断言到脱敏后文案（保留可操作实体标识）。
+  - `AIReasoningEngineTest`
+    - 新增 `executeActions_keepsSingleLocalTraceContext_forAutoCreatedEntitiesAndTransaction`，验证本地推理链自动补建与入账共享同一 `traceId` 且 `sourceType=AI_LOCAL`。
+  - `AILocalProcessorTest`
+    - 新增 `processMessage_keepsSingleLocalTraceContext_forAutoCreatedEntitiesAndTransaction`，验证本地处理器补建与入账 trace 一致性。
+    - 新增 `handleQueryCommand_returnsSanitizedFailure_whenTransactionsQueryFails`，验证本地查询失败文案脱敏且不回传内部错误。
+- 本轮验证：
+  - 定向回归：
+    - `./gradlew :app:testDebugUnitTest --tests "com.example.aiaccounting.ui.viewmodel.AIAssistantActionExecutorTest" --tests "com.example.aiaccounting.ai.AIReasoningEngineTest" --tests "com.example.aiaccounting.ai.AILocalProcessorTest" --tests "com.example.aiaccounting.ui.viewmodel.AIAssistantRemoteResponseInterpreterTest" --tests "com.example.aiaccounting.ui.viewmodel.AIAssistantMessageExecutionCoordinatorTest" --tests "com.example.aiaccounting.ui.viewmodel.AIAssistantRemoteExecutionHandlerTest" --tests "com.example.aiaccounting.ui.viewmodel.TransactionViewModelTest" --tests "com.example.aiaccounting.ui.viewmodel.TransactionListViewModelTest"` ✅
+  - 全量单测：
+    - `./gradlew :app:testDebugUnitTest` ✅
+  - 代码审查：
+    - 经多轮 code-review 跟进，已修复 CRITICAL/HIGH 风险项，最终结论为无 CRITICAL/HIGH，ready to merge。
+- 当前状态：模块 D 已完成收口；AI 留痕在本地/远程补建-执行链已统一 trace 语义，且用户可见错误反馈已安全化。
+
+#### 2026-03-27 模块 C 完成：执行编排显式化与批量失败隔离收口
+- 已完成模块 C 首轮收口，目标是把本地推理执行链的“查实体/补实体/执行”结果表达与异常处理显式化，确保批量动作在单条失败时仍可继续，并避免 clarification 问题被批量汇总文案污染。
+- 本轮改动：
+  - `AIReasoningEngine.executeActions`
+    - 新增 clarification 优先短路：当 actions 中包含 `RequestClarification` 时，直接返回澄清问题，不再拼接其他动作输出。
+    - 非澄清场景下，多动作统一按编号输出（`1. ... / 2. ...`），单动作保持原样返回，兼容既有调用方文案预期。
+    - 新增逐条安全执行封装；`CancellationException` 继续透传，其它异常降级为单条失败，不中断整批。
+  - `AIReasoningEngine` 失败反馈产品化
+    - 新增统一错误文案收口（记账/查询/分析）；对用户仅返回友好提示，不回传原始底层异常。
+    - 原始错误细节改为内部日志记录，减少实现细节外泄风险。
+- 本轮新增/更新回归测试：
+  - `AIReasoningEngineTest`
+    - 覆盖批量动作单条失败时的编号输出与继续执行；
+    - 覆盖存在 clarification 时仅返回澄清问题且不触发其它副作用；
+    - 覆盖 `CancellationException` 必须透传；
+    - 覆盖失败场景不泄露原始异常文本。
+- 本轮验证：
+  - 定向回归：
+    - `./gradlew :app:testDebugUnitTest --tests "com.example.aiaccounting.ai.AIReasoningEngineTest" --tests "com.example.aiaccounting.ai.AILocalProcessorTest" --tests "com.example.aiaccounting.ui.viewmodel.AIAssistantActionExecutorTest" --tests "com.example.aiaccounting.ui.viewmodel.AIAssistantRemoteResponseInterpreterTest" --tests "com.example.aiaccounting.ui.viewmodel.AIAssistantMessageExecutionCoordinatorTest" --tests "com.example.aiaccounting.ui.viewmodel.AIAssistantRemoteExecutionHandlerTest"` ✅
+  - 全量单测：
+    - `./gradlew :app:testDebugUnitTest` ✅
+  - 代码审查：
+    - 已完成两轮 code-review，修复 clarification 文案污染、错误细节泄露与取消异常契约测试缺口。
+- 当前状态：模块 C 已完成首轮收口，执行编排结果在“澄清优先、批量容错、失败文案安全性”三方面已稳定；下一模块进入 trace 与对话产品化层面的持续收口。
+
+#### 2026-03-27 模块 B 完成：工具语义统一首轮收口（prompt/interpreter/executor）
+- 已完成模块 B 的首轮收口，目标是把“支持哪些工具动作、每个动作怎么表达、解释器如何归一、执行器如何落地”统一为同一语义合同，降低本地/远程分叉与历史 payload 漂移。
+- 本轮改动：
+  - `AIAssistantPromptBuilder`
+    - 将工具集合显式收口为：`query_accounts` / `query_categories` / `query_transactions` / `create_account` / `create_category` / `add_transaction`。
+    - 输出示例统一到结构化动作格式：
+      - 查询动作显式 `action + target`；
+      - 交易动作统一 `add_transaction + transactionType + accountRef/categoryRef(+transferAccountRef)`；
+      - 保持 `reply` 为用户可见自然语言总结。
+  - `AIAssistantRemoteResponseInterpreter`
+    - `actionTypeRegex` 扩展为同时识别 `type` 与 `action` 字段中的工具名；
+    - `normalizeActionName()` 对 `query_accounts/query_categories/query_transactions` 在 action/type 两通道统一归一为 `query`；
+    - `parseTypedAction()` 对 query target 归一时同时读取 action/type alias；
+    - 兼容 legacy create_account 字段：`accountName`、`initialBalance`；
+    - 兼容 legacy transfer 字段：`fromAccountId`、`toAccountId` -> typed `accountRef/transferAccountRef`。
+  - `AILocalProcessor`
+    - `handleQueryCommand("transactions")` 新增真实查询分支，调用 `AIOperation.QueryData("transactions", 10)` 返回最近交易，修复工具合同已声明但本地执行落空的问题。
+- 本轮新增/更新回归测试：
+  - `AIAssistantRemoteResponseInterpreterTest`
+    - 新增 `action=query_accounts` alias 归一测试；
+    - 新增 legacy `create_account(type + accountName + initialBalance)` 解析测试；
+    - 新增 legacy `transfer(type + fromAccountId + toAccountId)` 解析测试。
+  - `AIAssistantActionExecutorTest`
+    - 新增 `action=query_accounts` 端到端执行测试。
+  - `AILocalProcessorTest`
+    - 新增 `transactions` 查询分支测试，断言返回最近交易结果。
+- 本轮验证：
+  - 定向回归：
+    - `./gradlew :app:testDebugUnitTest --tests "com.example.aiaccounting.ui.viewmodel.AIAssistantRemoteResponseInterpreterTest" --tests "com.example.aiaccounting.ui.viewmodel.AIAssistantActionExecutorTest" --tests "com.example.aiaccounting.ai.AILocalProcessorTest"` ✅
+  - 全量单测：
+    - `./gradlew :app:testDebugUnitTest` ✅
+  - 代码审查：
+    - 已修复 review 指出的 HIGH 问题（`query_transactions` 语义合同与实际执行链不一致）。
+- 当前状态：模块 B 已完成首轮收口；工具语义在 prompt/interpreter/executor 三层基本同名同义，且历史常见 payload 形态兼容已补齐。下一模块进入编排层显式化（查实体 -> 补实体 -> 执行）与权限语义进一步统一。
+
+#### 2026-03-27 模块 A 完成：P0 聊天与执行稳定性首轮收口
+- 已完成模块 A 的首轮收口，覆盖当前主线 P0 的四个核心点：
+  1) 普通聊天 fallback 收口（聊天变体扩展，减少落回通用兜底）；
+  2) 远程脏回复展示清洗（避免 JSON 垃圾直接进入 UI）；
+  3) 多动作执行稳定性收口（批量逐条容错，不因单条异常中断整批）；
+  4) 本地显式缺失实体自动补建收口（显式账户缺失、转账目标账户缺失可自动补建并反馈）。
+- 本轮改动：
+  - `AIReasoningEngine`
+    - 扩展聊天变体识别：新增“哈喽/嗨/啥模型/你都能干嘛”等命中，保持人格化回复主路径。
+    - `executeRecordTransaction()` 新增显式 `accountHint` 缺失时优先自动补建指定账户。
+    - `TRANSFER` 本地链路新增目标账户缺失自动补建，并在成功反馈中带出自动补建实体（账户/目标账户/分类）。
+  - `AIAssistantRemoteResponseInterpreter`
+    - `extractDisplayReply()` 增加 fenced JSON 与内联 JSON 片段剥离。
+    - 清洗后若为空且原文疑似结构化垃圾（含 code fence 或 action/json 标记），不再回退原始脏文本，避免 UI 泄漏污染内容。
+  - `AIAssistantActionExecutor`
+    - 批量执行入口改为逐条 `executeActionSafely` 容错。
+    - 单条动作抛异常时返回该条失败信息并继续执行后续动作，保留逐条编号可核对结果。
+- 本轮新增/更新回归测试：
+  - `AIAssistantRemoteResponseInterpreterTest`
+    - 覆盖 malformed JSON 垃圾在 fallback 展示路径不会泄漏；
+    - 覆盖非记账普通回复中的 JSON 片段会被剥离。
+  - `AIAssistantActionExecutorTest`
+    - 覆盖批量动作首条抛异常时，第二条仍继续执行并返回逐条结果。
+  - `AIReasoningEngineTest`
+    - 覆盖聊天变体（能力询问/模型询问/问候）不回落通用 fallback；
+    - 覆盖本地显式缺失账户与转账目标账户会自动补建并反馈。
+- 本轮验证：
+  - 定向回归：
+    - `./gradlew :app:testDebugUnitTest --tests "com.example.aiaccounting.ui.viewmodel.AIAssistantRemoteResponseInterpreterTest" --tests "com.example.aiaccounting.ui.viewmodel.AIAssistantActionExecutorTest" --tests "com.example.aiaccounting.ai.AIReasoningEngineTest"` ✅
+  - 全量单测：
+    - `./gradlew :app:testDebugUnitTest` ✅
+  - 代码审查：
+    - 已修复 code-review 指出的高优先级问题（展示清洗后为空时回退原脏文本）。
+- 当前状态：模块 A 已完成首轮收口，聊天自然度、远程文本干净度、批量执行稳定性与本地补建体验已同步提升；下一模块进入工具语义统一（模块 B）。
+
 #### 2026-03-27 模块 6 第一段收口：Query-Before-Execute 回归加固
 - 本轮在模块 6 第一段（先查再执行）已接通的链路基础上，完成一次中断后续的 TDD 收口，重点是修复两类高风险回归：
   1) 本地简写记账意图识别回退（`记50午饭` / `帮我记50午饭`）；

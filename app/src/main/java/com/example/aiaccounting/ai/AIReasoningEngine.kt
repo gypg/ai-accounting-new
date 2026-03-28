@@ -1,12 +1,15 @@
 package com.example.aiaccounting.ai
 
+import android.util.Log
 import com.example.aiaccounting.data.local.entity.Account
 import com.example.aiaccounting.data.local.entity.AccountType
 import com.example.aiaccounting.data.local.entity.TransactionType
+import com.example.aiaccounting.data.model.ButlerPersonaRegistry
 import com.example.aiaccounting.data.repository.AccountRepository
 import com.example.aiaccounting.data.local.entity.Category
 import com.example.aiaccounting.data.repository.CategoryRepository
 import com.example.aiaccounting.data.repository.TransactionRepository
+import kotlinx.coroutines.CancellationException
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -61,7 +64,9 @@ class AIReasoningEngine @Inject constructor(
         val conversationHistory: List<String> = emptyList(),
         val currentAccounts: List<com.example.aiaccounting.data.local.entity.Account> = emptyList(),
         val currentCategories: List<com.example.aiaccounting.data.local.entity.Category> = emptyList(),
-        val lastQueryTime: Long? = null
+        val lastQueryTime: Long? = null,
+        val isNetworkAvailable: Boolean = false,
+        val isAIConfigured: Boolean = false
     )
 
     /**
@@ -84,6 +89,7 @@ class AIReasoningEngine @Inject constructor(
             val type: TransactionType,
             val categoryHint: String?,
             val accountHint: String?,
+            val targetAccountHint: String? = null,
             val note: String,
             val date: Long
         ) : AIAction()
@@ -168,7 +174,7 @@ class AIReasoningEngine @Inject constructor(
             return if (hasFunctionRequest) {
                 // 混合意图：先确认身份，然后处理功能请求
                 val functionPart = identityConfirmationDetector.extractFunctionPart(context.userMessage)
-                val functionActions = processFunctionRequest(functionPart, context)
+                val functionActions = processFunctionRequest(functionPart, context, currentButlerId)
                 
                 ReasoningResult(
                     intent = UserIntent.IDENTITY_CONFIRMATION,
@@ -235,7 +241,7 @@ class AIReasoningEngine @Inject constructor(
             UserIntent.RECORD_TRANSACTION -> generateTransactionActions(context, intentAnalysis, "unified")
             UserIntent.MANAGE_ACCOUNT -> generateAccountManagementActions(context, intentAnalysis)
             UserIntent.MANAGE_CATEGORY -> generateCategoryManagementActions(context, intentAnalysis)
-            UserIntent.GENERAL_CONVERSATION -> generateConversationActions(context, intentAnalysis)
+            UserIntent.GENERAL_CONVERSATION -> generateConversationActions(context, intentAnalysis, currentButlerId)
             UserIntent.UNKNOWN -> listOf(AIAction.RequestClarification("抱歉，我不太理解您的意思。您可以尝试说：\n• 查看账户余额\n• 分析本月支出\n• 记一笔100元的餐饮消费"))
             else -> listOf(AIAction.RequestClarification("抱歉，我不太理解您的意思。"))
         }
@@ -255,8 +261,9 @@ class AIReasoningEngine @Inject constructor(
      * 【权限统一】所有人格拥有完全相同的操作权限
      */
     private suspend fun processFunctionRequest(
-        message: String, 
-        context: ReasoningContext
+        message: String,
+        context: ReasoningContext,
+        currentButlerId: String
     ): List<AIAction> {
         val intentAnalysis = analyzeIntent(message, context.conversationHistory)
         
@@ -267,6 +274,7 @@ class AIReasoningEngine @Inject constructor(
             UserIntent.RECORD_TRANSACTION -> generateTransactionActions(context, intentAnalysis, "unified")
             UserIntent.MANAGE_ACCOUNT -> generateAccountManagementActions(context, intentAnalysis)
             UserIntent.MANAGE_CATEGORY -> generateCategoryManagementActions(context, intentAnalysis)
+            UserIntent.GENERAL_CONVERSATION -> generateConversationActions(context, intentAnalysis, currentButlerId)
             else -> emptyList()
         }
     }
@@ -530,7 +538,13 @@ class AIReasoningEngine @Inject constructor(
         
         // 智能推断账户
         val accountHint = inferAccount(message)
-        
+
+        // 如果是转账，推断目标账户
+        val targetAccountHint: String? = if (type == TransactionType.TRANSFER) {
+            inferTransferTargetAccount(message, accountHint)
+        } else {
+            null
+        }
         // 提取备注
         val note = messageParser.extractNote(message) ?: "AI记账"
         
@@ -548,6 +562,7 @@ class AIReasoningEngine @Inject constructor(
             type = type,
             categoryHint = categoryHint,
             accountHint = accountHint,
+            targetAccountHint = targetAccountHint,
             note = note,
             date = date
         ))
@@ -725,7 +740,12 @@ class AIReasoningEngine @Inject constructor(
                 val result = aiOperationExecutor.executeOperation(op)
                 val responseMsg = when (result) {
                     is AIOperationExecutor.AIOperationResult.Success -> result.message
-                    is AIOperationExecutor.AIOperationResult.Error -> "创建子分类失败: ${result.error}"
+                    is AIOperationExecutor.AIOperationResult.Error -> {
+                        runCatching {
+                            Log.e("AIReasoningEngine", "创建子分类失败: parent=$parentName, child=$childName, error=${result.error}")
+                        }
+                        "创建子分类失败，请稍后重试。"
+                    }
                 }
                 return listOf(AIAction.GenerateResponse(responseMsg))
             } else {
@@ -741,7 +761,12 @@ class AIReasoningEngine @Inject constructor(
             val result = aiOperationExecutor.executeOperation(op)
             val responseMsg = when (result) {
                 is AIOperationExecutor.AIOperationResult.Success -> result.message
-                is AIOperationExecutor.AIOperationResult.Error -> "创建分类失败: ${result.error}"
+                is AIOperationExecutor.AIOperationResult.Error -> {
+                    runCatching {
+                        Log.e("AIReasoningEngine", "创建分类失败: name=$categoryName, error=${result.error}")
+                    }
+                    "创建分类失败，请稍后重试。"
+                }
             }
             return listOf(AIAction.GenerateResponse(responseMsg))
         }
@@ -757,38 +782,16 @@ class AIReasoningEngine @Inject constructor(
      */
     private fun generateConversationActions(
         context: ReasoningContext,
-        intentAnalysis: IntentAnalysis
+        intentAnalysis: IntentAnalysis,
+        currentButlerId: String
     ): List<AIAction> {
-        val message = context.userMessage.lowercase()
-
-        val response = when {
-            message.contains("你是什么模型") ||
-                message.contains("什么模型") ||
-                message.contains("底层模型") ||
-                message.contains("底层是什么模型") ||
-                message.contains("用的什么模型") ||
-                message.contains("哪个模型") -> {
-                "我是你的 AI 管家助手，会按当前管家的人设陪你聊天，也能帮你记账、查账和整理账本。关于底层模型这类实现细节，我更想先把眼前这件事替你办好。"
-            }
-            message.contains("你能做什么") ||
-                message.contains("你会什么") ||
-                message.contains("能帮我做什么") ||
-                message.contains("可以帮我做什么") -> {
-                "我是你的 AI 管家助手，可以陪你聊天，也能直接帮你记账、查账、看交易记录、看账户资产，还能做一些简单分析。你直接说需求，我来接住。"
-            }
-            message.contains("你好") || message.contains("您好") || message.contains("hi") || message.contains("hello") -> {
-                "你好呀，我在这儿。除了陪你聊聊，我也可以直接帮你记账、查账户余额、看交易记录，或者一起整理最近的收支。"
-            }
-            message.contains("谢谢") || message.contains("感谢") -> {
-                "不客气，我会一直在。你想继续聊，还是顺手处理一笔账，都可以。"
-            }
-            message.contains("再见") || message.contains("拜拜") -> {
-                "好呀，先陪你到这里。下次想聊天、记账或查账，直接叫我就行。"
-            }
-            else -> {
-                "我在听。你可以直接跟我聊天，也可以让我帮你记账、查账、看分析；按你现在想说的继续就好。"
-            }
-        }
+        val response = ButlerPersonaRegistry.buildGeneralConversationReply(
+            butlerId = currentButlerId,
+            lowerMessage = context.userMessage.lowercase(),
+            isNetworkAvailable = context.isNetworkAvailable,
+            isAIConfigured = context.isAIConfigured,
+            containsAny = { text, keywords -> keywords.any { text.contains(it) } }
+        )
 
         return listOf(AIAction.GenerateResponse(response))
     }
@@ -797,28 +800,91 @@ class AIReasoningEngine @Inject constructor(
      * 执行动作序列
      */
     suspend fun executeActions(actions: List<AIAction>): String {
-        val results = mutableListOf<String>()
-        
-        for (action in actions) {
-            val result = when (action) {
+        val clarificationIndex = actions.indexOfFirst { it is AIAction.RequestClarification }
+        if (clarificationIndex >= 0) {
+            val clarificationQuestion = (actions[clarificationIndex] as AIAction.RequestClarification).question
+            val preClarificationReplies = actions
+                .take(clarificationIndex)
+                .mapNotNull { action ->
+                    (action as? AIAction.GenerateResponse)
+                        ?.responseContent
+                        ?.trim()
+                        ?.takeIf { it.isNotBlank() }
+                }
+            return if (preClarificationReplies.isEmpty()) {
+                clarificationQuestion
+            } else {
+                buildString {
+                    append(preClarificationReplies.joinToString("\n\n"))
+                    append("\n\n")
+                    append(clarificationQuestion)
+                }
+            }
+        }
+
+        val results = actions.map { action ->
+            executeActionSafely(action)
+        }
+
+        if (results.isEmpty()) {
+            return "操作已完成"
+        }
+        if (results.size == 1) {
+            return results.first()
+        }
+        return buildString {
+            append("已完成以下操作：\n")
+            results.forEachIndexed { index, result ->
+                append(formatIndexedResult(index + 1, result))
+                append("\n")
+            }
+        }
+    }
+
+    private suspend fun executeActionSafely(action: AIAction): String {
+        return try {
+            when (action) {
                 is AIAction.RecordTransaction -> executeRecordTransaction(action)
                 is AIAction.QueryInformation -> executeQueryInformation(action)
                 is AIAction.AnalyzeData -> executeAnalyzeData(action)
                 is AIAction.GenerateResponse -> action.responseContent
                 is AIAction.RequestClarification -> action.question
             }
-            results.add(result)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            runCatching {
+                android.util.Log.e("AIReasoningEngine", "执行动作失败: ${action.javaClass.simpleName}", e)
+            }
+            "❌ 执行失败：请稍后重试"
         }
-        
-        return results.joinToString("\n\n")
+    }
+
+    private fun formatIndexedResult(index: Int, result: String): String {
+        return "$index. $result"
+    }
+
+    private fun sanitizeOperationError(action: AIAction, rawError: String?): String {
+        val sanitizedMessage = when (action) {
+            is AIAction.RecordTransaction -> "记账失败，请稍后重试"
+            is AIAction.QueryInformation -> "查询失败，请稍后重试"
+            is AIAction.AnalyzeData -> "分析失败，请稍后重试"
+            is AIAction.GenerateResponse,
+            is AIAction.RequestClarification -> "执行失败，请稍后重试"
+        }
+        runCatching {
+            Log.e("AIReasoningEngine", "执行动作业务失败: ${action.javaClass.simpleName}, error=$rawError")
+        }
+        return "❌ $sanitizedMessage"
     }
 
     /**
      * 执行记账动作
-     * 
+     *
      * 真正调用AIOperationExecutor执行数据库写入
      */
     private suspend fun executeRecordTransaction(action: AIAction.RecordTransaction): String {
+        val traceContext = AITraceContext(sourceType = "AI_LOCAL")
         // 1. 智能匹配账户（优先用 accountHint，兜底用默认账户）
         var accounts = accountRepository.getAllAccountsList()
         var account: Account? = null
@@ -843,6 +909,30 @@ class AIReasoningEngine @Inject constructor(
             }
         }
 
+        var autoCreatedAccountName: String? = null
+        var autoCreatedCategoryName: String? = null
+        // 显式账户提示缺失时，优先自动创建指定账户
+        if (account == null && action.accountHint != null) {
+            val createAccountOp = AIOperation.AddAccount(
+                name = action.accountHint,
+                type = mapHintToAccountType(action.accountHint) ?: AccountType.CASH,
+                balance = 0.0,
+                traceContext = traceContext
+            )
+            when (val result = aiOperationExecutor.executeOperation(createAccountOp)) {
+                is AIOperationExecutor.AIOperationResult.Success -> {
+                    accounts = accountRepository.getAllAccountsList()
+                    account = accounts.firstOrNull { !it.isArchived && it.name == action.accountHint }
+                    if (account != null) {
+                        autoCreatedAccountName = action.accountHint
+                    }
+                }
+                is AIOperationExecutor.AIOperationResult.Error -> {
+                    return sanitizeOperationError(action, result.error)
+                }
+            }
+        }
+
         // 兜底：默认账户
         if (account == null) {
             account = accounts.firstOrNull { it.isDefault } ?: accounts.firstOrNull { !it.isArchived }
@@ -853,7 +943,8 @@ class AIReasoningEngine @Inject constructor(
             val createAccountOp = AIOperation.AddAccount(
                 name = "默认账户",
                 type = com.example.aiaccounting.data.local.entity.AccountType.CASH,
-                balance = 0.0
+                balance = 0.0,
+                traceContext = traceContext
             )
             when (val result = aiOperationExecutor.executeOperation(createAccountOp)) {
                 is AIOperationExecutor.AIOperationResult.Success -> {
@@ -861,7 +952,7 @@ class AIReasoningEngine @Inject constructor(
                     account = accounts.firstOrNull()
                 }
                 is AIOperationExecutor.AIOperationResult.Error -> {
-                    return "记账失败：创建账户失败 - ${result.error ?: "未知错误"}"
+                    return sanitizeOperationError(action, result.error)
                 }
             }
         }
@@ -889,13 +980,17 @@ class AIReasoningEngine @Inject constructor(
         if (category == null && action.categoryHint != null) {
             val createOp = AIOperation.AddCategory(
                 name = action.categoryHint,
-                type = action.type
+                type = action.type,
+                traceContext = traceContext
             )
             when (aiOperationExecutor.executeOperation(createOp)) {
                 is AIOperationExecutor.AIOperationResult.Success -> {
                     categories = categoryRepository.getAllCategoriesList()
                     category = categories.firstOrNull {
                         it.type == action.type && it.name == action.categoryHint
+                    }
+                    if (category != null) {
+                        autoCreatedCategoryName = action.categoryHint
                     }
                 }
                 is AIOperationExecutor.AIOperationResult.Error -> {}
@@ -916,7 +1011,8 @@ class AIReasoningEngine @Inject constructor(
             }
             val createCategoryOp = AIOperation.AddCategory(
                 name = categoryName,
-                type = action.type
+                type = action.type,
+                traceContext = traceContext
             )
             when (val result = aiOperationExecutor.executeOperation(createCategoryOp)) {
                 is AIOperationExecutor.AIOperationResult.Success -> {
@@ -934,13 +1030,95 @@ class AIReasoningEngine @Inject constructor(
         }
         
         // 3. 执行记账操作
+        if (action.type == TransactionType.TRANSFER) {
+            val targetAccountHint = action.targetAccountHint
+            var autoCreatedTargetAccountName: String? = null
+            var targetAccount: Account? = null
+            if (targetAccountHint != null) {
+                targetAccount = accounts.firstOrNull { !it.isArchived && it.name == targetAccountHint }
+                    ?: accounts.firstOrNull {
+                        !it.isArchived && (it.name.contains(targetAccountHint) || targetAccountHint.contains(it.name))
+                    }
+                    ?: run {
+                        val hintType = mapHintToAccountType(targetAccountHint)
+                        if (hintType != null) accounts.firstOrNull { !it.isArchived && it.type == hintType } else null
+                    }
+                if (targetAccount == null) {
+                    val createTargetAccountOp = AIOperation.AddAccount(
+                        name = targetAccountHint,
+                        type = mapHintToAccountType(targetAccountHint) ?: AccountType.CASH,
+                        balance = 0.0,
+                        traceContext = traceContext
+                    )
+                    when (val result = aiOperationExecutor.executeOperation(createTargetAccountOp)) {
+                        is AIOperationExecutor.AIOperationResult.Success -> {
+                            accounts = accountRepository.getAllAccountsList()
+                            targetAccount = accounts.firstOrNull { !it.isArchived && it.name == targetAccountHint }
+                            if (targetAccount != null) {
+                                autoCreatedTargetAccountName = targetAccountHint
+                            }
+                        }
+                        is AIOperationExecutor.AIOperationResult.Error -> {
+                            return sanitizeOperationError(action, result.error)
+                        }
+                    }
+                }
+            }
+            if (targetAccount == null) {
+                return "记账失败：转账缺少目标账户，请补充要转入的账户名称"
+            }
+            if (targetAccount.id == account.id) {
+                return "记账失败：转账的来源账户和目标账户不能相同"
+            }
+            val operation = AIOperation.AddTransaction(
+                amount = action.amount,
+                type = TransactionType.TRANSFER,
+                accountId = account.id,
+                transferAccountId = targetAccount.id,
+                categoryId = category.id,
+                note = action.note,
+                date = action.date,
+                traceContext = traceContext
+            )
+            return when (val result = aiOperationExecutor.executeOperation(operation)) {
+                is AIOperationExecutor.AIOperationResult.Success -> {
+                    lastExecutedTransaction = action
+                    buildString {
+                        append("\u2705 已记录转账：¥")
+                        append(String.format("%.2f", action.amount))
+                        append(" ")
+                        append(account.name)
+                        append(" → ")
+                        append(targetAccount.name)
+                        append("（")
+                        append(category.name)
+                        append("）")
+                        autoCreatedAccountName?.takeIf { it.isNotBlank() }?.let {
+                            append("\n已自动创建账户：")
+                            append(it)
+                        }
+                        autoCreatedTargetAccountName?.takeIf { it.isNotBlank() }?.let {
+                            append("\n已自动创建目标账户：")
+                            append(it)
+                        }
+                        autoCreatedCategoryName?.takeIf { it.isNotBlank() }?.let {
+                            append("\n已自动创建分类：")
+                            append(it)
+                        }
+                    }
+                }
+                is AIOperationExecutor.AIOperationResult.Error -> sanitizeOperationError(action, result.error)
+            }
+        }
+
         val operation = AIOperation.AddTransaction(
             amount = action.amount,
             type = action.type,
             accountId = account.id,
             categoryId = category.id,
             note = action.note,
-            date = action.date
+            date = action.date,
+            traceContext = traceContext
         )
         
         return when (val result = aiOperationExecutor.executeOperation(operation)) {
@@ -951,10 +1129,30 @@ class AIReasoningEngine @Inject constructor(
                     TransactionType.EXPENSE -> "支出"
                     TransactionType.TRANSFER -> "转账"
                 }
-                "✅ 已记录${typeStr}：¥${String.format("%.2f", action.amount)} - ${action.note}（${account.name} · ${category.name}）"
+                buildString {
+                    append("✅ 已记录")
+                    append(typeStr)
+                    append("：¥")
+                    append(String.format("%.2f", action.amount))
+                    append(" - ")
+                    append(action.note)
+                    append("（")
+                    append(account.name)
+                    append(" · ")
+                    append(category.name)
+                    append("）")
+                    autoCreatedAccountName?.takeIf { it.isNotBlank() }?.let {
+                        append("\n已自动创建账户：")
+                        append(it)
+                    }
+                    autoCreatedCategoryName?.takeIf { it.isNotBlank() }?.let {
+                        append("\n已自动创建分类：")
+                        append(it)
+                    }
+                }
             }
             is AIOperationExecutor.AIOperationResult.Error -> {
-                "❌ 记账失败：${result.error ?: "未知错误"}"
+                sanitizeOperationError(action, result.error)
             }
         }
     }
@@ -971,7 +1169,7 @@ class AIReasoningEngine @Inject constructor(
         )
         
         val result = aiInformationSystem.executeQuery(request)
-        return if (result.success) result.details else "查询失败：${result.errorMessage}"
+        return if (result.success) result.details else sanitizeOperationError(action, result.errorMessage)
     }
 
     /**
@@ -996,7 +1194,7 @@ class AIReasoningEngine @Inject constructor(
         )
         
         val result = aiInformationSystem.executeQuery(request)
-        return if (result.success) result.details else "分析失败：${result.errorMessage}"
+        return if (result.success) result.details else sanitizeOperationError(action, result.errorMessage)
     }
 
     // ============ 辅助方法 ============
@@ -1005,9 +1203,9 @@ class AIReasoningEngine @Inject constructor(
 
     private fun isAssistantPersonaConversation(message: String): Boolean {
         return listOf(
-            "你好", "您好", "hi", "hello", "谢谢", "感谢", "再见", "拜拜",
-            "你是什么模型", "什么模型", "底层模型", "底层是什么模型", "用的什么模型", "哪个模型",
-            "你能做什么", "你会什么", "能帮我做什么", "可以帮我做什么"
+            "你好", "您好", "哈喽", "嗨", "hi", "hello", "hey", "谢谢", "感谢", "再见", "拜拜",
+            "你是什么模型", "什么模型", "底层模型", "底层是什么模型", "用的什么模型", "哪个模型", "啥模型",
+            "你能做什么", "你会什么", "能帮我做什么", "可以帮我做什么", "你都能干嘛", "都能干嘛"
         ).any { message.contains(it) }
     }
 
@@ -1043,6 +1241,31 @@ class AIReasoningEngine @Inject constructor(
             lower.contains("银行") || lower.contains("bank") -> AccountType.BANK
             else -> null
         }
+    }
+
+    private fun inferTransferTargetAccount(message: String, sourceAccountHint: String?): String? {
+        val lower = message.lowercase()
+        val accountKeywords = listOf("微信", "支付宝", "现金", "信用卡", "银行卡", "储蓄卡", "借记卡")
+        val toPatterns = listOf(Regex("转(到|给|入)([^，。！,.]+)"), Regex("到([^，。！,.]+)账户"))
+        for (pattern in toPatterns) {
+            val match = pattern.find(lower) ?: continue
+            val candidate = match.groupValues.last().trim()
+            if (candidate.isNotBlank() && candidate != sourceAccountHint?.lowercase()) {
+                for (kw in accountKeywords) {
+                    if (candidate.contains(kw)) return kw
+                }
+                return candidate
+            }
+        }
+        val fromPattern = Regex("从([^，。！,.转到]+)转")
+        val fromMatch = fromPattern.find(lower)
+        val sourceInferred = fromMatch?.groupValues?.get(1)?.trim()
+        for (kw in accountKeywords) {
+            if (lower.contains(kw) && kw != sourceInferred && kw != sourceAccountHint?.lowercase()) {
+                return kw
+            }
+        }
+        return null
     }
 
     /** 上下文引用类型 */

@@ -101,7 +101,9 @@ class AIAssistantRemoteExecutionHandlerTest {
         )
 
         assertTrue(result is AIAssistantRemoteExecutionResult.TransportFailure)
-        assertEquals("boom", (result as AIAssistantRemoteExecutionResult.TransportFailure).message)
+        val message = (result as AIAssistantRemoteExecutionResult.TransportFailure).message
+        assertEquals("服务暂时不可用，请稍后重试。", message)
+        assertTrue(!message.contains("boom"))
         coVerify(exactly = 1) { usageFailureRecorder() }
     }
 

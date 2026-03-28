@@ -2,6 +2,7 @@ package com.example.aiaccounting.ai
 
 import com.example.aiaccounting.data.local.entity.Transaction
 import com.example.aiaccounting.data.local.entity.TransactionType
+import com.example.aiaccounting.data.model.ButlerPersonaRegistry
 import com.example.aiaccounting.data.repository.AIConversationRepository
 import com.example.aiaccounting.data.repository.TransactionRepository
 import kotlinx.coroutines.flow.first
@@ -398,16 +399,10 @@ class TransactionModificationHandler @Inject constructor(
         butlerId: String,
         confirmation: ModificationConfirmation
     ): String {
-        val baseMessage = confirmation.confirmationMessage
-        
-        return when (butlerId) {
-            "xiaocainiang" -> "主人～$baseMessage 💕\n小财娘会帮您仔细核对的！"
-            "taotao" -> "主人～$baseMessage ✨\n桃桃会认真处理的！"
-            "guchen" -> "（懒洋洋地）...$baseMessage\n...改完让我继续睡..."
-            "suqian" -> "（平静地）...$baseMessage\n...确认后我会处理。"
-            "yishuihan" -> "（温柔地）$baseMessage\n请确认后我会为您更新。"
-            else -> baseMessage
-        }
+        return ButlerPersonaRegistry.buildModificationConfirmationReply(
+            butlerId = butlerId,
+            baseMessage = confirmation.confirmationMessage
+        )
     }
 
     /**
@@ -417,14 +412,10 @@ class TransactionModificationHandler @Inject constructor(
         butlerId: String,
         result: ModificationResult
     ): String {
-        return when (butlerId) {
-            "xiaocainiang" -> "主人～已经帮您修改好啦！🌸 记录已经更新，请查收～💕"
-            "taotao" -> "改好啦～✨ 已经帮您更新记录啦！(◕‿◕✿)"
-            "guchen" -> "（叹气）...改好了...哈啊...别吵我睡觉..."
-            "suqian" -> "（平静地）...已修改。"
-            "yishuihan" -> "（微笑）已经为您更新好了，请查看。"
-            else -> result.message
-        }
+        return ButlerPersonaRegistry.buildModificationSuccessReply(
+            butlerId = butlerId,
+            fallbackMessage = result.message
+        )
     }
 
     /**

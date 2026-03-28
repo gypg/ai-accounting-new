@@ -181,6 +181,46 @@ class AIAssistantRemoteResponseInterpreterTest {
         assertEquals("accounts", action.target)
     }
 
+    @Test
+    fun interpret_mapsQueryActionAliases_toTypedQueryTargets() {
+        val decision = interpreter.interpret(
+            userMessage = "帮我查账户",
+            remoteResponse = "{\"action\":\"query_accounts\"}"
+        )
+
+        assertTrue(decision is RemoteResponseDecision.ExecuteActions)
+        val action = (decision as RemoteResponseDecision.ExecuteActions).envelope.actions.single() as AIAssistantTypedAction.Query
+        assertEquals("accounts", action.target)
+    }
+
+    @Test
+    fun interpret_parsesLegacyCreateAccountShape_withTypeAndAccountName() {
+        val decision = interpreter.interpret(
+            userMessage = "创建微信账户",
+            remoteResponse = "{\"type\":\"create_account\",\"accountName\":\"微信\",\"accountType\":\"WECHAT\",\"balance\":500}"
+        )
+
+        assertTrue(decision is RemoteResponseDecision.ExecuteActions)
+        val action = (decision as RemoteResponseDecision.ExecuteActions).envelope.actions.single() as AIAssistantTypedAction.CreateAccount
+        assertEquals("微信", action.name)
+        assertEquals("WECHAT", action.accountTypeRaw)
+        assertEquals(500.0, action.balance, 0.0)
+    }
+
+    @Test
+    fun interpret_parsesLegacyTransferShape_withFromToAccountIds() {
+        val decision = interpreter.interpret(
+            userMessage = "从微信转100到支付宝",
+            remoteResponse = "{\"type\":\"transfer\",\"amount\":100,\"fromAccountId\":1,\"toAccountId\":2,\"note\":\"转账\"}"
+        )
+
+        assertTrue(decision is RemoteResponseDecision.QueryBeforeExecute)
+        val action = (decision as RemoteResponseDecision.QueryBeforeExecute).envelope.actions.single() as AIAssistantTypedAction.AddTransaction
+        assertEquals("transfer", action.transactionTypeRaw)
+        assertEquals(1L, action.accountRef.id)
+        assertEquals(2L, action.transferAccountRef?.id)
+    }
+
 
     @Test
     fun interpret_parsesTypedEntityReferences_forAddTransactionAction() {
@@ -272,6 +312,34 @@ class AIAssistantRemoteResponseInterpreterTest {
         assertEquals("transfer", action.transactionTypeRaw)
         assertEquals(1L, action.accountRef.id)
         assertEquals(2L, action.transferAccountRef?.id)
+    }
+
+    @Test
+    fun interpret_fallbackReply_stripsMalformedJsonGarbage_beforeReturningRemoteReply() {
+        val decision = interpreter.interpret(
+            userMessage = "帮我记一笔午饭 25 元",
+            remoteResponse = "好的 ```json {\"action\":\"add_transaction\",\"amount\":25,} ``` 我来帮你处理"
+        )
+
+        assertTrue(decision is RemoteResponseDecision.QueryBeforeExecute || decision is RemoteResponseDecision.FallbackToLocalTransaction)
+        if (decision is RemoteResponseDecision.FallbackToLocalTransaction) {
+            val remoteReply = decision.remoteReply
+            assertTrue(!remoteReply.contains("{") && !remoteReply.contains("}") && !remoteReply.contains("\"action\"") && !remoteReply.contains("```"))
+            assertTrue(remoteReply.contains("好的") || remoteReply.contains("我来帮你处理"))
+        }
+    }
+
+    @Test
+    fun interpret_returnRemoteReply_stripsEmbeddedJsonGarbage_forNonTransactionMessage() {
+        val decision = interpreter.interpret(
+            userMessage = "你好",
+            remoteResponse = "当然可以，{\"foo\":\"bar\"} 我在呢"
+        )
+
+        assertTrue(decision is RemoteResponseDecision.ReturnRemoteReply)
+        val reply = (decision as RemoteResponseDecision.ReturnRemoteReply).reply
+        assertTrue(!reply.contains("{\"foo\":\"bar\"}"))
+        assertTrue(reply.contains("当然可以") || reply.contains("我在呢"))
     }
 
     @Test

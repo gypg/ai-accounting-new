@@ -144,7 +144,9 @@ internal class AIAssistantMessageExecutionCoordinator(
         val reasoningResult = aiReasoningEngine.reason(
             AIReasoningEngine.ReasoningContext(
                 userMessage = continuationRequest.resumedMessage,
-                conversationHistory = conversationHistory
+                conversationHistory = conversationHistory,
+                isNetworkAvailable = isNetworkAvailable,
+                isAIConfigured = currentAIConfig.isEnabled && currentAIConfig.apiKey.isNotBlank()
             ),
             currentButler.id,
             currentButler.name
@@ -204,7 +206,9 @@ internal class AIAssistantMessageExecutionCoordinator(
     ): AIAssistantMessageExecutionResult {
         val context = AIReasoningEngine.ReasoningContext(
             userMessage = message,
-            conversationHistory = conversationHistory
+            conversationHistory = conversationHistory,
+            isNetworkAvailable = isNetworkAvailable,
+            isAIConfigured = currentAIConfig.isEnabled && currentAIConfig.apiKey.isNotBlank()
         )
 
         val reasoningResult = aiReasoningEngine.reason(context, currentButler.id, currentButler.name)
