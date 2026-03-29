@@ -308,4 +308,14 @@ class AIAssistantRemoteResponseInterpreterTest {
         assertTrue(!reply.contains("{\"foo\":\"bar\"}"))
         assertTrue(reply.contains("当然可以") || reply.contains("我在呢"))
     }
+
+    @Test
+    fun interpret_returnsBlankRemoteReply_whenDisplayContentIsOnlyJsonGarbage() {
+        val decision = interpreter.interpret(
+            remoteResponse = "```json\n{\"foo\":\"bar\"}\n```"
+        )
+
+        assertTrue(decision is RemoteResponseDecision.ReturnRemoteReply)
+        assertEquals("", (decision as RemoteResponseDecision.ReturnRemoteReply).reply)
+    }
 }

@@ -53,8 +53,8 @@ class AIAssistantViewModel @Inject constructor(
     private companion object {
         private const val USER_SAFE_PROCESSING_ERROR = "抱歉，处理你的请求时出现了一些问题，请稍后重试。"
         private const val USER_SAFE_REMOTE_TRANSPORT_ERROR = "服务暂时不可用，请稍后重试。"
-        private const val USER_SAFE_REMOTE_EXECUTION_MISSING_ERROR = "未收到可执行的记账指令，请稍后重试。"
-        private const val USER_SAFE_REMOTE_EMPTY_REPLY = "暂时没有可用回复，请稍后重试。"
+        private const val USER_SAFE_REMOTE_EXECUTION_MISSING_ERROR = "未收到可执行的记账指令。建议：重试本次记账；若仍失败，请切换模型后再试。"
+        private const val USER_SAFE_REMOTE_EMPTY_REPLY = "模型暂时没有返回可用内容。建议：重试一次；若仍无内容，请切换模型或保存配置后重试。"
         private const val USER_SAFE_UI_ERROR = "操作暂时不可用，请稍后重试。"
         private const val USER_SAFE_IMAGE_PROCESSING_ERROR = "图片处理暂时失败，请稍后重试。"
     }
@@ -91,7 +91,9 @@ class AIAssistantViewModel @Inject constructor(
         integrityChecker = remoteResponseIntegrityChecker,
         interpreter = remoteResponseInterpreter,
         recordUsageSuccess = { aiUsageRepository.recordCall(success = true) },
-        recordUsageFailure = { aiUsageRepository.recordCall(success = false) }
+        recordUsageFailure = { aiUsageRepository.recordCall(success = false) },
+        buildBookkeepingEnvelopeCorrectionMessage =
+            messageOrchestrator::buildBookkeepingEnvelopeCorrectionMessage
     )
     private val promptBuilder = AIAssistantPromptBuilder()
     private val commandHandler = AIAssistantCommandHandler(
@@ -326,26 +328,58 @@ class AIAssistantViewModel @Inject constructor(
         val categories = categoryRepository.getAllCategoriesList()
         val currentButler = butlerCoordinator.resolveCurrentButler(_uiState.value.currentButler)
         val messages = promptBuilder.buildMessages(request.userMessage, currentButler, accounts, categories)
+        val diagnostics = buildRemoteDiagnosticsLabel(
+            config = currentAIConfig,
+            responseRequirement = request.responseRequirement
+        )
 
         return when (val result = remoteExecutionHandler.execute(
             messages = messages,
             config = currentAIConfig,
             responseRequirement = request.responseRequirement
         )) {
-            is AIAssistantRemoteExecutionResult.Timeout -> "请求超时，请稍后重试。"
-            is AIAssistantRemoteExecutionResult.TransportFailure -> USER_SAFE_REMOTE_TRANSPORT_ERROR
-            is AIAssistantRemoteExecutionResult.IncompleteResponse -> "响应不完整，请稍后重试。"
+            is AIAssistantRemoteExecutionResult.Timeout -> "请求超时，请稍后重试。$diagnostics"
+            is AIAssistantRemoteExecutionResult.TransportFailure -> {
+                "$USER_SAFE_REMOTE_TRANSPORT_ERROR 建议：检查网络后重试，或切换模型。$diagnostics"
+            }
+            is AIAssistantRemoteExecutionResult.IncompleteResponse -> "响应不完整，请稍后重试。$diagnostics"
             is AIAssistantRemoteExecutionResult.QueryBeforeExecutionRequested -> {
                 actionExecutor.executeQueryBeforeExecution(result.envelope)
             }
             is AIAssistantRemoteExecutionResult.ActionExecutionRequested -> {
                 actionExecutor.executeAIActions(result.envelope)
             }
-            is AIAssistantRemoteExecutionResult.TransactionActionMissing -> USER_SAFE_REMOTE_EXECUTION_MISSING_ERROR
+            is AIAssistantRemoteExecutionResult.TransactionActionMissing -> {
+                if (result.retriedWithEnvelopeCorrection) {
+                    "$USER_SAFE_REMOTE_EXECUTION_MISSING_ERROR$diagnostics（已自动纠正一次动作合同）"
+                } else {
+                    "$USER_SAFE_REMOTE_EXECUTION_MISSING_ERROR$diagnostics"
+                }
+            }
+            is AIAssistantRemoteExecutionResult.EmptyRemoteReply -> {
+                if (result.retried) {
+                    "$USER_SAFE_REMOTE_EMPTY_REPLY$diagnostics（已自动重试一次）"
+                } else {
+                    "$USER_SAFE_REMOTE_EMPTY_REPLY$diagnostics"
+                }
+            }
             is AIAssistantRemoteExecutionResult.RemoteReply -> {
-                result.reply.takeIf { it.isNotBlank() } ?: USER_SAFE_REMOTE_EMPTY_REPLY
+                result.reply.takeIf { it.isNotBlank() } ?: "$USER_SAFE_REMOTE_EMPTY_REPLY$diagnostics"
             }
         }
+    }
+
+    private fun buildRemoteDiagnosticsLabel(
+        config: AIConfig,
+        responseRequirement: AIAssistantRemoteResponseRequirement
+    ): String {
+        val route = if (responseRequirement == AIAssistantRemoteResponseRequirement.ActionEnvelopeRequired) {
+            "BOOKKEEPING"
+        } else {
+            "CHAT"
+        }
+        val modelLabel = config.model.ifBlank { "AUTO" }
+        return "（provider=${config.provider.name}, model=$modelLabel, route=$route）"
     }
 
     private fun clearPendingInteractionStates() {

@@ -1,6 +1,6 @@
 # AI记账 — 产品开发文档
 
-> 版本：v1.8.3 | 文档日期：2026-03-22 | 文档状态：发布前同步版
+> 版本：v1.8.3 | 文档日期：2026-03-28 | 文档状态：发布前同步版
 
 ---
 
@@ -42,6 +42,23 @@ AI记账是一款面向中国大陆个人用户的智能记账 Android 应用。
    - P0 发布准备已完成，P1/P2 优化后置到反馈阶段决策
 
 ### 2.2 AI 助手文本消息主链路最新状态
+
+#### 2026-03-28 综合审查结论与 P0 修复入口：连接测试成功 ≠ 聊天链路可用
+- 已确认当前 P0 断层：AI 设置页 `testConnection()` 的成功结果，并不等于 AI 助手真实对话链路可用。
+- 已确认的链路差异：
+  - 设置页测试连接使用 `AISettingsViewModel.testConnection()` 中的 `_uiState.value.config` 草稿配置；
+  - 聊天主链实际消费 `AIConfigRepository.getAIConfig()` 合成后的生效配置（builtin / invite / user 覆盖规则）；
+  - 远端聊天路由按意图严格区分 `ReplyAllowed` 与 `ActionEnvelopeRequired`；
+  - `AIAssistantRemoteResponseInterpreter.extractDisplayReply(...)` 在清洗 JSON / fenced JSON / dirty wrapper 后，可能返回空字符串，最终落到“暂时没有可用回复”的兜底文案。
+- 当前已批准的修复顺序：
+  1. 先同步开发文档与持久记忆；
+  2. 用 TDD 补“草稿配置与生效配置不一致”保护，避免继续制造误导性测试成功；
+  3. 为 `ReplyAllowed` 下的空回复补显式结果语义与回归测试；
+  4. 保持 `BOOKKEEPING -> ActionEnvelopeRequired`、`DAILY_CHAT -> ReplyAllowed` 现有合同不放宽。
+- 本轮范围约束：
+  - 不重写 `AIAssistantMessageExecutionCoordinator` / `AIAssistantMessageOrchestrator` 主架构；
+  - 不重新引入远端异常时的本地聊天兜底；
+  - 不改账务执行核心，只修复“配置一致性 + 回复判定与提示语义”。
 
 #### 2026-03-28 模块 F 完成：人格统一收口（聊天/澄清/确认/欢迎文案单一来源）
 - 已完成模块 F 收口，目标是在不改变执行链语义的前提下，把用户可见人格文案统一收口到 `ButlerPersonaRegistry`，避免多处硬编码导致的人格漂移。
@@ -927,6 +944,7 @@ AI记账是一款面向中国大陆个人用户的智能记账 Android 应用。
 - 旧测试仍断言 `openai/gpt-oss-120b` 为默认模型的问题已修正
 
 ### 5.2 当前注意事项
+- P0：AI 设置页“测试连接成功”当前**不等于** AI 助手真实聊天链路可用；根因已定位为“测试使用草稿配置、聊天使用生效配置”以及“远端文本清洗后可变空但缺少显式结果语义”两类断层。本轮修复前，不能把测试连接结果当作聊天可用性的最终判断。
 - 本地某些 bash 环境运行 Gradle 时可能打印 `uname: command not found`，但当前不影响本地 lint / unit test 结果
 - `Build Release APK` 阶段仍可能出现 Apache POI 相关 R8 warning：`SVGUserAgent.getViewbox()` 在静态分析时被视为 unreachable；当前不影响 release 构建成功与 release artifact 上传
 - 该 warning 已完成模块 1 归因：当前 app 仅使用 [ExcelExporter.kt](../app/src/main/java/com/example/aiaccounting/data/exporter/ExcelExporter.kt) 中的 `XSSFWorkbook` 基础导出能力，但 `org.apache.poi:poi-ooxml:5.2.5` jar 自带了 `org.apache.poi.xslf.draw.SVGUserAgent` 等 PPT/SVG 渲染类，R8 在 release 混淆时会扫描到该未使用路径并对 `getViewbox()` 给出 unreachable warning
@@ -1054,7 +1072,7 @@ AI记账是一款面向中国大陆个人用户的智能记账 Android 应用。
 
 ## 六、结论
 
-截至 2026-03-22：
+截至 2026-03-28：
 - v1.8.3 发布准备已完成
 - AI 设置页模型测试能力已落地
 - 邀请码绑定后的 Auto 自动优选行为已成为当前标准实现
