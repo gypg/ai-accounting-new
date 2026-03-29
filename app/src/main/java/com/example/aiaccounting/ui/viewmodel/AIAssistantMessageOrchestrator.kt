@@ -253,6 +253,10 @@ internal class AIAssistantMessageOrchestrator {
         return route(analysis)
     }
 
+    fun buildBookkeepingEnvelopeCorrectionMessage(): String {
+        return "请仅返回可执行动作 envelope。不要输出解释性文本，不要 markdown，不要代码块。仅输出 JSON，对象格式为 {\"actions\":[...],\"reply\":\"...\" }。"
+    }
+
     private fun resolveTopLevelIntent(
         reasoningIntent: AIReasoningEngine.UserIntent,
         userMessage: String

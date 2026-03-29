@@ -423,6 +423,149 @@ class AIServiceModelFallbackTest {
     }
 
     @Test
+    fun chat_whenFixedModelFirstReplyEmpty_retriesSameModelAndSucceeds() = kotlinx.coroutines.test.runTest {
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setBody(
+                    """
+                    {
+                      "choices": [
+                        {"message": {"content": ""}}
+                      ]
+                    }
+                    """.trimIndent()
+                )
+        )
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setBody(
+                    """
+                    {
+                      "choices": [
+                        {"message": {"content": "ok"}}
+                      ]
+                    }
+                    """.trimIndent()
+                )
+        )
+
+        val service = AIService(
+            client = OkHttpClient(),
+            testClient = OkHttpClient(),
+            modelPerformanceRepository = mockk(relaxed = true)
+        )
+        val cfg = AIConfig(
+            provider = AIProvider.CUSTOM,
+            apiKey = "k",
+            apiUrl = server.url("/v1").toString().removeSuffix("/"),
+            model = "fixed-model",
+            isEnabled = true
+        )
+
+        val result = service.chat(
+            messages = listOf(ChatMessage(role = MessageRole.USER, content = "hi")),
+            config = cfg
+        )
+
+        assertEquals("ok", result)
+        val firstReq = server.takeRequest()
+        val secondReq = server.takeRequest()
+        assertTrue(firstReq.body.readUtf8().contains("\"model\":\"fixed-model\""))
+        assertTrue(secondReq.body.readUtf8().contains("\"model\":\"fixed-model\""))
+        assertEquals(2, server.requestCount)
+    }
+
+    @Test
+    fun chat_whenAutoPrimaryReplyEmpty_fallsBackToSecondaryModel() = kotlinx.coroutines.test.runTest {
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setBody(
+                    """
+                    {
+                      "data": [
+                        {"id": "slow-model", "name": "slow-model", "description": "rec"},
+                        {"id": "backup-model", "name": "backup-model", "description": "alt"}
+                      ]
+                    }
+                    """.trimIndent()
+                )
+        )
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setBody(
+                    """
+                    {
+                      "choices": [
+                        {"message": {"content": ""}}
+                      ]
+                    }
+                    """.trimIndent()
+                )
+        )
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setBody(
+                    """
+                    {
+                      "choices": [
+                        {"message": {"content": ""}}
+                      ]
+                    }
+                    """.trimIndent()
+                )
+        )
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setBody(
+                    """
+                    {
+                      "choices": [
+                        {"message": {"content": "ok"}}
+                      ]
+                    }
+                    """.trimIndent()
+                )
+        )
+
+        val service = AIService(
+            client = OkHttpClient(),
+            testClient = OkHttpClient(),
+            modelPerformanceRepository = mockk(relaxed = true)
+        )
+        val cfg = AIConfig(
+            provider = AIProvider.CUSTOM,
+            apiKey = "k",
+            apiUrl = server.url("/v1").toString().removeSuffix("/"),
+            model = "",
+            isEnabled = true
+        )
+
+        val result = service.chat(
+            messages = listOf(ChatMessage(role = MessageRole.USER, content = "hi")),
+            config = cfg
+        )
+
+        assertEquals("ok", result)
+
+        val modelsReq = server.takeRequest()
+        val primaryReq = server.takeRequest()
+        val primaryRetryReq = server.takeRequest()
+        val fallbackReq = server.takeRequest()
+
+        assertTrue(modelsReq.path?.endsWith("/v1/models") == true || modelsReq.path?.endsWith("/models") == true)
+        assertTrue(primaryReq.body.readUtf8().contains("\"model\":\"slow-model\""))
+        assertTrue(primaryRetryReq.body.readUtf8().contains("\"model\":\"slow-model\""))
+        assertTrue(fallbackReq.body.readUtf8().contains("\"model\":\"backup-model\""))
+        assertEquals(4, server.requestCount)
+    }
+
+    @Test
     fun chat_whenAutoPrimaryModelUnavailable_retriesWithAlternateModel() = kotlinx.coroutines.test.runTest {
         server.enqueue(
             MockResponse()

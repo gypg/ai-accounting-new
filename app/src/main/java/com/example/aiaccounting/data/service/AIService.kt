@@ -337,6 +337,51 @@ class AIService @Inject constructor(
         }
     }
 
+    suspend fun testChatPath(config: AIConfig): String? = withContext(Dispatchers.IO) {
+        if (!config.isEnabled) {
+            return@withContext "AI助手未启用"
+        }
+
+        if (config.apiKey.isBlank()) {
+            return@withContext "API密钥不能为空"
+        }
+
+        if (config.apiUrl.isBlank()) {
+            return@withContext "API地址不能为空"
+        }
+
+        val testMessages = listOf(
+            ChatMessage(MessageRole.USER, "Hi")
+        )
+
+        try {
+            val response = chat(testMessages, config)
+            if (response.trim().isEmpty()) {
+                "模型暂时没有返回可用内容，请稍后重试或切换模型"
+            } else {
+                null
+            }
+        } catch (e: OpenAIChatFailure.ModelUnavailable) {
+            if (config.model.isBlank()) {
+                "自动优选暂时不可用，请稍后重试"
+            } else {
+                "当前模型不可用，请切换模型或改用自动优选"
+            }
+        } catch (e: OpenAIChatFailure.Timeout) {
+            if (config.model.isBlank()) {
+                "自动优选连接超时，请稍后重试或手动选择模型"
+            } else {
+                "连接超时，请检查网络或稍后重试"
+            }
+        } catch (e: OpenAIChatFailure.EmptyReply) {
+            "模型暂时没有返回可用内容，请稍后重试或切换模型"
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            mapConnectionFailureToMessage(e)
+        }
+    }
+
     private fun mapConnectionFailureToMessage(error: Throwable): String {
         return when (requestFailureClassifier.classify(error)) {
             AIRequestFailureCategory.INVALID_API_KEY -> "API密钥无效或已过期"
@@ -683,10 +728,14 @@ class AIService @Inject constructor(
     private sealed class OpenAIChatFailure(message: String) : Exception(message) {
         data class ModelUnavailable(val details: String) : OpenAIChatFailure(details)
         data class Timeout(val details: String) : OpenAIChatFailure(details)
+        data class EmptyReply(val details: String) : OpenAIChatFailure(details)
         data class Other(val details: String) : OpenAIChatFailure(details)
     }
 
     private fun isRetryableFailure(error: Throwable): Boolean {
+        if (error is OpenAIChatFailure.EmptyReply) {
+            return true
+        }
         return when (requestFailureClassifier.classify(error)) {
             AIRequestFailureCategory.TIMEOUT,
             AIRequestFailureCategory.CONNECT_FAILURE,
@@ -809,9 +858,13 @@ class AIService @Inject constructor(
 
                 val choices = json.getJSONArray("choices")
                 if (choices.length() > 0) {
-                    return choices.getJSONObject(0)
+                    val content = choices.getJSONObject(0)
                         .getJSONObject("message")
                         .getString("content")
+                    if (content.trim().isEmpty()) {
+                        throw OpenAIChatFailure.EmptyReply("empty_reply")
+                    }
+                    return content
                 }
                 throw OpenAIChatFailure.Other("无效的响应格式")
             }
@@ -884,6 +937,7 @@ class AIService @Inject constructor(
         val firstModel = plan.primaryModelId
             ?: throw OpenAIChatFailure.Other("无法获取可用模型列表，请稍后重试")
 
+        var firstFailure: OpenAIChatFailure? = null
         try {
             val startedAt = System.currentTimeMillis()
             val result = executeWithRetry(policy) {
@@ -893,19 +947,24 @@ class AIService @Inject constructor(
             return result
         } catch (e: OpenAIChatFailure.ModelUnavailable) {
             recordModelFailure(config, firstModel, ModelPerformanceFailureCategory.MODEL_UNAVAILABLE)
+            firstFailure = e
         } catch (e: OpenAIChatFailure.Timeout) {
             recordModelFailure(config, firstModel, ModelPerformanceFailureCategory.TIMEOUT)
+            firstFailure = e
+        } catch (e: OpenAIChatFailure.EmptyReply) {
+            recordModelFailure(config, firstModel, ModelPerformanceFailureCategory.OTHER)
+            firstFailure = e
         } catch (e: Throwable) {
             recordModelFailure(config, firstModel, ModelPerformanceFailureCategory.OTHER)
             throw e
         }
 
         if (!policy.allowModelFallback) {
-            throw OpenAIChatFailure.ModelUnavailable("model_unavailable: no alternative model")
+            throw firstFailure ?: OpenAIChatFailure.ModelUnavailable("model_unavailable: no alternative model")
         }
 
         val secondModel = plan.fallbackModelIds.firstOrNull()
-            ?: throw OpenAIChatFailure.ModelUnavailable("model_unavailable: no alternative model")
+            ?: throw firstFailure ?: OpenAIChatFailure.ModelUnavailable("model_unavailable: no alternative model")
 
         try {
             val startedAt = System.currentTimeMillis()
@@ -919,6 +978,9 @@ class AIService @Inject constructor(
             throw e
         } catch (e: OpenAIChatFailure.Timeout) {
             recordModelFailure(config, secondModel, ModelPerformanceFailureCategory.TIMEOUT)
+            throw e
+        } catch (e: OpenAIChatFailure.EmptyReply) {
+            recordModelFailure(config, secondModel, ModelPerformanceFailureCategory.OTHER)
             throw e
         } catch (e: Throwable) {
             recordModelFailure(config, secondModel, ModelPerformanceFailureCategory.OTHER)

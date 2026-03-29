@@ -412,6 +412,15 @@ class AIAssistantMessageOrchestratorTest {
         )
     }
 
+    @Test
+    fun buildBookkeepingEnvelopeCorrectionMessage_returnsStrictJsonEnvelopeInstruction() {
+        val message = orchestrator.buildBookkeepingEnvelopeCorrectionMessage()
+
+        assertTrue(message.contains("仅返回"))
+        assertTrue(message.contains("JSON"))
+        assertTrue(message.contains("actions"))
+    }
+
     private fun reasoningResult(
         intent: AIReasoningEngine.UserIntent,
         actions: List<AIReasoningEngine.AIAction> = emptyList()
