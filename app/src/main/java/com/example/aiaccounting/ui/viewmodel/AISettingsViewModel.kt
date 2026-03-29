@@ -24,6 +24,7 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 private const val DEFAULT_GATEWAY_BASE_URL = "https://api.gdmon.dpdns.org"
+private const val CONNECTION_TEST_REQUIRES_SAVE_MESSAGE = "当前配置尚未保存，请先保存后再测试聊天链路"
 private const val NETWORK_WARNING_LATENCY_THRESHOLD_MS = 800L
 private val LEGACY_GATEWAY_HOST_KEYWORDS = listOf(
     "workers.dev"
@@ -649,18 +650,30 @@ class AISettingsViewModel @Inject constructor(
                 return@launch
             }
 
-            // 使用AI服务进行真正的连接测试
-            val config = _uiState.value.config
-            val errorMessage = aiService.testConnection(config)
+            val draftConfig = _uiState.value.config
+            val effectiveConfig = aiConfigRepository.getAIConfig().first()
+            if (draftConfig != effectiveConfig) {
+                _uiState.update {
+                    it.copy(
+                        isTesting = false,
+                        testResult = TestResult.Error(CONNECTION_TEST_REQUIRES_SAVE_MESSAGE)
+                    )
+                }
+                return@launch
+            }
+
+            // 使用与聊天主链一致的生效配置进行真实聊天链路测试
+            val errorMessage = aiService.testChatPath(effectiveConfig)
+            val testResult = if (errorMessage == null) {
+                TestResult.Success
+            } else {
+                TestResult.Error(buildActionableChatPathError(errorMessage, effectiveConfig))
+            }
 
             _uiState.update {
                 it.copy(
                     isTesting = false,
-                    testResult = if (errorMessage == null) {
-                        TestResult.Success
-                    } else {
-                        TestResult.Error(errorMessage)
-                    }
+                    testResult = testResult
                 )
             }
         }
@@ -692,6 +705,20 @@ class AISettingsViewModel @Inject constructor(
 
     fun clearTestResult() {
         _uiState.update { it.copy(testResult = null) }
+    }
+
+    private fun buildActionableChatPathError(errorMessage: String, config: AIConfig): String {
+        val routeLabel = if (config.model.isBlank()) "AUTO" else "FIXED"
+        val modelLabel = config.model.ifBlank { "AUTO" }
+        val diagnostics = "（provider=${config.provider.name}, model=$modelLabel, route=$routeLabel）"
+        val safeMessage = errorMessage.trim().ifBlank { "聊天链路测试失败" }
+        val nextStep = when {
+            safeMessage.contains("API密钥") -> "建议：保存配置后重试聊天链路，或检查 API Key。"
+            safeMessage.contains("模型") -> "建议：重试聊天链路，或切换模型后再测。"
+            safeMessage.contains("超时") || safeMessage.contains("网络") -> "建议：重试聊天链路，或稍后再试。"
+            else -> "建议：重试聊天链路，必要时保存配置并切换模型。"
+        }
+        return "$safeMessage $diagnostics\n$nextStep"
     }
 
     /**

@@ -82,7 +82,7 @@ class AISettingsConnectionTest {
 
     @Test
     fun testConnection_whenAutoFallbackFails_setsErrorResultAndStopsTesting() = runTest {
-        coEvery { aiService.testConnection(any()) } returns "自动优选暂时不可用，请稍后重试"
+        coEvery { aiService.testChatPath(any()) } returns "自动优选暂时不可用，请稍后重试"
 
         val vm = AISettingsViewModel(
             aiConfigRepository = aiConfigRepository,
@@ -100,10 +100,8 @@ class AISettingsConnectionTest {
         testDispatcher.scheduler.advanceUntilIdle()
 
         assertFalse(vm.uiState.value.isTesting)
-        assertEquals(
-            "自动优选暂时不可用，请稍后重试",
-            (vm.uiState.value.testResult as TestResult.Error).message
-        )
+        assertTrue((vm.uiState.value.testResult as TestResult.Error).message.contains("自动优选暂时不可用，请稍后重试"))
+        io.mockk.coVerify(exactly = 1) { aiService.testChatPath(any()) }
     }
 
     @Test
@@ -482,5 +480,70 @@ class AISettingsConnectionTest {
         assertNull(vm.uiState.value.preferredRouteSummary)
         assertNull(vm.uiState.value.networkSpeedTestResult)
         assertNull(vm.uiState.value.networkHealthWarning)
+    }
+
+    @Test
+    fun testConnection_whenDraftConfigDiffersFromPersistedConfig_setsMismatchErrorWithoutCallingService() = runTest {
+        val persistedConfig = AIConfig(
+            isEnabled = true,
+            apiKey = "persisted-key",
+            apiUrl = "https://persisted.example/v1",
+            model = "persisted-model"
+        )
+        every { aiConfigRepository.getAIConfig() } returns flowOf(persistedConfig)
+        coEvery { aiService.testChatPath(any()) } returns null
+
+        val vm = AISettingsViewModel(
+            aiConfigRepository = aiConfigRepository,
+            aiService = aiService,
+            aiUsageRepository = aiUsageRepository,
+            modelPerformanceRepository = modelPerformanceRepository,
+            networkUtils = networkUtils,
+            inviteGatewayService = inviteGatewayService,
+            deviceIdProvider = deviceIdProvider,
+            networkSpeedTestService = networkSpeedTestService
+        )
+
+        testDispatcher.scheduler.advanceUntilIdle()
+        vm.updateApiUrl("https://draft.example/v1")
+        vm.updateApiKey("draft-key")
+        vm.updateModel("draft-model")
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        vm.testConnection()
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertFalse(vm.uiState.value.isTesting)
+        assertEquals(
+            "当前配置尚未保存，请先保存后再测试聊天链路",
+            (vm.uiState.value.testResult as TestResult.Error).message
+        )
+        io.mockk.coVerify(exactly = 0) { aiService.testChatPath(any()) }
+    }
+
+    @Test
+    fun testConnection_whenChatPathReturnsBlankReply_setsActionableModelMessage() = runTest {
+        coEvery { aiService.testChatPath(any()) } returns "模型暂时没有返回可用内容"
+
+        val vm = AISettingsViewModel(
+            aiConfigRepository = aiConfigRepository,
+            aiService = aiService,
+            aiUsageRepository = aiUsageRepository,
+            modelPerformanceRepository = modelPerformanceRepository,
+            networkUtils = networkUtils,
+            inviteGatewayService = inviteGatewayService,
+            deviceIdProvider = deviceIdProvider,
+            networkSpeedTestService = networkSpeedTestService
+        )
+
+        testDispatcher.scheduler.advanceUntilIdle()
+        vm.testConnection()
+        testDispatcher.scheduler.advanceUntilIdle()
+
+        assertFalse(vm.uiState.value.isTesting)
+        val message = (vm.uiState.value.testResult as TestResult.Error).message
+        assertTrue(message.contains("模型暂时没有返回可用内容"))
+        assertTrue(message.contains("建议：重试聊天链路"))
+        assertTrue(message.contains("切换模型"))
     }
 }
