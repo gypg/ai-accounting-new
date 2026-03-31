@@ -128,3 +128,11 @@ memory/
 # Conversation records / office docs
 对话记录/
 *.docx
+
+# Chinese-named reference/inspiration folders (de-sensitized)
+灵感文件/
+方案设计ui灵感/
+豆包设计ui画面/
+配置文件/
+方案设计app原型参考图 - 2次迭代/
+方案设计app原型参考图/
