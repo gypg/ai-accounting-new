@@ -42,7 +42,7 @@ class ButlerPersonaRegistryTest {
             activeButlerName = "塞巴斯蒂安"
         )
 
-        assertEquals("是的，我是塞巴斯蒂安。", reply)
+        assertEquals("是的，我是塞巴斯蒂安。有什么可以帮你的吗？", reply)
     }
 
     @Test
