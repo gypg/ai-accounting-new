@@ -199,6 +199,9 @@ fun AppNavigation(
                         },
                         onNavigateToStatistics = {
                             navController.navigate("statistics")
+                        },
+                        onNavigateToAccounts = {
+                            navController.navigate(Screen.Accounts.route)
                         }
                     )
                 } else if (isFreshSciTheme) {
@@ -217,6 +220,9 @@ fun AppNavigation(
                         },
                         onNavigateToStatistics = {
                             navController.navigate("statistics")
+                        },
+                        onNavigateToAccounts = {
+                            navController.navigate(Screen.Accounts.route)
                         }
                     )
                 } else {

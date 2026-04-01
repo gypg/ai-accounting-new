@@ -19,6 +19,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import com.example.aiaccounting.ui.navigation.Screen
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -45,7 +46,8 @@ fun NewYearHorseOverviewScreen(
     onNavigateToAI: () -> Unit = {},
     onNavigateToButlerMarket: () -> Unit = {},
     onNavigateToTransactions: () -> Unit = {},
-    onNavigateToStatistics: () -> Unit = {}
+    onNavigateToStatistics: () -> Unit = {},
+    onNavigateToAccounts: () -> Unit = {}
 ) {
     val monthlyStats by viewModel.monthlyStats.collectAsState()
     val recentTransactions by viewModel.recentTransactions.collectAsState()
@@ -55,9 +57,8 @@ fun NewYearHorseOverviewScreen(
     val todayStats by viewModel.todayStats.collectAsState()
     val weekStats by viewModel.weekStats.collectAsState()
 
-    val calendar = Calendar.getInstance()
-    val currentYear = calendar.get(Calendar.YEAR)
-    val currentMonth = calendar.get(Calendar.MONTH) + 1
+    var selectedYear by remember { mutableStateOf(Calendar.getInstance().get(Calendar.YEAR)) }
+    val currentMonth = Calendar.getInstance().get(Calendar.MONTH) + 1
 
     // Safe theme colors with fallback defaults (prevent crash on first theme switch)
     // Check if theme colors are properly initialized by testing if primary color is not 0
@@ -75,7 +76,7 @@ fun NewYearHorseOverviewScreen(
                         horizontalArrangement = Arrangement.Center,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        IconButton(onClick = { }) {
+                        IconButton(onClick = { selectedYear = selectedYear - 1 }) {
                             Icon(
                                 imageVector = Icons.Default.ChevronLeft,
                                 contentDescription = "上一年",
@@ -83,12 +84,12 @@ fun NewYearHorseOverviewScreen(
                             )
                         }
                         Text(
-                            text = "${currentYear}年度",
+                            text = "${selectedYear}年度",
                             fontSize = 20.sp,
                             fontWeight = FontWeight.Bold,
                             color = safeOnSurface
                         )
-                        IconButton(onClick = { }) {
+                        IconButton(onClick = { selectedYear = selectedYear + 1 }) {
                             Icon(
                                 imageVector = Icons.Default.ChevronRight,
                                 contentDescription = "下一年",
@@ -154,6 +155,7 @@ fun NewYearHorseOverviewScreen(
                         accountCount = accounts.size,
                         onNavigateToTransactions = onNavigateToTransactions,
                         onNavigateToStatistics = onNavigateToStatistics,
+                        onNavigateToAccounts = onNavigateToAccounts,
                         primaryColor = safePrimary,
                         onSurfaceColor = safeOnSurface,
                         onSurfaceVariantColor = safeOnSurfaceVariant
@@ -287,6 +289,7 @@ fun NewYearHorseQuickActionCards(
     accountCount: Int,
     onNavigateToTransactions: () -> Unit,
     onNavigateToStatistics: () -> Unit,
+    onNavigateToAccounts: () -> Unit = {},
     primaryColor: Color,
     onSurfaceColor: Color,
     onSurfaceVariantColor: Color
@@ -295,6 +298,7 @@ fun NewYearHorseQuickActionCards(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        // 日历 - 点击跳转到交易明细
         NewYearHorseActionCard(
             title = "日历",
             subtitle = "",
@@ -331,9 +335,11 @@ fun NewYearHorseQuickActionCards(
                     )
                 }
             },
+            onClick = onNavigateToTransactions,
             modifier = Modifier.weight(1f)
         )
 
+        // 本月收支 - 点击跳转到交易明细
         NewYearHorseActionCard(
             title = "本月收支",
             subtitle = "",
@@ -358,9 +364,11 @@ fun NewYearHorseQuickActionCards(
                     )
                 }
             },
+            onClick = onNavigateToTransactions,
             modifier = Modifier.weight(1f)
         )
 
+        // 账户 - 点击跳转到账户列表
         NewYearHorseActionCard(
             title = "账户",
             icon = Icons.Default.Receipt,
@@ -384,9 +392,11 @@ fun NewYearHorseQuickActionCards(
                     Text(text = "${accountCount}个账户", color = onSurfaceVariantColor, fontSize = 11.sp)
                 }
             },
+            onClick = onNavigateToAccounts,
             modifier = Modifier.weight(1f)
         )
 
+        // 趋势 - 点击跳转到统计
         NewYearHorseActionCard(
             title = "趋势",
             icon = Icons.AutoMirrored.Filled.ShowChart,
@@ -415,6 +425,7 @@ fun NewYearHorseQuickActionCards(
                     )
                 }
             },
+            onClick = onNavigateToStatistics,
             modifier = Modifier.weight(1f)
         )
     }

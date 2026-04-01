@@ -34,6 +34,7 @@ import com.example.aiaccounting.data.local.entity.TransactionType
 import com.example.aiaccounting.ui.components.*
 import com.example.aiaccounting.ui.theme.HorseTheme2026Colors
 import com.example.aiaccounting.ui.theme.LocalUiScale
+import com.example.aiaccounting.ui.navigation.Screen
 import com.example.aiaccounting.ui.viewmodel.OverviewViewModel
 import java.text.SimpleDateFormat
 import java.util.*
@@ -46,7 +47,8 @@ fun HorseOverviewScreen(
  onNavigateToAI: () -> Unit = {},
  onNavigateToButlerMarket: () -> Unit = {},
  onNavigateToTransactions: () -> Unit = {},
- onNavigateToStatistics: () -> Unit = {}
+ onNavigateToStatistics: () -> Unit = {},
+ onNavigateToAccounts: () -> Unit = {}
 ) {
  val monthlyStats by viewModel.monthlyStats.collectAsState()
  val recentTransactions by viewModel.recentTransactions.collectAsState()
@@ -61,9 +63,8 @@ fun HorseOverviewScreen(
  val overviewScale = uiScale.overviewScale
  val fontScale = uiScale.fontScale
 
- val calendar = Calendar.getInstance()
- val currentYear = calendar.get(Calendar.YEAR)
- val currentMonth = calendar.get(Calendar.MONTH) + 1
+ var selectedYear by remember { mutableStateOf(Calendar.getInstance().get(Calendar.YEAR)) }
+ val currentMonth = Calendar.getInstance().get(Calendar.MONTH) + 1
 
  Scaffold(
  topBar = {
@@ -74,7 +75,7 @@ fun HorseOverviewScreen(
  horizontalArrangement = Arrangement.Center,
  modifier = Modifier.fillMaxWidth()
  ) {
- IconButton(onClick = { }) {
+ IconButton(onClick = { selectedYear = selectedYear - 1 }) {
  Icon(
  imageVector = Icons.Default.ChevronLeft,
  contentDescription = "上一年",
@@ -82,12 +83,12 @@ fun HorseOverviewScreen(
  )
  }
  Text(
- text = "${currentYear}年度",
+ text = "${selectedYear}年度",
  fontSize = (20 * fontScale).sp,
  fontWeight = FontWeight.Bold,
  color = HorseTheme2026Colors.TextPrimary
  )
- IconButton(onClick = { }) {
+ IconButton(onClick = { selectedYear = selectedYear + 1 }) {
  Icon(
  imageVector = Icons.Default.ChevronRight,
  contentDescription = "下一年",
@@ -147,6 +148,7 @@ fun HorseOverviewScreen(
  accountCount = accounts.size,
  onNavigateToTransactions = onNavigateToTransactions,
  onNavigateToStatistics = onNavigateToStatistics,
+ onNavigateToAccounts = onNavigateToAccounts,
  overviewScale = overviewScale,
  fontScale = fontScale
  )
@@ -321,6 +323,7 @@ fun QuickActionCards(
  accountCount: Int,
  onNavigateToTransactions: () -> Unit,
  onNavigateToStatistics: () -> Unit,
+ onNavigateToAccounts: () -> Unit = {},
  overviewScale: Float = 1f,
  fontScale: Float = 1f
 ) {
@@ -328,7 +331,7 @@ fun QuickActionCards(
  modifier = Modifier.fillMaxWidth(),
  horizontalArrangement = Arrangement.spacedBy(12.dp)
  ) {
- // 方框1：日历信息（自动跟踪日历）
+ // 方框1：日历信息 - 点击跳转到交易明细
  val today = Calendar.getInstance()
  val currentYear = today.get(Calendar.YEAR)
  val currentMonthNum = today.get(Calendar.MONTH) + 1
@@ -368,12 +371,13 @@ fun QuickActionCards(
  )
  }
  },
+ onClick = onNavigateToTransactions,
  modifier = Modifier.weight(1f),
  overviewScale = overviewScale,
  fontScale = fontScale
  )
 
- // 方框2：月度收支数据（实时同步数据库）
+ // 方框2：月度收支数据 - 点击跳转到交易明细
  ActionCard(
  title = "本月收支",
  subtitle = "",
@@ -434,12 +438,13 @@ fun QuickActionCards(
  }
  }
  },
+ onClick = onNavigateToTransactions,
  modifier = Modifier.weight(1f),
  overviewScale = overviewScale,
  fontScale = fontScale
  )
 
- // 账户明细 - 仅展示数据，无点击跳转
+ // 账户明细 - 点击跳转到账户列表
  ActionCard(
  title = "账户明细",
  icon = Icons.Default.Receipt,
@@ -470,12 +475,13 @@ fun QuickActionCards(
  )
  }
  },
+ onClick = onNavigateToAccounts,
  modifier = Modifier.weight(1f),
  overviewScale = overviewScale,
  fontScale = fontScale
  )
 
- // 年度趋势 - 仅展示数据，无点击跳转
+ // 年度趋势 - 点击跳转到统计
  ActionCard(
  title = "年度趋势",
  icon = Icons.AutoMirrored.Filled.ShowChart,
@@ -507,6 +513,7 @@ fun QuickActionCards(
  )
  }
  },
+ onClick = onNavigateToStatistics,
  modifier = Modifier.weight(1f),
  overviewScale = overviewScale,
  fontScale = fontScale
@@ -616,13 +623,13 @@ fun ActionCard(
  horizontalArrangement = Arrangement.Center
  ) {
  Row(verticalAlignment = Alignment.CenterVertically) {
- Box(modifier = Modifier.size(10.dp).background(Color(0xFF00E676), CircleShape))
+ Box(modifier = Modifier.size((10 * overviewScale).dp).background(Color(0xFF00E676), CircleShape))
  Spacer(modifier = Modifier.width(4.dp))
  Text("收入", color = HorseTheme2026Colors.TextSecondary, fontSize = (10 * fontScale).sp)
  }
  Spacer(modifier = Modifier.width(16.dp))
  Row(verticalAlignment = Alignment.CenterVertically) {
- Box(modifier = Modifier.size(10.dp).background(Color(0xFF00B0FF), CircleShape))
+ Box(modifier = Modifier.size((10 * overviewScale).dp).background(Color(0xFF00B0FF), CircleShape))
  Spacer(modifier = Modifier.width(4.dp))
  Text("支出", color = HorseTheme2026Colors.TextSecondary, fontSize = (10 * fontScale).sp)
  }
@@ -641,7 +648,7 @@ fun ActionCard(
  Row(
  modifier = Modifier
  .fillMaxWidth()
- .height(100.dp),
+ .height((100 * overviewScale).dp),
  horizontalArrangement = Arrangement.SpaceEvenly,
  verticalAlignment = Alignment.Bottom
  ) {
@@ -653,14 +660,14 @@ fun ActionCard(
  Column(
  horizontalAlignment = Alignment.CenterHorizontally,
  modifier = Modifier
- .width(36.dp)
+ .width((36 * fontScale).dp)
  .clickable { selectedMonth = if (isSelected) null else data }
  ) {
  // 收入柱（绿色）
  Box(
  modifier = Modifier
- .width(12.dp)
- .height((incomeHeight * 40).dp)
+ .width((12 * fontScale).dp)
+ .height((incomeHeight * 40 * overviewScale).dp)
  .clip(RoundedCornerShape(2.dp))
  .background(
  if (isSelected) Color(0xFF00E676)
@@ -673,8 +680,8 @@ fun ActionCard(
  // 支出柱（蓝色）
  Box(
  modifier = Modifier
- .width(12.dp)
- .height((expenseHeight * 40).dp)
+ .width((12 * fontScale).dp)
+ .height((expenseHeight * 40 * overviewScale).dp)
  .clip(RoundedCornerShape(2.dp))
  .background(
  if (isSelected) Color(0xFF00B0FF)
@@ -697,7 +704,7 @@ fun ActionCard(
  text = data.month,
  color = HorseTheme2026Colors.TextSecondary,
  fontSize = (10 * fontScale).sp,
- modifier = Modifier.width(36.dp),
+ modifier = Modifier.width((36 * fontScale).dp),
  textAlign = TextAlign.Center
  )
  }
@@ -814,7 +821,7 @@ fun CategorySummaryCard(
  text = stat.name,
  color = HorseTheme2026Colors.TextSecondary,
  fontSize = (12 * fontScale).sp,
- modifier = Modifier.width(50.dp)
+ modifier = Modifier.width((50 * fontScale).dp)
  )
  Spacer(modifier = Modifier.width(8.dp))
  LinearProgressIndicator(
