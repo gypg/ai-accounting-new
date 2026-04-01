@@ -26,6 +26,7 @@ import com.example.aiaccounting.ui.components.SciFiBottomDecoration
 import com.example.aiaccounting.ui.components.FreshSciBackground
 import com.example.aiaccounting.ui.theme.AppThemeOptions
 import com.example.aiaccounting.ui.theme.FreshSciThemeColors
+import com.example.aiaccounting.ui.theme.LocalUiScale
 import com.example.aiaccounting.ui.viewmodel.SettingsViewModel
 import java.text.SimpleDateFormat
 
@@ -46,13 +47,16 @@ fun FreshSettingsScreen(
     onNavigateToSetupPin: () -> Unit = {},
     onLogout: () -> Unit = {},
     onThemeChanged: () -> Unit = {},
-    themeKey: Int = 0,
+    uiScaleKey: Int = 0,
+    onUiScaleChanged: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     var showAboutDialog by remember { mutableStateOf(false) }
     var showLogoutConfirmDialog by remember { mutableStateOf(false) }
     var showThemeDialog by remember { mutableStateOf(false) }
-    val currentTheme by remember(themeKey) { mutableStateOf(appStateManager.getTheme()) }
+    var showUiScaleDialog by remember { mutableStateOf(false) }
+    val currentTheme by remember(uiScaleKey) { mutableStateOf(appStateManager.getTheme()) }
+    val uiScale by remember(uiScaleKey) { mutableStateOf(appStateManager.getUiScalePreferences()) }
 
     Scaffold(
         topBar = {
@@ -198,6 +202,13 @@ fun FreshSettingsScreen(
                     onClick = { showThemeDialog = true },
                     primaryColor = FreshSciThemeColors.primary
                 )
+                SettingsRow(
+                    icon = Icons.Default.ZoomIn,
+                    title = "显示大小",
+                    subtitle = "调整界面和字体大小",
+                    onClick = { showUiScaleDialog = true },
+                    primaryColor = FreshSciThemeColors.primary
+                )
 
                 Spacer(modifier = Modifier.weight(1f))
 
@@ -247,6 +258,22 @@ fun FreshSettingsScreen(
             AboutDialog(
                 onDismiss = { showAboutDialog = false },
                 primaryColor = FreshSciThemeColors.primary
+            )
+        }
+
+        if (showUiScaleDialog) {
+            FreshUiScaleDialog(
+                uiScale = uiScale,
+                onDismiss = { showUiScaleDialog = false },
+                onConfirm = { overviewScale, statisticsScale, transactionScale, settingsScale, fontScale ->
+                    appStateManager.setOverviewScale(overviewScale)
+                    appStateManager.setStatisticsScale(statisticsScale)
+                    appStateManager.setTransactionScale(transactionScale)
+                    appStateManager.setSettingsScale(settingsScale)
+                    appStateManager.setFontScale(fontScale)
+                    showUiScaleDialog = false
+                    onUiScaleChanged()
+                }
             )
         }
     }
@@ -451,4 +478,101 @@ fun AboutDialog(
 @Composable
 fun getCurrentThemeName(themeId: String): String {
     return AppThemeOptions.all().find { it.id == themeId }?.title ?: "未知"
+}
+
+/**
+ * 浅色科幻清新主题的显示大小对话框
+ */
+@Composable
+fun FreshUiScaleDialog(
+    uiScale: com.example.aiaccounting.data.local.prefs.UiScalePreferences,
+    onDismiss: () -> Unit,
+    onConfirm: (Float, Float, Float, Float, Float) -> Unit
+) {
+    var localOverviewScale by remember { mutableFloatStateOf(uiScale.overviewScale) }
+    var localStatisticsScale by remember { mutableFloatStateOf(uiScale.statisticsScale) }
+    var localTransactionScale by remember { mutableFloatStateOf(uiScale.transactionScale) }
+    var localSettingsScale by remember { mutableFloatStateOf(uiScale.settingsScale) }
+    var localFontScale by remember { mutableFloatStateOf(uiScale.fontScale) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = FreshSciThemeColors.surface,
+        title = {
+            Text(
+                "显示大小",
+                color = FreshSciThemeColors.onSurface,
+                fontWeight = FontWeight.Bold
+            )
+        },
+        text = {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                Text(
+                    "调整各项界面的显示大小（${(localOverviewScale * 100).toInt()}%）",
+                    fontSize = 12.sp,
+                    color = FreshSciThemeColors.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+
+                FreshScaleSliderItem("总览界面", localOverviewScale) { localOverviewScale = it }
+                FreshScaleSliderItem("统计界面", localStatisticsScale) { localStatisticsScale = it }
+                FreshScaleSliderItem("交易明细", localTransactionScale) { localTransactionScale = it }
+                FreshScaleSliderItem("设置界面", localSettingsScale) { localSettingsScale = it }
+                FreshScaleSliderItem("全局字体", localFontScale) { localFontScale = it }
+            }
+        },
+        confirmButton = {
+            Row {
+                TextButton(onClick = {
+                    localOverviewScale = 1.0f
+                    localStatisticsScale = 1.0f
+                    localTransactionScale = 1.0f
+                    localSettingsScale = 1.0f
+                    localFontScale = 1.0f
+                }) {
+                    Text("重置", color = FreshSciThemeColors.onSurfaceVariant)
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                TextButton(onClick = {
+                    onConfirm(localOverviewScale, localStatisticsScale, localTransactionScale, localSettingsScale, localFontScale)
+                }) {
+                    Text("确定", color = FreshSciThemeColors.primary)
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("取消", color = FreshSciThemeColors.onSurfaceVariant)
+            }
+        }
+    )
+}
+
+@Composable
+private fun FreshScaleSliderItem(
+    label: String,
+    value: Float,
+    onValueChange: (Float) -> Unit
+) {
+    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(text = label, fontSize = 14.sp, color = FreshSciThemeColors.onSurface)
+            Text(
+                text = "${(value * 100).toInt()}%",
+                fontSize = 14.sp,
+                color = FreshSciThemeColors.primary
+            )
+        }
+        Slider(
+            value = value,
+            onValueChange = onValueChange,
+            valueRange = 0.7f..1.4f,
+            steps = 6,
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
 }

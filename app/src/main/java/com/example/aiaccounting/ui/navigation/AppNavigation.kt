@@ -15,6 +15,7 @@ import com.example.aiaccounting.data.local.prefs.AppStateManager
 import com.example.aiaccounting.ui.components.BottomNavBar
 import com.example.aiaccounting.ui.components.BottomNavItems
 import com.example.aiaccounting.ui.components.HorseBottomNavBar
+import com.example.aiaccounting.ui.components.FreshSciBottomNavBar
 import com.example.aiaccounting.ui.screens.*
 
 /**
@@ -75,6 +76,7 @@ fun AppNavigation(
     // 获取当前主题
     val currentTheme = appStateManager.getTheme()
     val isHorseTheme = currentTheme == "horse_2026"
+    val isFreshSciTheme = currentTheme == "fresh_sci"
 
     Scaffold(
         bottomBar = {
@@ -82,6 +84,20 @@ fun AppNavigation(
                 if (isHorseTheme) {
                     // 马年主题底部导航栏
                     HorseBottomNavBar(
+                        currentRoute = currentRoute ?: "overview",
+                        onNavigate = { route ->
+                            navController.navigate(route) {
+                                popUpTo("overview") {
+                                    saveState = true
+                                }
+                                launchSingleTop = true
+                                restoreState = true
+                            }
+                        }
+                    )
+                } else if (isFreshSciTheme) {
+                    // 浅色科幻清新主题底部导航栏
+                    FreshSciBottomNavBar(
                         currentRoute = currentRoute ?: "overview",
                         onNavigate = { route ->
                             navController.navigate(route) {
@@ -185,6 +201,24 @@ fun AppNavigation(
                             navController.navigate("statistics")
                         }
                     )
+                } else if (isFreshSciTheme) {
+                    FreshOverviewScreen(
+                        onNavigateToAddTransaction = {
+                            navController.navigate(Screen.AddTransaction.route)
+                        },
+                        onNavigateToAI = {
+                            navController.navigate(Screen.AIAssistant.route)
+                        },
+                        onNavigateToButlerMarket = {
+                            navController.navigate(Screen.ButlerSettings.route)
+                        },
+                        onNavigateToTransactions = {
+                            navController.navigate("transactions")
+                        },
+                        onNavigateToStatistics = {
+                            navController.navigate("statistics")
+                        }
+                    )
                 } else {
                     OverviewScreen(
                         onNavigateToAddTransaction = {
@@ -208,6 +242,12 @@ fun AppNavigation(
                             navController.navigate(Screen.AddTransaction.route)
                         }
                     )
+                } else if (isFreshSciTheme) {
+                    FreshTransactionScreen(
+                        onNavigateToAddTransaction = {
+                            navController.navigate(Screen.AddTransaction.route)
+                        }
+                    )
                 } else {
                     TransactionListScreen(
                         onNavigateToAddTransaction = {
@@ -227,6 +267,11 @@ fun AppNavigation(
                         uiScaleKey = uiScaleKey,
                         onUiScaleChanged = onUiScaleChanged
                     )
+                } else if (isFreshSciTheme) {
+                    FreshStatisticsScreen(
+                        uiScaleKey = uiScaleKey,
+                        onUiScaleChanged = onUiScaleChanged
+                    )
                 } else {
                     StatisticsScreen()
                 }
@@ -236,6 +281,54 @@ fun AppNavigation(
             composable("settings") {
                 if (isHorseTheme) {
                     HorseSettingsScreen(
+                        appStateManager = appStateManager,
+                        onNavigateBack = {
+                            navController.navigate("overview") {
+                                popUpTo("overview") { inclusive = true }
+                            }
+                        },
+                        onNavigateToProfile = {
+                            navController.navigate(Screen.Profile.route)
+                        },
+                        onNavigateToButlerSettings = {
+                            navController.navigate(Screen.ButlerSettings.route)
+                        },
+                        onNavigateToAccounts = {
+                            navController.navigate(Screen.Accounts.route)
+                        },
+                        onNavigateToCategories = {
+                            navController.navigate(Screen.Categories.route)
+                        },
+                        onNavigateToExport = {
+                            navController.navigate(Screen.Export.route)
+                        },
+                        onNavigateToTemplates = {
+                            navController.navigate(Screen.Templates.route)
+                        },
+                        onNavigateToImport = {
+                            navController.navigate(Screen.Import.route)
+                        },
+                        onNavigateToAISettings = {
+                            navController.navigate(Screen.AISettings.route)
+                        },
+                        onNavigateToBudgets = {
+                            navController.navigate(Screen.Budgets.route)
+                        },
+                        onNavigateToSetupPin = {
+                            navController.navigate(Screen.SetupPin.route)
+                        },
+                        onLogout = {
+                            appStateManager.setLoggedIn(false)
+                            navController.navigate(Screen.Login.route) {
+                                popUpTo(0) { inclusive = true }
+                            }
+                        },
+                        onThemeChanged = onThemeChanged,
+                        uiScaleKey = uiScaleKey,
+                        onUiScaleChanged = onUiScaleChanged
+                    )
+                } else if (isFreshSciTheme) {
+                    FreshSettingsScreen(
                         appStateManager = appStateManager,
                         onNavigateBack = {
                             navController.navigate("overview") {
