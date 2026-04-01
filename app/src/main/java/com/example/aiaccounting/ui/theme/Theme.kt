@@ -19,7 +19,6 @@ import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 
 import com.example.aiaccounting.ui.theme.FreshSciColorScheme
-import com.example.aiaccounting.ui.theme.NewYearHorseSciColorScheme
 
 /**
  * Current app theme id (string) for theme-aware UI.
@@ -175,20 +174,20 @@ private val AmoledDarkColorScheme = darkColorScheme(
 @Composable
 fun AIAccountingTheme(
 	themeSetting: String = "system",
+	uiScalePreferences: com.example.aiaccounting.data.local.prefs.UiScalePreferences = com.example.aiaccounting.data.local.prefs.UiScalePreferences(),
 	dynamicColor: Boolean = true,
 	content: @Composable () -> Unit
 ) {
 	val isSystemInDarkTheme = isSystemInDarkTheme()
 
-	val (darkTheme, amoledMode, dynamicMode, newYearHorseMode, horse2026Mode) = when (themeSetting) {
-		"light" -> Quintuple(false, false, false, false, false)
-		"dark" -> Quintuple(true, false, false, false, false)
-		"amoled" -> Quintuple(true, true, false, false, false)
-		"dynamic" -> Quintuple(isSystemInDarkTheme, false, true, false, false)
-		"horse_year" -> Quintuple(false, false, false, false, true) // legacy alias -> horse_2026
-		"new_year_horse" -> Quintuple(false, false, false, true, false)
-		"horse_2026" -> Quintuple(false, false, false, false, true)
-		else -> Quintuple(isSystemInDarkTheme, false, false, false, false) // system default
+	val (darkTheme, amoledMode, dynamicMode, horse2026Mode) = when (themeSetting) {
+		"light" -> Quadruple(false, false, false, false)
+		"dark" -> Quadruple(true, false, false, false)
+		"amoled" -> Quadruple(true, true, false, false)
+		"dynamic" -> Quadruple(isSystemInDarkTheme, false, true, false)
+		"horse_year" -> Quadruple(false, false, false, true) // legacy alias -> horse_2026
+		"horse_2026" -> Quadruple(false, false, false, true)
+		else -> Quadruple(isSystemInDarkTheme, false, false, false) // system default
 	}
 
 	val freshSciMode = themeSetting == "fresh_sci"
@@ -198,8 +197,6 @@ fun AIAccountingTheme(
 		horse2026Mode -> HorseTheme2026ColorScheme
 		// 浅色科幻清新主题
 		freshSciMode -> FreshSciColorScheme
-		// 新马年科幻主题（与 horse_2026 独立）
-		newYearHorseMode -> NewYearHorseSciColorScheme
 		// Material You动态主题（Android 12+）
 		dynamicMode && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
 			val context = LocalContext.current
@@ -230,7 +227,7 @@ fun AIAccountingTheme(
 	}
 
 	// Dreamy themes use glass cards with transparent backgrounds
-	val isDreamyTheme = themeSetting == "fresh_sci" || themeSetting == "new_year_horse"
+	val isDreamyTheme = themeSetting == "fresh_sci"
 
 	MaterialTheme(
 		colorScheme = colorScheme,
@@ -238,7 +235,8 @@ fun AIAccountingTheme(
 	) {
 		CompositionLocalProvider(
 			LocalAppThemeId provides themeSetting,
-			LocalIsDreamyTheme provides isDreamyTheme
+			LocalIsDreamyTheme provides isDreamyTheme,
+			LocalUiScale provides uiScalePreferences
 		) {
 			content()
 		}

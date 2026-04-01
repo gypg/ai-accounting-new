@@ -32,7 +32,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.aiaccounting.ui.theme.FreshSciColorScheme
-import com.example.aiaccounting.ui.theme.NewYearHorseSciColorScheme
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
@@ -40,7 +39,7 @@ import androidx.compose.ui.res.painterResource
 
 /**
  * 科幻风格装饰组件库
- * 适用于 fresh_sci（浅色科幻清新）和 new_year_horse（新马年科幻）主题
+ * 适用于 fresh_sci（浅色科幻清新）主题
  */
 
 // ==================== 浅色科幻清新装饰色 ====================

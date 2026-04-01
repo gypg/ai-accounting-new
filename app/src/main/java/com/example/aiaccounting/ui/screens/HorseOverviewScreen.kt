@@ -33,6 +33,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.aiaccounting.data.local.entity.TransactionType
 import com.example.aiaccounting.ui.components.*
 import com.example.aiaccounting.ui.theme.HorseTheme2026Colors
+import com.example.aiaccounting.ui.theme.LocalUiScale
 import com.example.aiaccounting.ui.viewmodel.OverviewViewModel
 import java.text.SimpleDateFormat
 import java.util.*
@@ -54,6 +55,11 @@ fun HorseOverviewScreen(
  val categories by viewModel.categories.collectAsState()
  val todayStats by viewModel.todayStats.collectAsState()
  val weekStats by viewModel.weekStats.collectAsState()
+
+ // UI scaling
+ val uiScale = LocalUiScale.current
+ val overviewScale = uiScale.overviewScale
+ val fontScale = uiScale.fontScale
 
  val calendar = Calendar.getInstance()
  val currentYear = calendar.get(Calendar.YEAR)
@@ -77,7 +83,7 @@ fun HorseOverviewScreen(
  }
  Text(
  text = "${currentYear}年度",
- fontSize = 20.sp,
+ fontSize = (20 * fontScale).sp,
  fontWeight = FontWeight.Bold,
  color = HorseTheme2026Colors.TextPrimary
  )
@@ -125,7 +131,9 @@ fun HorseOverviewScreen(
  totalIncome = monthlyStats.totalIncome,
  totalExpense = monthlyStats.totalExpense,
  balance = monthlyStats.totalIncome - monthlyStats.totalExpense,
- butlerName = butlerName
+ butlerName = butlerName,
+ overviewScale = overviewScale,
+ fontScale = fontScale
  )
 
  Spacer(modifier = Modifier.height(16.dp))
@@ -138,26 +146,38 @@ fun HorseOverviewScreen(
  yearlyExpense = monthlyStats.totalExpense,
  accountCount = accounts.size,
  onNavigateToTransactions = onNavigateToTransactions,
- onNavigateToStatistics = onNavigateToStatistics
+ onNavigateToStatistics = onNavigateToStatistics,
+ overviewScale = overviewScale,
+ fontScale = fontScale
  )
 
  Spacer(modifier = Modifier.height(16.dp))
 
  // 本月支出趋势（真实数据）
- MonthlyTrendCard(yearlyTrendData = yearlyTrendData)
+ MonthlyTrendCard(
+ yearlyTrendData = yearlyTrendData,
+ overviewScale = overviewScale,
+ fontScale = fontScale
+ )
 
  Spacer(modifier = Modifier.height(16.dp))
 
  // 支出分类占比（基于真实交易数据）
  CategorySummaryCard(
  recentTransactions = recentTransactions,
- categories = categories
+ categories = categories,
+ overviewScale = overviewScale,
+ fontScale = fontScale
  )
 
  Spacer(modifier = Modifier.height(16.dp))
 
  // 最近交易（真实数据）
- RecentTransactionsCard(transactions = recentTransactions)
+ RecentTransactionsCard(
+ transactions = recentTransactions,
+ overviewScale = overviewScale,
+ fontScale = fontScale
+ )
 
  Spacer(modifier = Modifier.height(120.dp))
  }
@@ -188,7 +208,9 @@ fun YearlySummaryCard(
  totalIncome: Double,
  totalExpense: Double,
  balance: Double,
- butlerName: String
+ butlerName: String,
+ overviewScale: Float = 1f,
+ fontScale: Float = 1f
 ) {
  Card(
  modifier = Modifier.fillMaxWidth(),
@@ -203,7 +225,7 @@ fun YearlySummaryCard(
  ) {
  Text(
  text = if (butlerName.isBlank()) "AI管家" else "AI管家 · $butlerName",
- fontSize = 14.sp,
+ fontSize = (14 * fontScale).sp,
  fontWeight = FontWeight.SemiBold,
  color = HorseTheme2026Colors.TextSecondary,
  modifier = Modifier.padding(bottom = 12.dp)
@@ -218,7 +240,9 @@ fun YearlySummaryCard(
  label = "收入",
  amount = "¥${String.format("%.2f", totalIncome)}",
  color = HorseTheme2026Colors.Income,
- icon = Icons.AutoMirrored.Filled.TrendingUp
+ icon = Icons.AutoMirrored.Filled.TrendingUp,
+ overviewScale = overviewScale,
+ fontScale = fontScale
  )
 
  // 支出 - 使用高对比度颜色
@@ -226,7 +250,9 @@ fun YearlySummaryCard(
  label = "支出",
  amount = "¥${String.format("%.2f", totalExpense)}",
  color = HorseTheme2026Colors.Expense,
- icon = Icons.AutoMirrored.Filled.TrendingDown
+ icon = Icons.AutoMirrored.Filled.TrendingDown,
+ overviewScale = overviewScale,
+ fontScale = fontScale
  )
 
  // 结余
@@ -234,7 +260,9 @@ fun YearlySummaryCard(
  label = "结余",
  amount = "¥${String.format("%.2f", balance)}",
  color = HorseTheme2026Colors.Gold,
- icon = Icons.Default.AccountBalance
+ icon = Icons.Default.AccountBalance,
+ overviewScale = overviewScale,
+ fontScale = fontScale
  )
  }
  }
@@ -246,7 +274,9 @@ fun SummaryItem(
  label: String,
  amount: String,
  color: Color,
- icon: ImageVector
+ icon: ImageVector,
+ overviewScale: Float = 1f,
+ fontScale: Float = 1f
 ) {
  Column(
  horizontalAlignment = Alignment.CenterHorizontally
@@ -254,7 +284,7 @@ fun SummaryItem(
  // 图标
  Box(
  modifier = Modifier
- .size(40.dp)
+ .size((40 * overviewScale).dp)
  .clip(CircleShape)
  .background(color.copy(alpha = 0.2f)),
  contentAlignment = Alignment.Center
@@ -263,20 +293,20 @@ fun SummaryItem(
  imageVector = icon,
  contentDescription = label,
  tint = color,
- modifier = Modifier.size(24.dp)
+ modifier = Modifier.size((24 * overviewScale).dp)
  )
  }
  Spacer(modifier = Modifier.height(8.dp))
  Text(
  text = label,
  color = HorseTheme2026Colors.TextSecondary,
- fontSize = 12.sp
+ fontSize = (12 * fontScale).sp
  )
  Spacer(modifier = Modifier.height(4.dp))
  Text(
  text = amount,
  color = color,
- fontSize = 18.sp,
+ fontSize = (18 * fontScale).sp,
  fontWeight = FontWeight.Bold
  )
  }
@@ -290,7 +320,9 @@ fun QuickActionCards(
  yearlyExpense: Double,
  accountCount: Int,
  onNavigateToTransactions: () -> Unit,
- onNavigateToStatistics: () -> Unit
+ onNavigateToStatistics: () -> Unit,
+ overviewScale: Float = 1f,
+ fontScale: Float = 1f
 ) {
  Row(
  modifier = Modifier.fillMaxWidth(),
@@ -315,7 +347,7 @@ fun QuickActionCards(
  Text(
  text = "$currentYear",
  color = HorseTheme2026Colors.TextPrimary,
- fontSize = 26.sp,
+ fontSize = (26 * overviewScale * fontScale).sp,
  fontWeight = FontWeight.Bold
  )
  Spacer(modifier = Modifier.height(2.dp))
@@ -323,7 +355,7 @@ fun QuickActionCards(
  Text(
  text = "${currentMonthNum}月${currentDay}日",
  color = HorseTheme2026Colors.Gold,
- fontSize = 14.sp,
+ fontSize = (14 * fontScale).sp,
  fontWeight = FontWeight.Medium
  )
  Spacer(modifier = Modifier.height(2.dp))
@@ -332,11 +364,13 @@ fun QuickActionCards(
  Text(
  text = weekDays[today.get(Calendar.DAY_OF_WEEK) - 1],
  color = HorseTheme2026Colors.TextSecondary,
- fontSize = 12.sp
+ fontSize = (12 * fontScale).sp
  )
  }
  },
- modifier = Modifier.weight(1f)
+ modifier = Modifier.weight(1f),
+ overviewScale = overviewScale,
+ fontScale = fontScale
  )
 
  // 方框2：月度收支数据（实时同步数据库）
@@ -362,13 +396,13 @@ fun QuickActionCards(
  Text(
  text = "收",
  color = HorseTheme2026Colors.TextSecondary,
- fontSize = 11.sp,
+ fontSize = (11 * fontScale).sp,
  modifier = Modifier.width(20.dp)
  )
  Text(
  text = "¥$incomeText",
  color = HorseTheme2026Colors.Income,
- fontSize = 16.sp,
+ fontSize = (16 * fontScale).sp,
  fontWeight = FontWeight.Bold
  )
  }
@@ -388,19 +422,21 @@ fun QuickActionCards(
  Text(
  text = "支",
  color = HorseTheme2026Colors.TextSecondary,
- fontSize = 11.sp,
+ fontSize = (11 * fontScale).sp,
  modifier = Modifier.width(20.dp)
  )
  Text(
  text = "¥$expenseText",
  color = HorseTheme2026Colors.Expense,
- fontSize = 16.sp,
+ fontSize = (16 * fontScale).sp,
  fontWeight = FontWeight.Bold
  )
  }
  }
  },
- modifier = Modifier.weight(1f)
+ modifier = Modifier.weight(1f),
+ overviewScale = overviewScale,
+ fontScale = fontScale
  )
 
  // 账户明细 - 仅展示数据，无点击跳转
@@ -414,7 +450,7 @@ fun QuickActionCards(
  ) {
  Box(
  modifier = Modifier
- .size(40.dp)
+ .size((40 * overviewScale).dp)
  .clip(CircleShape)
  .background(HorseTheme2026Colors.Gold.copy(alpha = 0.2f)),
  contentAlignment = Alignment.Center
@@ -423,18 +459,20 @@ fun QuickActionCards(
  imageVector = Icons.Default.Receipt,
  contentDescription = null,
  tint = HorseTheme2026Colors.Gold,
- modifier = Modifier.size(24.dp)
+ modifier = Modifier.size((24 * overviewScale).dp)
  )
  }
  Spacer(modifier = Modifier.height(4.dp))
  Text(
  text = "${accountCount}个账户",
  color = HorseTheme2026Colors.TextSecondary,
- fontSize = 11.sp
+ fontSize = (11 * fontScale).sp
  )
  }
  },
- modifier = Modifier.weight(1f)
+ modifier = Modifier.weight(1f),
+ overviewScale = overviewScale,
+ fontScale = fontScale
  )
 
  // 年度趋势 - 仅展示数据，无点击跳转
@@ -448,7 +486,7 @@ fun QuickActionCards(
  ) {
  Box(
  modifier = Modifier
- .size(40.dp)
+ .size((40 * overviewScale).dp)
  .clip(CircleShape)
  .background(HorseTheme2026Colors.Gold.copy(alpha = 0.2f)),
  contentAlignment = Alignment.Center
@@ -457,19 +495,21 @@ fun QuickActionCards(
  imageVector = Icons.AutoMirrored.Filled.ShowChart,
  contentDescription = null,
  tint = HorseTheme2026Colors.Gold,
- modifier = Modifier.size(24.dp)
+ modifier = Modifier.size((24 * overviewScale).dp)
  )
  }
  Spacer(modifier = Modifier.height(4.dp))
  Text(
  text = "¥${String.format("%.2f", yearlyExpense)}",
  color = HorseTheme2026Colors.Gold,
- fontSize = 14.sp,
+ fontSize = (14 * fontScale).sp,
  fontWeight = FontWeight.Bold
  )
  }
  },
- modifier = Modifier.weight(1f)
+ modifier = Modifier.weight(1f),
+ overviewScale = overviewScale,
+ fontScale = fontScale
  )
  }
 }
@@ -481,12 +521,14 @@ fun ActionCard(
  icon: ImageVector,
  content: @Composable () -> Unit,
  onClick: () -> Unit = {},
- modifier: Modifier = Modifier
+ modifier: Modifier = Modifier,
+ overviewScale: Float = 1f,
+ fontScale: Float = 1f
 ) {
  Card(
  modifier = modifier
  .clickable(onClick = onClick)
- .height(130.dp),
+ .height((130 * overviewScale).dp),
  shape = RoundedCornerShape(12.dp),
  colors = CardDefaults.cardColors(
  containerColor = HorseTheme2026Colors.CardBackground
@@ -506,19 +548,19 @@ fun ActionCard(
  imageVector = icon,
  contentDescription = title,
  tint = HorseTheme2026Colors.Gold,
- modifier = Modifier.size(14.dp)
+ modifier = Modifier.size((14 * fontScale).dp)
  )
  Text(
  text = title,
  color = HorseTheme2026Colors.TextSecondary,
- fontSize = 11.sp
+ fontSize = (11 * fontScale).sp
  )
  }
  subtitle?.let {
  Text(
  text = it,
  color = HorseTheme2026Colors.TextPrimary,
- fontSize = 13.sp,
+ fontSize = (13 * fontScale).sp,
  fontWeight = FontWeight.Medium
  )
  }
@@ -529,7 +571,11 @@ fun ActionCard(
 }
 
 @Composable
- fun MonthlyTrendCard(yearlyTrendData: List<com.example.aiaccounting.ui.components.charts.MonthlyData>) {
+ fun MonthlyTrendCard(
+ yearlyTrendData: List<com.example.aiaccounting.ui.components.charts.MonthlyData>,
+ overviewScale: Float = 1f,
+ fontScale: Float = 1f
+) {
  var selectedMonth by remember { mutableStateOf<com.example.aiaccounting.ui.components.charts.MonthlyData?>(null) }
 
  Card(
@@ -551,14 +597,14 @@ fun ActionCard(
  Text(
  text = "年度收支趋势",
  color = HorseTheme2026Colors.TextPrimary,
- fontSize = 15.sp,
+ fontSize = (15 * fontScale).sp,
  fontWeight = FontWeight.Bold
  )
  Icon(
  imageVector = Icons.AutoMirrored.Filled.TrendingUp,
  contentDescription = null,
  tint = HorseTheme2026Colors.Gold,
- modifier = Modifier.size(20.dp)
+ modifier = Modifier.size((20 * fontScale).dp)
  )
  }
 
@@ -572,13 +618,13 @@ fun ActionCard(
  Row(verticalAlignment = Alignment.CenterVertically) {
  Box(modifier = Modifier.size(10.dp).background(Color(0xFF00E676), CircleShape))
  Spacer(modifier = Modifier.width(4.dp))
- Text("收入", color = HorseTheme2026Colors.TextSecondary, fontSize = 10.sp)
+ Text("收入", color = HorseTheme2026Colors.TextSecondary, fontSize = (10 * fontScale).sp)
  }
  Spacer(modifier = Modifier.width(16.dp))
  Row(verticalAlignment = Alignment.CenterVertically) {
  Box(modifier = Modifier.size(10.dp).background(Color(0xFF00B0FF), CircleShape))
  Spacer(modifier = Modifier.width(4.dp))
- Text("支出", color = HorseTheme2026Colors.TextSecondary, fontSize = 10.sp)
+ Text("支出", color = HorseTheme2026Colors.TextSecondary, fontSize = (10 * fontScale).sp)
  }
  }
 
@@ -650,7 +696,7 @@ fun ActionCard(
  Text(
  text = data.month,
  color = HorseTheme2026Colors.TextSecondary,
- fontSize = 10.sp,
+ fontSize = (10 * fontScale).sp,
  modifier = Modifier.width(36.dp),
  textAlign = TextAlign.Center
  )
@@ -677,21 +723,21 @@ fun ActionCard(
  Text(
  text = data.month,
  color = HorseTheme2026Colors.TextPrimary,
- fontSize = 14.sp,
+ fontSize = (14 * fontScale).sp,
  fontWeight = FontWeight.Bold
  )
  Row {
  Text(
  text = "收: ¥${data.income.toInt()}",
  color = Color(0xFF00E676),
- fontSize = 13.sp,
+ fontSize = (13 * fontScale).sp,
  fontWeight = FontWeight.Bold
  )
  Spacer(modifier = Modifier.width(12.dp))
  Text(
  text = "支: ¥${data.expense.toInt()}",
  color = Color(0xFF00B0FF),
- fontSize = 13.sp,
+ fontSize = (13 * fontScale).sp,
  fontWeight = FontWeight.Bold
  )
  }
@@ -709,7 +755,7 @@ fun ActionCard(
  Text(
  text = "暂无数据",
  color = HorseTheme2026Colors.TextSecondary,
- fontSize = 14.sp
+ fontSize = (14 * fontScale).sp
  )
  }
  }
@@ -720,7 +766,9 @@ fun ActionCard(
 @Composable
 fun CategorySummaryCard(
  recentTransactions: List<com.example.aiaccounting.data.local.entity.Transaction>,
- categories: List<com.example.aiaccounting.data.local.entity.Category>
+ categories: List<com.example.aiaccounting.data.local.entity.Category>,
+ overviewScale: Float = 1f,
+ fontScale: Float = 1f
 ) {
  // 从真实交易计算分类统计，使用真实的分类名称
  val categoryStats = rememberCategoryStats(recentTransactions, categories)
@@ -744,14 +792,14 @@ fun CategorySummaryCard(
  Text(
  text = "支出分类占比",
  color = HorseTheme2026Colors.TextPrimary,
- fontSize = 15.sp,
+ fontSize = (15 * fontScale).sp,
  fontWeight = FontWeight.Bold
  )
  Icon(
  imageVector = Icons.Default.PieChart,
  contentDescription = null,
  tint = HorseTheme2026Colors.Gold,
- modifier = Modifier.size(20.dp)
+ modifier = Modifier.size((20 * fontScale).dp)
  )
  }
  Spacer(modifier = Modifier.height(12.dp))
@@ -765,7 +813,7 @@ fun CategorySummaryCard(
  Text(
  text = stat.name,
  color = HorseTheme2026Colors.TextSecondary,
- fontSize = 12.sp,
+ fontSize = (12 * fontScale).sp,
  modifier = Modifier.width(50.dp)
  )
  Spacer(modifier = Modifier.width(8.dp))
@@ -773,7 +821,7 @@ fun CategorySummaryCard(
  progress = { stat.percentage },
  modifier = Modifier
  .weight(1f)
- .height(6.dp)
+ .height((6 * overviewScale).dp)
  .clip(RoundedCornerShape(3.dp)),
  color = stat.color,
  trackColor = HorseTheme2026Colors.TextSecondary.copy(alpha = 0.1f)
@@ -782,7 +830,7 @@ fun CategorySummaryCard(
  Text(
  text = "${(stat.percentage * 100).toInt()}%",
  color = HorseTheme2026Colors.TextPrimary,
- fontSize = 12.sp,
+ fontSize = (12 * fontScale).sp,
  fontWeight = FontWeight.Bold
  )
  }
@@ -794,7 +842,7 @@ fun CategorySummaryCard(
  Text(
  text = "暂无支出数据",
  color = HorseTheme2026Colors.TextSecondary,
- fontSize = 14.sp
+ fontSize = (14 * fontScale).sp
  )
  }
  }
@@ -855,7 +903,9 @@ fun rememberCategoryStats(
 
 @Composable
 fun RecentTransactionsCard(
- transactions: List<com.example.aiaccounting.data.local.entity.Transaction>
+ transactions: List<com.example.aiaccounting.data.local.entity.Transaction>,
+ overviewScale: Float = 1f,
+ fontScale: Float = 1f
 ) {
  val dateFormat = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
  val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
@@ -879,13 +929,13 @@ fun RecentTransactionsCard(
  Text(
  text = "最近交易",
  color = HorseTheme2026Colors.TextPrimary,
- fontSize = 15.sp,
+ fontSize = (15 * fontScale).sp,
  fontWeight = FontWeight.Bold
  )
  Text(
  text = "查看更多",
  color = HorseTheme2026Colors.Gold,
- fontSize = 12.sp,
+ fontSize = (12 * fontScale).sp,
  modifier = Modifier.clickable { }
  )
  }
@@ -905,7 +955,7 @@ fun RecentTransactionsCard(
  Row(verticalAlignment = Alignment.CenterVertically) {
  Box(
  modifier = Modifier
- .size(36.dp)
+ .size((36 * overviewScale).dp)
  .clip(RoundedCornerShape(8.dp))
  .background(
  if (isExpense)
@@ -919,7 +969,7 @@ fun RecentTransactionsCard(
  imageVector = if (isExpense) Icons.Default.ShoppingCart else Icons.Default.AttachMoney,
  contentDescription = null,
  tint = amountColor,
- modifier = Modifier.size(20.dp)
+ modifier = Modifier.size((20 * overviewScale).dp)
  )
  }
  Spacer(modifier = Modifier.width(10.dp))
@@ -927,20 +977,20 @@ fun RecentTransactionsCard(
  Text(
  text = transaction.note.takeIf { it.isNotBlank() } ?: "未备注",
  color = HorseTheme2026Colors.TextPrimary,
- fontSize = 13.sp,
+ fontSize = (13 * fontScale).sp,
  fontWeight = FontWeight.Medium
  )
  Text(
  text = dateFormat.format(Date(transaction.date)),
  color = HorseTheme2026Colors.TextSecondary,
- fontSize = 11.sp
+ fontSize = (11 * fontScale).sp
  )
  }
  }
  Text(
  text = "$amountPrefix¥${String.format("%.2f", transaction.amount)}",
  color = amountColor,
- fontSize = 14.sp,
+ fontSize = (14 * fontScale).sp,
  fontWeight = FontWeight.Bold
  )
  }
@@ -952,7 +1002,7 @@ fun RecentTransactionsCard(
  Text(
  text = "暂无交易记录",
  color = HorseTheme2026Colors.TextSecondary,
- fontSize = 14.sp
+ fontSize = (14 * fontScale).sp
  )
  }
  }

@@ -36,14 +36,6 @@ fun AppThemeBackground(
 			)
 		)
 
-		AppThemeIds.NEW_YEAR_HORSE -> Brush.verticalGradient(
-			colors = listOf(
-				Color(0xFFFFECF6),
-				Color(0xFFF6EDFF),
-				Color(0xFFFFFFFF)
-			)
-		)
-
 		else -> null
 	}
 
@@ -58,16 +50,6 @@ fun AppThemeBackground(
 			radius = 0.95f
 		)
 
-		AppThemeIds.NEW_YEAR_HORSE -> Brush.radialGradient(
-			colors = listOf(
-				Color(0xFFFFB3E6).copy(alpha = 0.40f),
-				Color(0xFFFFB3E6).copy(alpha = 0.0f)
-			),
-			// Primary highlight: upper-left for natural focal point
-			center = Offset(0.25f, 0.18f),
-			radius = 1.0f
-		)
-
 		else -> null
 	}
 
@@ -80,16 +62,6 @@ fun AppThemeBackground(
 			// Secondary glow: lower-right for visual balance
 			center = Offset(0.85f, 0.42f),
 			radius = 0.85f
-		)
-
-		AppThemeIds.NEW_YEAR_HORSE -> Brush.radialGradient(
-			colors = listOf(
-				Color(0xFFB86BFF).copy(alpha = 0.20f),
-				Color(0xFFB86BFF).copy(alpha = 0.0f)
-			),
-			// Secondary glow: lower-right for visual balance
-			center = Offset(0.88f, 0.40f),
-			radius = 0.9f
 		)
 
 		else -> null

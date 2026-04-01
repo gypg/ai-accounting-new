@@ -8,6 +8,17 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
+ * UI 缩放偏好数据类
+ */
+data class UiScalePreferences(
+    val overviewScale: Float = 1.0f,
+    val statisticsScale: Float = 1.0f,
+    val transactionScale: Float = 1.0f,
+    val settingsScale: Float = 1.0f,
+    val fontScale: Float = 1.0f
+)
+
+/**
  * 应用状态管理器 - 管理应用的初始化状态和设置
  */
 @Singleton
@@ -30,9 +41,21 @@ class AppStateManager @Inject constructor(
         private const val KEY_THEME = "theme"
         private const val KEY_IS_LOGGED_IN = "is_logged_in"
 
+        // UI 缩放偏好
+        private const val KEY_UI_SCALE_OVERVIEW = "ui_scale_overview"
+        private const val KEY_UI_SCALE_STATISTICS = "ui_scale_statistics"
+        private const val KEY_UI_SCALE_TRANSACTION = "ui_scale_transaction"
+        private const val KEY_UI_SCALE_SETTINGS = "ui_scale_settings"
+        private const val KEY_UI_SCALE_FONT = "ui_scale_font"
+
         // AI 模型类型
         const val AI_MODEL_DEFAULT = "default"
         const val AI_MODEL_CUSTOM = "custom"
+
+        // UI 缩放默认值
+        const val DEFAULT_UI_SCALE = 1.0f
+        const val MIN_UI_SCALE = 0.7f
+        const val MAX_UI_SCALE = 1.4f
     }
     private val prefs: SharedPreferences by lazy {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -166,6 +189,51 @@ class AppStateManager @Inject constructor(
 
     fun setLoggedIn(loggedIn: Boolean) {
         prefs.edit().putBoolean(KEY_IS_LOGGED_IN, loggedIn).apply()
+    }
+
+    // ==================== UI 缩放偏好 ====================
+
+    /**
+     * 获取 UI 缩放偏好数据类
+     */
+    fun getUiScalePreferences(): UiScalePreferences {
+        return UiScalePreferences(
+            overviewScale = prefs.getFloat(KEY_UI_SCALE_OVERVIEW, DEFAULT_UI_SCALE),
+            statisticsScale = prefs.getFloat(KEY_UI_SCALE_STATISTICS, DEFAULT_UI_SCALE),
+            transactionScale = prefs.getFloat(KEY_UI_SCALE_TRANSACTION, DEFAULT_UI_SCALE),
+            settingsScale = prefs.getFloat(KEY_UI_SCALE_SETTINGS, DEFAULT_UI_SCALE),
+            fontScale = prefs.getFloat(KEY_UI_SCALE_FONT, DEFAULT_UI_SCALE)
+        )
+    }
+
+    fun setOverviewScale(scale: Float) {
+        prefs.edit().putFloat(KEY_UI_SCALE_OVERVIEW, scale.coerceIn(MIN_UI_SCALE, MAX_UI_SCALE)).apply()
+    }
+
+    fun setStatisticsScale(scale: Float) {
+        prefs.edit().putFloat(KEY_UI_SCALE_STATISTICS, scale.coerceIn(MIN_UI_SCALE, MAX_UI_SCALE)).apply()
+    }
+
+    fun setTransactionScale(scale: Float) {
+        prefs.edit().putFloat(KEY_UI_SCALE_TRANSACTION, scale.coerceIn(MIN_UI_SCALE, MAX_UI_SCALE)).apply()
+    }
+
+    fun setSettingsScale(scale: Float) {
+        prefs.edit().putFloat(KEY_UI_SCALE_SETTINGS, scale.coerceIn(MIN_UI_SCALE, MAX_UI_SCALE)).apply()
+    }
+
+    fun setFontScale(scale: Float) {
+        prefs.edit().putFloat(KEY_UI_SCALE_FONT, scale.coerceIn(MIN_UI_SCALE, MAX_UI_SCALE)).apply()
+    }
+
+    fun resetUiScalesToDefault() {
+        prefs.edit()
+            .putFloat(KEY_UI_SCALE_OVERVIEW, DEFAULT_UI_SCALE)
+            .putFloat(KEY_UI_SCALE_STATISTICS, DEFAULT_UI_SCALE)
+            .putFloat(KEY_UI_SCALE_TRANSACTION, DEFAULT_UI_SCALE)
+            .putFloat(KEY_UI_SCALE_SETTINGS, DEFAULT_UI_SCALE)
+            .putFloat(KEY_UI_SCALE_FONT, DEFAULT_UI_SCALE)
+            .apply()
     }
 
     // ==================== 清除所有状态 ====================

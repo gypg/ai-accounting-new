@@ -60,7 +60,9 @@ fun AppNavigation(
     onSetupComplete: (String) -> Unit = {},
     onLoginSuccess: (String) -> Unit = {},
     onInitialSetupComplete: () -> Unit = {},
-    onThemeChanged: () -> Unit = {}
+    onThemeChanged: () -> Unit = {},
+    uiScaleKey: Int = 0,
+    onUiScaleChanged: () -> Unit = {}
 ) {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
@@ -221,7 +223,10 @@ fun AppNavigation(
             // 统计 (使用底部导航)
             composable("statistics") {
                 if (isHorseTheme) {
-                    HorseStatisticsScreen()
+                    HorseStatisticsScreen(
+                        uiScaleKey = uiScaleKey,
+                        onUiScaleChanged = onUiScaleChanged
+                    )
                 } else {
                     StatisticsScreen()
                 }
@@ -273,7 +278,9 @@ fun AppNavigation(
                                 popUpTo(0) { inclusive = true }
                             }
                         },
-                        onThemeChanged = onThemeChanged
+                        onThemeChanged = onThemeChanged,
+                        uiScaleKey = uiScaleKey,
+                        onUiScaleChanged = onUiScaleChanged
                     )
                 } else {
                     SettingsScreen(
@@ -319,7 +326,9 @@ fun AppNavigation(
                                 popUpTo(0) { inclusive = true }
                             }
                         },
-                        onThemeChanged = onThemeChanged
+                        onThemeChanged = onThemeChanged,
+                        uiScaleKey = uiScaleKey,
+                        onUiScaleChanged = onUiScaleChanged
                     )
                 }
             }

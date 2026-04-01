@@ -34,6 +34,7 @@ import com.example.aiaccounting.data.local.entity.Transaction
 import com.example.aiaccounting.data.local.entity.TransactionType
 import com.example.aiaccounting.ui.components.*
 import com.example.aiaccounting.ui.theme.HorseTheme2026Colors
+import com.example.aiaccounting.ui.theme.LocalUiScale
 import com.example.aiaccounting.ui.viewmodel.StatisticsViewModel
 import java.text.SimpleDateFormat
 import java.util.*
@@ -41,7 +42,9 @@ import java.util.*
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HorseStatisticsScreen(
-    viewModel: StatisticsViewModel = hiltViewModel()
+    viewModel: StatisticsViewModel = hiltViewModel(),
+    uiScaleKey: Int = 0,
+    onUiScaleChanged: () -> Unit = {}
 ) {
     var selectedTab by remember { mutableStateOf(0) }
     val tabs = listOf("支出趋势", "支出分类", "支出明细", "分类统计")
@@ -49,13 +52,18 @@ fun HorseStatisticsScreen(
     val statistics by viewModel.statistics.collectAsState()
     val uiState by viewModel.uiState.collectAsState()
 
+    // UI scaling
+    val uiScale = LocalUiScale.current
+    val statisticsScale = uiScale.statisticsScale
+    val fontScale = uiScale.fontScale
+
     Scaffold(
         topBar = {
             TopAppBar(
                 title = {
                     Text(
                         text = "统计",
-                        fontSize = 22.sp,
+                        fontSize = (22 * fontScale).sp,
                         fontWeight = FontWeight.Bold,
                         color = HorseTheme2026Colors.TextPrimary
                     )
@@ -81,7 +89,9 @@ fun HorseStatisticsScreen(
                     // 总收入/总支出卡片 - 真实数据
                     IncomeExpenseCard(
                         totalIncome = statistics.totalIncome,
-                        totalExpense = statistics.totalExpense
+                        totalExpense = statistics.totalExpense,
+                        statisticsScale = statisticsScale,
+                        fontScale = fontScale
                     )
 
                     Spacer(modifier = Modifier.height(16.dp))
@@ -89,7 +99,9 @@ fun HorseStatisticsScreen(
                     // 时间筛选器
                     TimeFilterBar(
                         currentFilter = uiState.timeFilter,
-                        onFilterSelected = { viewModel.setTimeFilter(it) }
+                        onFilterSelected = { viewModel.setTimeFilter(it) },
+                        statisticsScale = statisticsScale,
+                        fontScale = fontScale
                     )
 
                     Spacer(modifier = Modifier.height(16.dp))
@@ -115,7 +127,7 @@ fun HorseStatisticsScreen(
                                 text = {
                                     Text(
                                         text = title,
-                                        fontSize = 13.sp,
+                                        fontSize = (13 * fontScale).sp,
                                         fontWeight = if (selectedTab == index) FontWeight.Bold else FontWeight.Normal,
                                         color = if (selectedTab == index)
                                             HorseTheme2026Colors.Gold
@@ -135,13 +147,25 @@ fun HorseStatisticsScreen(
                             monthlyTrend = statistics.monthlyTrend,
                             dailyTrend = statistics.dailyTrend,
                             weeklyTrend = statistics.weeklyTrend,
-                            timeFilter = uiState.timeFilter
+                            timeFilter = uiState.timeFilter,
+                            statisticsScale = statisticsScale,
+                            fontScale = fontScale
                         )
-                        1 -> ExpenseCategoryContent(categoryStats = statistics.categoryStats)
-                        2 -> ExpenseDetailContent(transactions = statistics.transactions)
+                        1 -> ExpenseCategoryContent(
+                            categoryStats = statistics.categoryStats,
+                            statisticsScale = statisticsScale,
+                            fontScale = fontScale
+                        )
+                        2 -> ExpenseDetailContent(
+                            transactions = statistics.transactions,
+                            statisticsScale = statisticsScale,
+                            fontScale = fontScale
+                        )
                         3 -> CategoryStatsContent(
                             totalExpense = statistics.totalExpense,
-                            categoryStats = statistics.categoryStats
+                            categoryStats = statistics.categoryStats,
+                            statisticsScale = statisticsScale,
+                            fontScale = fontScale
                         )
                     }
 
@@ -160,7 +184,9 @@ fun HorseStatisticsScreen(
 @Composable
 fun TimeFilterBar(
     currentFilter: String,
-    onFilterSelected: (String) -> Unit
+    onFilterSelected: (String) -> Unit,
+    statisticsScale: Float = 1f,
+    fontScale: Float = 1f
 ) {
     var showDatePicker by remember { mutableStateOf(false) }
     var selectedYear by remember { mutableStateOf(Calendar.getInstance().get(Calendar.YEAR)) }
@@ -211,12 +237,12 @@ fun TimeFilterBar(
                     Text(
                         text = "统计时间",
                         color = HorseTheme2026Colors.TextSecondary,
-                        fontSize = 12.sp
+                        fontSize = (12 * fontScale).sp
                     )
                     Text(
                         text = dateRangeText,
                         color = HorseTheme2026Colors.TextPrimary,
-                        fontSize = 16.sp,
+                        fontSize = (16 * fontScale).sp,
                         fontWeight = FontWeight.Bold
                     )
                 }
@@ -225,7 +251,7 @@ fun TimeFilterBar(
                         imageVector = Icons.Default.CalendarMonth,
                         contentDescription = "选择日期",
                         tint = HorseTheme2026Colors.Gold,
-                        modifier = Modifier.size(24.dp)
+                        modifier = Modifier.size((24 * statisticsScale).dp)
                     )
                 }
             }
@@ -269,7 +295,7 @@ fun TimeFilterBar(
                     label = {
                         Text(
                             text = label,
-                            fontSize = 11.sp,
+                            fontSize = (11 * fontScale).sp,
                             color = if (isSelected) Color.Black else HorseTheme2026Colors.TextSecondary
                         )
                     },
@@ -306,7 +332,7 @@ fun TimeFilterBar(
                     label = {
                         Text(
                             text = label,
-                            fontSize = 11.sp,
+                            fontSize = (11 * fontScale).sp,
                             color = if (isSelected) Color.Black else HorseTheme2026Colors.TextSecondary
                         )
                     },
@@ -325,7 +351,9 @@ fun TimeFilterBar(
 @Composable
 fun IncomeExpenseCard(
     totalIncome: Double,
-    totalExpense: Double
+    totalExpense: Double,
+    statisticsScale: Float = 1f,
+    fontScale: Float = 1f
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -346,20 +374,21 @@ fun IncomeExpenseCard(
                 Text(
                     text = "总收入",
                     color = HorseTheme2026Colors.TextSecondary,
-                    fontSize = 14.sp
+                    fontSize = (14 * fontScale).sp
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
                     text = "¥${String.format("%.2f", totalIncome)}",
                     color = HorseTheme2026Colors.Income,
-                    fontSize = 28.sp,
+                    fontSize = (28 * fontScale).sp,
                     fontWeight = FontWeight.Bold
                 )
                 // 收入图标
                 StatIcon(
                     icon = Icons.AutoMirrored.Filled.TrendingUp,
                     backgroundColor = HorseTheme2026Colors.Income.copy(alpha = 0.2f),
-                    iconColor = HorseTheme2026Colors.Income
+                    iconColor = HorseTheme2026Colors.Income,
+                    statisticsScale = statisticsScale
                 )
             }
 
@@ -368,20 +397,21 @@ fun IncomeExpenseCard(
                 Text(
                     text = "总支出",
                     color = HorseTheme2026Colors.TextSecondary,
-                    fontSize = 14.sp
+                    fontSize = (14 * fontScale).sp
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
                     text = "¥${String.format("%.2f", totalExpense)}",
                     color = HorseTheme2026Colors.Expense,
-                    fontSize = 28.sp,
+                    fontSize = (28 * fontScale).sp,
                     fontWeight = FontWeight.Bold
                 )
                 // 支出图标
                 StatIcon(
                     icon = Icons.AutoMirrored.Filled.TrendingDown,
                     backgroundColor = HorseTheme2026Colors.Expense.copy(alpha = 0.2f),
-                    iconColor = HorseTheme2026Colors.Expense
+                    iconColor = HorseTheme2026Colors.Expense,
+                    statisticsScale = statisticsScale
                 )
             }
         }
@@ -393,11 +423,12 @@ fun StatIcon(
     icon: ImageVector,
     backgroundColor: Color,
     iconColor: Color,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    statisticsScale: Float = 1f
 ) {
     Box(
         modifier = modifier
-            .size(40.dp)
+            .size((40 * statisticsScale).dp)
             .clip(CircleShape)
             .background(backgroundColor),
         contentAlignment = Alignment.Center
@@ -406,7 +437,7 @@ fun StatIcon(
             imageVector = icon,
             contentDescription = null,
             tint = iconColor,
-            modifier = Modifier.size(24.dp)
+            modifier = Modifier.size((24 * statisticsScale).dp)
         )
     }
 }
@@ -417,7 +448,9 @@ fun ExpenseTrendContent(
     monthlyTrend: List<com.example.aiaccounting.ui.components.charts.MonthlyData>,
     dailyTrend: List<com.example.aiaccounting.ui.viewmodel.DailyData>,
     weeklyTrend: List<com.example.aiaccounting.ui.viewmodel.WeeklyData>,
-    timeFilter: String
+    timeFilter: String,
+    statisticsScale: Float = 1f,
+    fontScale: Float = 1f
 ) {
     var chartType by remember { mutableStateOf(0) } // 0: 线图, 1: 柱状图
     var trendType by remember { mutableStateOf(0) } // 0: 月度, 1: 每周, 2: 日历
@@ -442,7 +475,7 @@ fun ExpenseTrendContent(
                     Text(
                         text = "支出趋势",
                         color = HorseTheme2026Colors.TextPrimary,
-                        fontSize = 16.sp,
+                        fontSize = (16 * fontScale).sp,
                         fontWeight = FontWeight.Bold
                     )
                     Row {
@@ -451,7 +484,7 @@ fun ExpenseTrendContent(
                                 imageVector = Icons.Default.ShowChart,
                                 contentDescription = "线图",
                                 tint = if (chartType == 0) HorseTheme2026Colors.Gold else HorseTheme2026Colors.TextSecondary,
-                                modifier = Modifier.size(24.dp)
+                                modifier = Modifier.size((24 * statisticsScale).dp)
                             )
                         }
                         IconButton(onClick = { chartType = 1 }) {
@@ -459,7 +492,7 @@ fun ExpenseTrendContent(
                                 imageVector = Icons.Default.BarChart,
                                 contentDescription = "柱状图",
                                 tint = if (chartType == 1) HorseTheme2026Colors.Gold else HorseTheme2026Colors.TextSecondary,
-                                modifier = Modifier.size(24.dp)
+                                modifier = Modifier.size((24 * statisticsScale).dp)
                             )
                         }
                     }
@@ -474,7 +507,7 @@ fun ExpenseTrendContent(
                         FilterChip(
                             selected = trendType == index,
                             onClick = { trendType = index },
-                            label = { Text(label, fontSize = 12.sp) },
+                            label = { Text(label, fontSize = (12 * fontScale).sp) },
                             colors = FilterChipDefaults.filterChipColors(
                                 selectedContainerColor = HorseTheme2026Colors.Gold,
                                 selectedLabelColor = Color.Black,
@@ -1195,7 +1228,11 @@ fun EmptyChartMessage() {
 
 // 支出分类内容 - 使用真实数据
 @Composable
-fun ExpenseCategoryContent(categoryStats: List<com.example.aiaccounting.ui.viewmodel.CategoryStat>) {
+fun ExpenseCategoryContent(
+    categoryStats: List<com.example.aiaccounting.ui.viewmodel.CategoryStat>,
+    statisticsScale: Float = 1f,
+    fontScale: Float = 1f
+) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
@@ -1300,7 +1337,11 @@ fun PieChart(categoryStats: List<com.example.aiaccounting.ui.viewmodel.CategoryS
 
 // 支出明细内容 - 使用真实数据
 @Composable
-fun ExpenseDetailContent(transactions: List<Transaction>) {
+fun ExpenseDetailContent(
+    transactions: List<Transaction>,
+    statisticsScale: Float = 1f,
+    fontScale: Float = 1f
+) {
     val dateFormat = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
 
     Card(
@@ -1363,7 +1404,9 @@ fun ExpenseDetailContent(transactions: List<Transaction>) {
 @Composable
 fun CategoryStatsContent(
     totalExpense: Double,
-    categoryStats: List<com.example.aiaccounting.ui.viewmodel.CategoryStat>
+    categoryStats: List<com.example.aiaccounting.ui.viewmodel.CategoryStat>,
+    statisticsScale: Float = 1f,
+    fontScale: Float = 1f
 ) {
     val transactionCount = categoryStats.size
     val maxExpense = categoryStats.maxOfOrNull { it.amount } ?: 0.0

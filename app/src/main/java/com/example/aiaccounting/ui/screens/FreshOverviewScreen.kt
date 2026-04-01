@@ -34,6 +34,7 @@ import com.example.aiaccounting.data.local.entity.TransactionType
 import com.example.aiaccounting.ui.components.*
 import com.example.aiaccounting.ui.components.FreshSciBackground
 import com.example.aiaccounting.ui.theme.FreshSciThemeColors
+import com.example.aiaccounting.ui.theme.LocalUiScale
 import com.example.aiaccounting.ui.viewmodel.OverviewViewModel
 import java.text.SimpleDateFormat
 import java.util.*
@@ -55,6 +56,11 @@ fun FreshOverviewScreen(
     val categories by viewModel.categories.collectAsState()
     val todayStats by viewModel.todayStats.collectAsState()
     val weekStats by viewModel.weekStats.collectAsState()
+
+    // UI scaling
+    val uiScale = LocalUiScale.current
+    val overviewScale = uiScale.overviewScale
+    val fontScale = uiScale.fontScale
 
     val calendar = Calendar.getInstance()
     val currentYear = calendar.get(Calendar.YEAR)
@@ -78,7 +84,7 @@ fun FreshOverviewScreen(
                         }
                         Text(
                             text = "${currentYear}年度",
-                            fontSize = 20.sp,
+                            fontSize = (20 * fontScale).sp,
                             fontWeight = FontWeight.Bold,
                             color = FreshSciThemeColors.onPrimary
                         )
@@ -127,7 +133,9 @@ fun FreshOverviewScreen(
                         totalExpense = monthlyStats.totalExpense,
                         balance = monthlyStats.totalIncome - monthlyStats.totalExpense,
                         butlerName = butlerName,
-                        primaryColor = FreshSciThemeColors.primary
+                        primaryColor = FreshSciThemeColors.primary,
+                        overviewScale = overviewScale,
+                        fontScale = fontScale
                     )
 
                     Spacer(modifier = Modifier.height(16.dp))
@@ -141,7 +149,9 @@ fun FreshOverviewScreen(
                         accountCount = accounts.size,
                         onNavigateToTransactions = onNavigateToTransactions,
                         onNavigateToStatistics = onNavigateToStatistics,
-                        primaryColor = FreshSciThemeColors.primary
+                        primaryColor = FreshSciThemeColors.primary,
+                        overviewScale = overviewScale,
+                        fontScale = fontScale
                     )
 
                     Spacer(modifier = Modifier.height(16.dp))
@@ -149,7 +159,9 @@ fun FreshOverviewScreen(
                     // 本月支出趋势
                     MonthlyTrendCard(
                         yearlyTrendData = yearlyTrendData,
-                        primaryColor = FreshSciThemeColors.primary
+                        primaryColor = FreshSciThemeColors.primary,
+                        overviewScale = overviewScale,
+                        fontScale = fontScale
                     )
 
                     Spacer(modifier = Modifier.height(16.dp))
@@ -158,7 +170,9 @@ fun FreshOverviewScreen(
                     CategorySummaryCard(
                         recentTransactions = recentTransactions,
                         categories = categories,
-                        primaryColor = FreshSciThemeColors.primary
+                        primaryColor = FreshSciThemeColors.primary,
+                        overviewScale = overviewScale,
+                        fontScale = fontScale
                     )
 
                     Spacer(modifier = Modifier.height(16.dp))
@@ -166,7 +180,9 @@ fun FreshOverviewScreen(
                     // 最近交易
                     RecentTransactionsCard(
                         transactions = recentTransactions,
-                        primaryColor = FreshSciThemeColors.primary
+                        primaryColor = FreshSciThemeColors.primary,
+                        overviewScale = overviewScale,
+                        fontScale = fontScale
                     )
 
                     Spacer(modifier = Modifier.height(120.dp))
@@ -189,7 +205,9 @@ fun YearlySummaryCard(
     totalExpense: Double,
     balance: Double,
     butlerName: String,
-    primaryColor: Color
+    primaryColor: Color,
+    overviewScale: Float = 1f,
+    fontScale: Float = 1f
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -248,7 +266,9 @@ fun SummaryItem(
     amount: String,
     color: Color,
     icon: ImageVector,
-    primaryColor: Color
+    primaryColor: Color,
+    overviewScale: Float = 1f,
+    fontScale: Float = 1f
 ) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally
@@ -292,7 +312,9 @@ fun QuickActionCards(
     accountCount: Int,
     onNavigateToTransactions: () -> Unit,
     onNavigateToStatistics: () -> Unit,
-    primaryColor: Color
+    primaryColor: Color,
+    overviewScale: Float = 1f,
+    fontScale: Float = 1f
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -479,7 +501,9 @@ fun ActionCard(
     content: @Composable () -> Unit,
     onClick: () -> Unit = {},
     modifier: Modifier = Modifier,
-    primaryColor: Color
+    primaryColor: Color,
+    overviewScale: Float = 1f,
+    fontScale: Float = 1f
 ) {
     Card(
         modifier = modifier
@@ -529,7 +553,9 @@ fun ActionCard(
 @Composable
 fun MonthlyTrendCard(
     yearlyTrendData: List<com.example.aiaccounting.ui.components.charts.MonthlyData>,
-    primaryColor: Color
+    primaryColor: Color,
+    overviewScale: Float = 1f,
+    fontScale: Float = 1f
 ) {
     var selectedMonth by remember { mutableStateOf<com.example.aiaccounting.ui.components.charts.MonthlyData?>(null) }
 
@@ -681,7 +707,9 @@ fun MonthlyTrendCard(
 fun CategorySummaryCard(
     recentTransactions: List<com.example.aiaccounting.data.local.entity.Transaction>,
     categories: List<com.example.aiaccounting.data.local.entity.Category>,
-    primaryColor: Color
+    primaryColor: Color,
+    overviewScale: Float = 1f,
+    fontScale: Float = 1f
 ) {
     val categoryStats = rememberCategoryStats(recentTransactions, categories)
 
@@ -764,7 +792,9 @@ fun CategorySummaryCard(
 @Composable
 fun RecentTransactionsCard(
     transactions: List<com.example.aiaccounting.data.local.entity.Transaction>,
-    primaryColor: Color
+    primaryColor: Color,
+    overviewScale: Float = 1f,
+    fontScale: Float = 1f
 ) {
     val dateFormat = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
     val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())

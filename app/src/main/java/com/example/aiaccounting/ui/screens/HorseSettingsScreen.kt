@@ -43,11 +43,15 @@ fun HorseSettingsScreen(
     onNavigateToSetupPin: () -> Unit = {},
     onLogout: () -> Unit = {},
     onThemeChanged: () -> Unit = {},
+    uiScaleKey: Int = 0,
+    onUiScaleChanged: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     var showThemeDialog by remember { mutableStateOf(false) }
+    var showUiScaleDialog by remember { mutableStateOf(false) }
     val currentTheme = appStateManager.getTheme()
     val uiState by viewModel.uiState.collectAsState()
+    val uiScale by remember(uiScaleKey) { mutableStateOf(appStateManager.getUiScalePreferences()) }
 
     Scaffold(
         topBar = {
@@ -102,6 +106,9 @@ fun HorseSettingsScreen(
                         },
                         Triple("主题", Icons.Default.Palette) {
                             showThemeDialog = true
+                        },
+                        Triple("显示大小", Icons.Default.ZoomIn) {
+                            showUiScaleDialog = true
                         },
                         Triple("AI管家", Icons.Default.Settings, onNavigateToButlerSettings)
                     )
@@ -189,6 +196,23 @@ fun HorseSettingsScreen(
                             appStateManager.setTheme(theme)
                             showThemeDialog = false
                             onThemeChanged()
+                        }
+                    )
+                }
+
+                // 显示大小对话框
+                if (showUiScaleDialog) {
+                    HorseUiScaleDialog(
+                        uiScale = uiScale,
+                        onDismiss = { showUiScaleDialog = false },
+                        onConfirm = { overviewScale, statisticsScale, transactionScale, settingsScale, fontScale ->
+                            appStateManager.setOverviewScale(overviewScale)
+                            appStateManager.setStatisticsScale(statisticsScale)
+                            appStateManager.setTransactionScale(transactionScale)
+                            appStateManager.setSettingsScale(settingsScale)
+                            appStateManager.setFontScale(fontScale)
+                            showUiScaleDialog = false
+                            onUiScaleChanged()
                         }
                     )
                 }
@@ -307,4 +331,102 @@ fun HorseThemeSelectionDialog(
             }
         }
     )
+}
+
+/**
+ * 马年主题的显示大小对话框
+ */
+@Composable
+fun HorseUiScaleDialog(
+    uiScale: com.example.aiaccounting.data.local.prefs.UiScalePreferences,
+    onDismiss: () -> Unit,
+    onConfirm: (Float, Float, Float, Float, Float) -> Unit
+) {
+    var localOverviewScale by remember { mutableFloatStateOf(uiScale.overviewScale) }
+    var localStatisticsScale by remember { mutableFloatStateOf(uiScale.statisticsScale) }
+    var localTransactionScale by remember { mutableFloatStateOf(uiScale.transactionScale) }
+    var localSettingsScale by remember { mutableFloatStateOf(uiScale.settingsScale) }
+    var localFontScale by remember { mutableFloatStateOf(uiScale.fontScale) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = HorseTheme2026Colors.CardBackground,
+        title = {
+            Text(
+                "显示大小",
+                color = HorseTheme2026Colors.TextPrimary,
+                fontWeight = FontWeight.Bold
+            )
+        },
+        text = {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                Text(
+                    "调整各项界面的显示大小（${(localOverviewScale * 100).toInt()}%）",
+                    fontSize = 12.sp,
+                    color = HorseTheme2026Colors.TextSecondary
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+
+                HorseScaleSliderItem("总览界面", localOverviewScale) { localOverviewScale = it }
+                HorseScaleSliderItem("统计界面", localStatisticsScale) { localStatisticsScale = it }
+                HorseScaleSliderItem("交易明细", localTransactionScale) { localTransactionScale = it }
+                HorseScaleSliderItem("设置界面", localSettingsScale) { localSettingsScale = it }
+                HorseScaleSliderItem("全局字体", localFontScale) { localFontScale = it }
+            }
+        },
+        confirmButton = {
+            Row {
+                TextButton(onClick = {
+                    localOverviewScale = 1.0f
+                    localStatisticsScale = 1.0f
+                    localTransactionScale = 1.0f
+                    localSettingsScale = 1.0f
+                    localFontScale = 1.0f
+                }) {
+                    Text("重置", color = HorseTheme2026Colors.TextSecondary)
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                TextButton(onClick = {
+                    onConfirm(localOverviewScale, localStatisticsScale, localTransactionScale, localSettingsScale, localFontScale)
+                }) {
+                    Text("确定", color = HorseTheme2026Colors.Gold)
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("取消", color = HorseTheme2026Colors.TextSecondary)
+            }
+        }
+    )
+}
+
+@Composable
+fun HorseScaleSliderItem(
+    label: String,
+    value: Float,
+    onValueChange: (Float) -> Unit
+) {
+    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(text = label, fontSize = 14.sp, color = HorseTheme2026Colors.TextPrimary)
+            Text(text = "${(value * 100).toInt()}%", fontSize = 14.sp, color = HorseTheme2026Colors.Gold)
+        }
+        Slider(
+            value = value,
+            onValueChange = onValueChange,
+            valueRange = 0.7f..1.4f,
+            steps = 6,
+            colors = SliderDefaults.colors(
+                thumbColor = HorseTheme2026Colors.Gold,
+                activeTrackColor = HorseTheme2026Colors.Gold,
+                inactiveTrackColor = HorseTheme2026Colors.TextSecondary.copy(alpha = 0.3f)
+            ),
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
 }

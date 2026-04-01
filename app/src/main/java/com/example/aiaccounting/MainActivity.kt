@@ -52,20 +52,27 @@ class MainActivity : ComponentActivity() {
  widgetActionNonce = SystemClock.elapsedRealtime()
 
  setContent {
- // 使用remember来监听主题变化
+ // 使用remember来监听主题和UI缩放变化
  var themeKey by remember { mutableStateOf(0) }
+ var uiScaleKey by remember { mutableStateOf(0) }
 
  // 读取当前主题设置
  val themeSetting = remember(themeKey) { appStateManager.getTheme() }
 
+ // 读取当前UI缩放设置
+ val uiScalePreferences = remember(uiScaleKey) { appStateManager.getUiScalePreferences() }
+
  AIAccountingTheme(
- themeSetting = themeSetting
+ themeSetting = themeSetting,
+ uiScalePreferences = uiScalePreferences
  ) {
  MainApp(
  securityManager = securityManager,
  appStateManager = appStateManager,
  themeKey = themeKey,
  onThemeChanged = { themeKey++ },
+ uiScaleKey = uiScaleKey,
+ onUiScaleChanged = { uiScaleKey++ },
  onRequestStoragePermission = { requestStoragePermission() },
  widgetAction = pendingWidgetAction,
  widgetActionNonce = widgetActionNonce,
@@ -75,7 +82,7 @@ class MainActivity : ComponentActivity() {
  )
  }
  }
- }
+}
 
  override fun onNewIntent(intent: Intent) {
  super.onNewIntent(intent)
@@ -113,6 +120,8 @@ fun MainApp(
  appStateManager: AppStateManager,
  @Suppress("UNUSED_PARAMETER") themeKey: Int,
  onThemeChanged: () -> Unit,
+ @Suppress("UNUSED_PARAMETER") uiScaleKey: Int,
+ @Suppress("UNUSED_PARAMETER") onUiScaleChanged: () -> Unit,
  @Suppress("UNUSED_PARAMETER") onRequestStoragePermission: () -> Unit,
  widgetAction: String? = null,
  widgetActionNonce: Long = 0L,
@@ -238,6 +247,8 @@ fun MainApp(
  appStateManager.setInitialSetupCompleted(true)
  refreshKey++
  },
- onThemeChanged = onThemeChanged
+ onThemeChanged = onThemeChanged,
+ uiScaleKey = uiScaleKey,
+ onUiScaleChanged = onUiScaleChanged
  )
 }
