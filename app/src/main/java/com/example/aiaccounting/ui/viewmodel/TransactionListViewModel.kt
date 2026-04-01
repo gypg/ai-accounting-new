@@ -2,6 +2,7 @@ package com.example.aiaccounting.ui.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.aiaccounting.data.local.entity.Category
 import com.example.aiaccounting.data.local.entity.Transaction
 import com.example.aiaccounting.data.local.entity.TransactionType
 import com.example.aiaccounting.data.repository.TransactionRepository
@@ -48,6 +49,9 @@ class TransactionListViewModel @Inject constructor(
     private val _categoryMap = MutableStateFlow<Map<Long, String>>(emptyMap())
     val categoryMap: StateFlow<Map<Long, String>> = _categoryMap.asStateFlow()
 
+    private val _categories = MutableStateFlow<List<Category>>(emptyList())
+    val categories: StateFlow<List<Category>> = _categories.asStateFlow()
+
     init {
         loadTransactions()
         loadCategories()
@@ -57,6 +61,7 @@ class TransactionListViewModel @Inject constructor(
         viewModelScope.launch {
             categoryRepository.getAllCategories().collect { categories ->
                 _categoryMap.value = categories.associate { it.id to it.name }
+                _categories.value = categories
             }
         }
     }

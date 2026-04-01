@@ -347,7 +347,7 @@ private fun NewYearHorseThemeOptionItem(
                 modifier = Modifier
                     .size(20.dp)
                     .clip(CircleShape)
-                    .background(theme.color),
+                    .background(theme.previewColor),
                 contentAlignment = Alignment.Center
             ) {
                 if (selected) {

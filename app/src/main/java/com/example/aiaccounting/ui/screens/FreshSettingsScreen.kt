@@ -354,7 +354,7 @@ fun ThemeSelectionDialog(
                                     modifier = Modifier
                                         .size(20.dp)
                                         .clip(RoundedCornerShape(4.dp))
-                                        .background(option.color),
+                                        .background(option.previewColor),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     if (currentTheme == option.id) {

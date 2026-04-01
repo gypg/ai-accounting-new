@@ -41,13 +41,17 @@ fun SettingsScreen(
     onNavigateToSetupPin: () -> Unit = {},
     onLogout: () -> Unit = {},
     onThemeChanged: () -> Unit = {},
+    uiScaleKey: Int = 0,
+    onUiScaleChanged: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     var showAboutDialog by remember { mutableStateOf(false) }
     var showNoticeDialog by remember { mutableStateOf(false) }
     var showLogoutConfirmDialog by remember { mutableStateOf(false) }
     var showThemeDialog by remember { mutableStateOf(false) }
+    var showUiScaleDialog by remember { mutableStateOf(false) }
     val currentTheme = appStateManager.getTheme()
+    val uiScale by remember(uiScaleKey) { mutableStateOf(appStateManager.getUiScalePreferences()) }
 
     Scaffold(
         topBar = {
@@ -324,6 +328,14 @@ fun SettingsScreen(
                 )
             }
 
+            // 显示大小设置
+            SettingsListItem(
+                icon = Icons.Default.ZoomIn,
+                title = "显示大小",
+                subtitle = "调整界面和字体大小",
+                onClick = { showUiScaleDialog = true }
+            )
+
             Spacer(modifier = Modifier.height(24.dp))
 
             // 管家设置区域
@@ -538,6 +550,92 @@ fun SettingsScreen(
             }
         )
     }
+
+    // 显示大小对话框
+    if (showUiScaleDialog) {
+        var localOverviewScale by remember { mutableFloatStateOf(uiScale.overviewScale) }
+        var localStatisticsScale by remember { mutableFloatStateOf(uiScale.statisticsScale) }
+        var localTransactionScale by remember { mutableFloatStateOf(uiScale.transactionScale) }
+        var localSettingsScale by remember { mutableFloatStateOf(uiScale.settingsScale) }
+        var localFontScale by remember { mutableFloatStateOf(uiScale.fontScale) }
+
+        AlertDialog(
+            onDismissRequest = { showUiScaleDialog = false },
+            title = { Text("显示大小", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                    Text("调整各项界面的显示大小（${(localOverviewScale * 100).toInt()}%）", fontSize = 12.sp, color = Color(0xFF888888))
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // 总览界面
+                    ScaleSliderItem(
+                        label = "总览界面",
+                        value = localOverviewScale,
+                        onValueChange = { localOverviewScale = it }
+                    )
+
+                    // 统计界面
+                    ScaleSliderItem(
+                        label = "统计界面",
+                        value = localStatisticsScale,
+                        onValueChange = { localStatisticsScale = it }
+                    )
+
+                    // 交易明细界面
+                    ScaleSliderItem(
+                        label = "交易明细",
+                        value = localTransactionScale,
+                        onValueChange = { localTransactionScale = it }
+                    )
+
+                    // 设置界面
+                    ScaleSliderItem(
+                        label = "设置界面",
+                        value = localSettingsScale,
+                        onValueChange = { localSettingsScale = it }
+                    )
+
+                    // 全局字体
+                    ScaleSliderItem(
+                        label = "全局字体",
+                        value = localFontScale,
+                        onValueChange = { localFontScale = it }
+                    )
+                }
+            },
+            confirmButton = {
+                Row {
+                    TextButton(onClick = {
+                        // 重置为默认值
+                        localOverviewScale = 1.0f
+                        localStatisticsScale = 1.0f
+                        localTransactionScale = 1.0f
+                        localSettingsScale = 1.0f
+                        localFontScale = 1.0f
+                    }) {
+                        Text("重置")
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    TextButton(onClick = {
+                        appStateManager.setOverviewScale(localOverviewScale)
+                        appStateManager.setStatisticsScale(localStatisticsScale)
+                        appStateManager.setTransactionScale(localTransactionScale)
+                        appStateManager.setSettingsScale(localSettingsScale)
+                        appStateManager.setFontScale(localFontScale)
+                        showUiScaleDialog = false
+                        onUiScaleChanged()
+                    }) {
+                        Text("确定")
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showUiScaleDialog = false }) {
+                    Text("取消")
+                }
+            }
+        )
+    }
 }
 
 @Composable
@@ -679,6 +777,34 @@ fun SettingsListItem(
                 modifier = Modifier.size(20.dp)
             )
         }
+    }
+}
+
+/**
+ * UI缩放滑块项
+ */
+@Composable
+fun ScaleSliderItem(
+    label: String,
+    value: Float,
+    onValueChange: (Float) -> Unit
+) {
+    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(text = label, fontSize = 14.sp)
+            Text(text = "${(value * 100).toInt()}%", fontSize = 14.sp, color = MaterialTheme.colorScheme.primary)
+        }
+        Slider(
+            value = value,
+            onValueChange = onValueChange,
+            valueRange = 0.7f..1.4f,
+            steps = 6,
+            modifier = Modifier.fillMaxWidth()
+        )
     }
 }
 
