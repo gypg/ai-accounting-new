@@ -22,6 +22,7 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.aiaccounting.BuildConfig
 import com.example.aiaccounting.data.local.prefs.AppStateManager
+import com.example.aiaccounting.ui.theme.AppThemeOptions
 import com.example.aiaccounting.ui.viewmodel.SettingsViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -491,25 +492,19 @@ fun SettingsScreen(
 
     // 主题选择对话框
     if (showThemeDialog) {
-        val themes = listOf(
-            Triple("system", "跟随系统", "自动切换浅色/深色模式"),
-            Triple("light", "浅色", "明亮的浅色主题"),
-            Triple("dark", "深色", "深色主题，护眼模式"),
-            Triple("amoled", "AMOLED纯黑", "纯黑背景，OLED省电"),
-            Triple("horse_2026", "2026马年主题", "新春马年主题")
-        )
+        val themes = AppThemeOptions.all().map { Triple(it.id, it.title, it.description) }
 
         AlertDialog(
             onDismissRequest = { showThemeDialog = false },
             title = { Text("选择主题") },
             text = {
                 Column {
-                    themes.forEach { (theme, title, desc) ->
+                    themes.forEach { (id, title, desc) ->
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable {
-                                    appStateManager.setTheme(theme)
+                                    appStateManager.setTheme(id)
                                     showThemeDialog = false
                                     // 通知主题变化
                                     onThemeChanged()
@@ -518,9 +513,9 @@ fun SettingsScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             RadioButton(
-                                selected = currentTheme == theme,
+                                selected = currentTheme == id,
                                 onClick = {
-                                    appStateManager.setTheme(theme)
+                                    appStateManager.setTheme(id)
                                     showThemeDialog = false
                                     // 通知主题变化
                                     onThemeChanged()
