@@ -88,7 +88,7 @@ class AIAssistantMessageOrchestratorTest {
             )
         )
 
-        assertTrue(route is AIAssistantMessageRoute.RemoteOrLocalFallback)
+        assertTrue(route is AIAssistantMessageRoute.RemoteRequest)
     }
 
     @Test
@@ -261,8 +261,8 @@ class AIAssistantMessageOrchestratorTest {
             )
         )
 
-        assertTrue(route is AIAssistantMessageRoute.RemoteOrLocalFallback)
-        route as AIAssistantMessageRoute.RemoteOrLocalFallback
+        assertTrue(route is AIAssistantMessageRoute.RemoteRequest)
+        route as AIAssistantMessageRoute.RemoteRequest
         assertEquals("补充一下是午饭", route.request.userMessage)
         assertEquals(AIAssistantInteractionStage.Execution, route.request.stage)
     }
@@ -279,11 +279,12 @@ class AIAssistantMessageOrchestratorTest {
             pendingInteractionState = null
         )
 
-        assertTrue(route is AIAssistantMessageRoute.RemoteOrLocalFallback)
-        route as AIAssistantMessageRoute.RemoteOrLocalFallback
+        assertTrue(route is AIAssistantMessageRoute.RemoteRequest)
+        route as AIAssistantMessageRoute.RemoteRequest
         assertEquals("帮我记一笔午饭 25 元", route.request.userMessage)
         assertEquals(AIAssistantInteractionStage.Execution, route.request.stage)
         assertEquals(AIAssistantRemoteResponseRequirement.ActionEnvelopeRequired, route.request.responseRequirement)
+        assertEquals(AIAssistantRemotePromptScenario.Bookkeeping, route.request.promptScenario)
     }
 
     @Test
@@ -343,7 +344,7 @@ class AIAssistantMessageOrchestratorTest {
 
     @Test
     fun decideContinuation_requestsSecondRemote_whenRouteNeedsRemoteFallback() {
-        val route = AIAssistantMessageRoute.RemoteOrLocalFallback(
+        val route = AIAssistantMessageRoute.RemoteRequest(
             request = RemoteExecutionRequest(userMessage = "帮我记一笔午饭 25 元")
         )
         val payload = AIAssistantContinuationPayload(

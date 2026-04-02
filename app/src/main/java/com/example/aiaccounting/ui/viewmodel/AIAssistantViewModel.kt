@@ -327,22 +327,32 @@ class AIAssistantViewModel @Inject constructor(
         val accounts = accountRepository.getAllAccountsList()
         val categories = categoryRepository.getAllCategoriesList()
         val currentButler = butlerCoordinator.resolveCurrentButler(_uiState.value.currentButler)
-        val messages = promptBuilder.buildMessages(request.userMessage, currentButler, accounts, categories)
+        val messages = promptBuilder.buildMessages(
+            userMessage = request.userMessage,
+            currentButler = currentButler,
+            accounts = accounts,
+            categories = categories,
+            scenario = request.promptScenario
+        )
         val diagnostics = buildRemoteDiagnosticsLabel(
             config = currentAIConfig,
             responseRequirement = request.responseRequirement
         )
 
-        return when (val result = remoteExecutionHandler.execute(
+        val result = remoteExecutionHandler.execute(
             messages = messages,
             config = currentAIConfig,
             responseRequirement = request.responseRequirement
-        )) {
+        )
+
+        return when (result) {
             is AIAssistantRemoteExecutionResult.Timeout -> "请求超时，请稍后重试。$diagnostics"
             is AIAssistantRemoteExecutionResult.TransportFailure -> {
                 "$USER_SAFE_REMOTE_TRANSPORT_ERROR 建议：检查网络后重试，或切换模型。$diagnostics"
             }
             is AIAssistantRemoteExecutionResult.IncompleteResponse -> "响应不完整，请稍后重试。$diagnostics"
+            AIAssistantRemoteExecutionResult.IncompleteResponseAfterRetry ->
+                "模型返回了不完整结果，已自动重试一次仍失败。建议：切换模型后重试。$diagnostics"
             is AIAssistantRemoteExecutionResult.QueryBeforeExecutionRequested -> {
                 actionExecutor.executeQueryBeforeExecution(result.envelope)
             }

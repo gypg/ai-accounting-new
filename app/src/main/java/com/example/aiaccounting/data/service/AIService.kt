@@ -54,6 +54,11 @@ class AIService @Inject constructor(
     private val modelExecutionPlanner = ModelExecutionPlanner()
     private val retryBackoffMillis = 300L
     private val compressionThresholdBytes = 512
+    private val oversizedStreamBypassThresholdChars = 8_000
+    private val bookkeepingOutputBudgetTokens = 2_000
+    private val longTextOutputBudgetTokens = 2_500
+    private val defaultOutputBudgetTokens = 4_000
+    private val longTextOutputBudgetThresholdChars = 8_000
     private val modelCache = ConcurrentHashMap<ModelCacheKey, CachedRemoteModels>()
 
     private fun modelSelectionStrategy(config: AIConfig): ModelSelectionStrategy {
@@ -93,16 +98,10 @@ class AIService @Inject constructor(
             return@flow
         }
 
-        try {
-            val response = when (config.provider) {
-                AIProvider.QWEN, AIProvider.DEEPSEEK, AIProvider.ZHIPU, AIProvider.BAIDU, AIProvider.CUSTOM -> sendOpenAIChatStream(messages, config)
-            }
-            emit(response)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            emit("请求失败: ${e.message}")
+        val response = when (config.provider) {
+            AIProvider.QWEN, AIProvider.DEEPSEEK, AIProvider.ZHIPU, AIProvider.BAIDU, AIProvider.CUSTOM -> sendOpenAIChatStream(messages, config)
         }
+        emit(response)
     }.flowOn(Dispatchers.IO)
 
     /**
@@ -545,7 +544,7 @@ class AIService @Inject constructor(
 
     private fun testGeminiConnection(config: AIConfig, messages: List<ChatMessage>) {
         val model = config.model.ifEmpty { "gemini-pro" }
-        val url = "${config.apiUrl}/models/$model:generateContent?key=${config.apiKey}"
+        val url = "${config.apiUrl}/models/$model:generateContent"
 
         val contentsArray = JSONArray()
         messages.forEach { msg ->
@@ -563,6 +562,7 @@ class AIService @Inject constructor(
 
         val request = Request.Builder()
             .url(url)
+            .header("x-goog-api-key", config.apiKey)
             .header("Content-Type", "application/json")
             .post(requestBody.toString().toRequestBody(jsonMediaType))
             .build()
@@ -589,7 +589,7 @@ class AIService @Inject constructor(
     ): String {
         // Current implementation is non-streaming under the hood. If AUTO is enabled (model is blank),
         // resolve a model via sendOpenAIChatNonStream directly to avoid an extra failing stream attempt.
-        if (config.model.isBlank()) {
+        if (config.model.isBlank() || shouldBypassStreamForOversizedPayload(messages)) {
             return sendOpenAIChatNonStream(messages, config)
         }
 
@@ -608,7 +608,7 @@ class AIService @Inject constructor(
             put("model", config.model)
             put("messages", messagesArray)
             put("temperature", 0.7)
-            put("max_tokens", 2000)
+            put("max_tokens", resolveOutputBudgetTokens(messages))
             put("stream", true)
         }
 
@@ -666,6 +666,34 @@ class AIService @Inject constructor(
             // 流式请求失败，回退到非流式
             sendOpenAIChatNonStream(messages, config)
         }
+    }
+
+    private fun shouldBypassStreamForOversizedPayload(messages: List<ChatMessage>): Boolean {
+        val estimatedChars = messages.sumOf { it.content.length }
+        return estimatedChars >= oversizedStreamBypassThresholdChars
+    }
+
+    private fun resolveOutputBudgetTokens(messages: List<ChatMessage>): Int {
+        if (isBookkeepingEnvelopeScenario(messages)) {
+            return bookkeepingOutputBudgetTokens
+        }
+
+        val estimatedChars = messages.sumOf { it.content.length }
+        if (estimatedChars >= longTextOutputBudgetThresholdChars) {
+            return longTextOutputBudgetTokens
+        }
+
+        return defaultOutputBudgetTokens
+    }
+
+    private fun isBookkeepingEnvelopeScenario(messages: List<ChatMessage>): Boolean {
+        val systemText = messages
+            .filter { it.role == MessageRole.SYSTEM }
+            .joinToString("\n") { it.content }
+            .lowercase()
+        return systemText.contains("仅返回 json 对象") ||
+            systemText.contains("仅返回可执行动作 envelope") ||
+            systemText.contains("\"actions\"")
     }
 
     private fun buildOpenAiJsonPostRequest(
@@ -818,7 +846,7 @@ class AIService @Inject constructor(
             put("model", config.model)
             put("messages", messagesArray)
             put("temperature", 0.7)
-            put("max_tokens", 2000)
+            put("max_tokens", resolveOutputBudgetTokens(messages))
             put("stream", false)
         }
 
@@ -856,17 +884,23 @@ class AIService @Inject constructor(
                     throw OpenAIChatFailure.Other(message)
                 }
 
-                val choices = json.getJSONArray("choices")
-                if (choices.length() > 0) {
-                    val content = choices.getJSONObject(0)
-                        .getJSONObject("message")
-                        .getString("content")
-                    if (content.trim().isEmpty()) {
-                        throw OpenAIChatFailure.EmptyReply("empty_reply")
-                    }
-                    return content
+                val choices = json.optJSONArray("choices")
+                    ?: throw OpenAIChatFailure.EmptyReply("missing_choices")
+                if (choices.length() == 0) {
+                    throw OpenAIChatFailure.EmptyReply("empty_choices")
                 }
-                throw OpenAIChatFailure.Other("无效的响应格式")
+                val firstChoice = choices.optJSONObject(0)
+                    ?: throw OpenAIChatFailure.EmptyReply("missing_choice_object")
+                val message = firstChoice.optJSONObject("message")
+                    ?: throw OpenAIChatFailure.EmptyReply("missing_message")
+                if (!message.has("content")) {
+                    throw OpenAIChatFailure.EmptyReply("missing_content")
+                }
+                val content = message.optString("content", "")
+                if (content.trim().isEmpty()) {
+                    throw OpenAIChatFailure.EmptyReply("empty_reply")
+                }
+                return content
             }
         } catch (e: OpenAIChatFailure.ModelUnavailable) {
             throw e
@@ -1011,7 +1045,7 @@ class AIService @Inject constructor(
             put("model", config.model)
             put("messages", messagesArray)
             put("temperature", 0.7)
-            put("max_tokens", 2000)
+            put("max_tokens", resolveOutputBudgetTokens(messages))
             put("stream", false)
         }
 
@@ -1098,7 +1132,7 @@ class AIService @Inject constructor(
 
         val requestBody = JSONObject().apply {
             put("model", config.model.ifEmpty { "claude-3-sonnet-20240229" })
-            put("max_tokens", 2000)
+            put("max_tokens", defaultOutputBudgetTokens)
             put("messages", messagesArray)
             if (systemMessage.isNotEmpty()) {
                 put("system", systemMessage)
@@ -1136,7 +1170,7 @@ class AIService @Inject constructor(
         config: AIConfig
     ): String {
         val model = config.model.ifEmpty { "gemini-pro" }
-        val url = "${config.apiUrl}/models/$model:generateContent?key=${config.apiKey}"
+        val url = "${config.apiUrl}/models/$model:generateContent"
 
         // 构建Gemini格式的内容
         val contentsArray = JSONArray()
@@ -1155,6 +1189,7 @@ class AIService @Inject constructor(
 
         val request = Request.Builder()
             .url(url)
+            .header("x-goog-api-key", config.apiKey)
             .header("Content-Type", "application/json")
             .post(requestBody.toString().toRequestBody(jsonMediaType))
             .build()
@@ -1469,7 +1504,7 @@ private fun sendOpenAIImageRequest(
         put("model", config.model)
         put("messages", messagesArray)
         put("temperature", 0.7)
-        put("max_tokens", 2000)
+        put("max_tokens", defaultOutputBudgetTokens)
     }
 
     val request = Request.Builder()
@@ -1543,7 +1578,7 @@ private fun sendClaudeImageRequest(
 
     val requestBody = JSONObject().apply {
         put("model", config.model.ifEmpty { "claude-3-sonnet-20240229" })
-        put("max_tokens", 2000)
+        put("max_tokens", defaultOutputBudgetTokens)
         put("messages", messagesArray)
         if (systemPrompt.isNotEmpty()) {
             put("system", systemPrompt)
@@ -1586,7 +1621,7 @@ private fun sendGeminiImageRequest(
     config: AIConfig
 ): String {
     val model = config.model.ifEmpty { "gemini-1.5-flash" }
-    val url = "${config.apiUrl}/models/$model:generateContent?key=${config.apiKey}"
+    val url = "${config.apiUrl}/models/$model:generateContent"
 
     val partsArray = JSONArray()
     partsArray.put(JSONObject().apply {
@@ -1610,6 +1645,7 @@ private fun sendGeminiImageRequest(
 
     val request = Request.Builder()
         .url(url)
+        .header("x-goog-api-key", config.apiKey)
         .header("Content-Type", "application/json")
         .post(requestBody.toString().toRequestBody(jsonMediaType))
         .build()

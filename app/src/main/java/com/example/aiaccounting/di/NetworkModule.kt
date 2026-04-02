@@ -37,8 +37,8 @@ object NetworkModule {
         return OkHttpClient.Builder()
             .dns(ipv4FirstDns)
             .connectTimeout(30, TimeUnit.SECONDS)
-            .readTimeout(120, TimeUnit.SECONDS)
-            .writeTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(300, TimeUnit.SECONDS)  // 5分钟读取超时，支持长消息
+            .writeTimeout(60, TimeUnit.SECONDS)  // 1分钟写入超时
             .pingInterval(30, TimeUnit.SECONDS)
             .retryOnConnectionFailure(true)
             .connectionPool(ConnectionPool(5, 5, TimeUnit.MINUTES))

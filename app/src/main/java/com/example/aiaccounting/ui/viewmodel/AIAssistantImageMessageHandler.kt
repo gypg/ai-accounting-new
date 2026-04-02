@@ -144,12 +144,22 @@ internal class AIAssistantImageMessageHandler(
             it.confidence == ImageProcessingService.OcrConfidence.HIGH ||
                 it.confidence == ImageProcessingService.OcrConfidence.MEDIUM
         }
-        if (acceptedResults.isEmpty()) {
-            return ImagePromptResult.Error("😥 这次图片识别置信度过低，暂时不会发送到云端 AI。请尽量保持图片清晰、端正、完整后再试一次。")
+        val resultsForPrompt = acceptedResults.ifEmpty {
+            analysisResults.filter { result ->
+                result.hasContent && (
+                    result.text.isNotBlank() ||
+                        result.keyLines.isNotEmpty() ||
+                        result.labels.isNotEmpty() ||
+                        result.receiptSignals.hasStrongReceiptSignals
+                    )
+            }
+        }
+        if (resultsForPrompt.isEmpty()) {
+            return ImagePromptResult.Error("😥 没有在图片里识别到文字或标签，可能图片过模糊或无法读取。请尝试更清晰的账单照片再试一次。")
         }
 
         return ImagePromptResult.Success(
-            imageProcessingService.generateCompactPrompt(acceptedResults, message)
+            imageProcessingService.generateCompactPrompt(resultsForPrompt, message)
         )
     }
 

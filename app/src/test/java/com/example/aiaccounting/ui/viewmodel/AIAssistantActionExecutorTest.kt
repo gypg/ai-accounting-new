@@ -74,6 +74,53 @@ class AIAssistantActionExecutorTest {
     }
 
     @Test
+    fun executeQueryBeforeExecution_whenEnvelopeComesFromWrappedChoicesContent_returnsUserVisibleReplyWithExecutionSummary() = runTest {
+        val interpreter = AIAssistantRemoteResponseInterpreter()
+        val wrappedResponse = """
+            {
+              "choices": [
+                {
+                  "message": {
+                    "content": "{\"actions\":[{\"action\":\"add_transaction\",\"amount\":26,\"transactionType\":\"expense\",\"accountRef\":{\"id\":12,\"name\":\"日常卡\",\"kind\":\"account\"},\"categoryRef\":{\"id\":34,\"name\":\"餐饮\",\"kind\":\"category\"},\"note\":\"工作餐\",\"date\":0}],\"reply\":\"已整理长文本账单\"}"
+                  }
+                }
+              ]
+            }
+        """.trimIndent()
+
+        coEvery { aiLocalProcessor.ensureBasicCategoriesExist() } returns Unit
+        coEvery { accountRepository.getAllAccountsList() } returnsMany listOf(
+            listOf(Account(id = 12, name = "日常卡", type = AccountType.BANK)),
+            listOf(Account(id = 12, name = "日常卡", type = AccountType.BANK))
+        )
+        coEvery { categoryRepository.getAllCategoriesList() } returnsMany listOf(
+            listOf(Category(id = 34, name = "餐饮", type = TransactionType.EXPENSE)),
+            listOf(Category(id = 34, name = "餐饮", type = TransactionType.EXPENSE))
+        )
+        coEvery {
+            aiOperationExecutor.executeOperation(
+                match<AIOperation.AddTransaction> {
+                    it.accountId == 12L &&
+                        it.categoryId == 34L &&
+                        it.amount == 26.0
+                }
+            )
+        } returns AIOperationExecutor.AIOperationResult.Success("ok")
+
+        val decision = interpreter.interpret(wrappedResponse)
+        assertTrue(decision is RemoteResponseDecision.QueryBeforeExecute)
+        val result = executor.executeQueryBeforeExecution(
+            (decision as RemoteResponseDecision.QueryBeforeExecute).envelope
+        )
+
+        assertTrue(result.contains("已整理长文本账单"))
+        assertTrue(result.contains("已先查询本地上下文，再执行记账"))
+        assertTrue(result.contains("已记账"))
+        assertTrue(result.contains("账户查询：请求=日常卡，命中=日常卡"))
+        assertTrue(result.contains("分类查询：请求=餐饮，命中=餐饮"))
+    }
+
+    @Test
     fun executeAIActions_reportsEachActionResult_whenBatchHasMixedOutcome() = runTest {
         coEvery { aiLocalProcessor.ensureBasicCategoriesExist() } returns Unit
         coEvery { accountRepository.getAllAccountsList() } returnsMany listOf(

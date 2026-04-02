@@ -16,7 +16,7 @@ internal sealed class RemoteStreamCollectionResult {
 internal class AIAssistantRemoteStreamCollector(
     private val sendChatStream: (List<ChatMessage>, AIConfig) -> Flow<String>,
     private val recordUsageFailure: suspend () -> Unit,
-    private val timeoutMillis: Long = 60_000L
+    private val timeoutMillis: Long = 720_000L  // 12分钟总预算，覆盖长请求的读取、重试与模型回退
 ) {
     private companion object {
         private const val USER_SAFE_TRANSPORT_FAILURE = "服务暂时不可用，请稍后重试。"

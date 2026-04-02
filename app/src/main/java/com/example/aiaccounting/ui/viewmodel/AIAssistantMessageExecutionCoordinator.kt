@@ -168,7 +168,7 @@ internal class AIAssistantMessageExecutionCoordinator(
             resumedMessage = continuationRequest.resumedMessage,
             trigger = continuationRequest.trigger,
             nextStep = when (route) {
-                is AIAssistantMessageRoute.RemoteOrLocalFallback -> AIAssistantContinuationStep.RequestSecondRemote
+                is AIAssistantMessageRoute.RemoteRequest -> AIAssistantContinuationStep.RequestSecondRemote
                 is AIAssistantMessageRoute.ModificationFlow -> AIAssistantContinuationStep.ExecuteModification
                 is AIAssistantMessageRoute.LocalActions -> AIAssistantContinuationStep.ExecuteLocally
             }
@@ -262,7 +262,7 @@ internal class AIAssistantMessageExecutionCoordinator(
                     )
                 }
             }
-            is AIAssistantMessageRoute.RemoteOrLocalFallback -> {
+            is AIAssistantMessageRoute.RemoteRequest -> {
                 AIAssistantMessageExecutionResult.Reply(
                     message = processWithRemoteAI(route.request),
                     stage = route.request.stage
@@ -286,7 +286,7 @@ internal class AIAssistantMessageExecutionCoordinator(
         route: AIAssistantMessageRoute,
         analysis: AIAssistantMessageAnalysis
     ): AIAssistantMessageRoute {
-        return if (route is AIAssistantMessageRoute.RemoteOrLocalFallback) {
+        return if (route is AIAssistantMessageRoute.RemoteRequest) {
             if (
                 analysis.engineMode == AIAssistantEngineMode.Local ||
                 analysis.topLevelIntent == AIAssistantTopLevelIntent.OCR_IMAGE
@@ -313,10 +313,11 @@ internal class AIAssistantMessageExecutionCoordinator(
             trigger == ClarificationTrigger.TRANSACTION_CATEGORY ||
             trigger == ClarificationTrigger.TRANSACTION_DATE
 
-        return if (isBookkeepingTrigger && route is AIAssistantMessageRoute.RemoteOrLocalFallback) {
-            AIAssistantMessageRoute.RemoteOrLocalFallback(
+        return if (isBookkeepingTrigger && route is AIAssistantMessageRoute.RemoteRequest) {
+            AIAssistantMessageRoute.RemoteRequest(
                 route.request.copy(
-                    responseRequirement = AIAssistantRemoteResponseRequirement.ActionEnvelopeRequired
+                    responseRequirement = AIAssistantRemoteResponseRequirement.ActionEnvelopeRequired,
+                    promptScenario = AIAssistantRemotePromptScenario.Bookkeeping
                 )
             )
         } else {

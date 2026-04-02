@@ -54,7 +54,32 @@ class AIAssistantRemoteResponseIntegrityCheckerTest {
     }
 
     @Test
+    fun isComplete_returnsTrue_whenBareJsonArrayIsValid() {
+        assertTrue(checker.isComplete("[{\"action\":\"add_transaction\",\"amount\":25}]"))
+    }
+
+    @Test
+    fun isComplete_returnsFalse_whenBareJsonArrayIsIncomplete() {
+        assertFalse(checker.isComplete("[{\"action\":\"add_transaction\",\"amount\":25}"))
+    }
+
+    @Test
     fun isComplete_returnsTrue_whenNonJsonFenceContainsPlainText() {
         assertTrue(checker.isComplete("```text\nhello\n```"))
+    }
+
+    @Test
+    fun isComplete_returnsFalse_whenOpenAiChoicesContentContainsHalfJson() {
+        assertFalse(checker.isComplete("{\"choices\":[{\"message\":{\"content\":\"{\\\"action\\\":\\\"add_transaction\\\"\"}}]}"))
+    }
+
+    @Test
+    fun isComplete_returnsTrue_whenOpenAiChoicesContentContainsCompleteJson() {
+        assertTrue(checker.isComplete("{\"choices\":[{\"message\":{\"content\":\"{\\\"action\\\":\\\"add_transaction\\\"}\"}}]}"))
+    }
+
+    @Test
+    fun isComplete_returnsTrue_whenOpenAiChoicesContentIsPlainText() {
+        assertTrue(checker.isComplete("{\"choices\":[{\"message\":{\"content\":\"您好，我在呢\"}}]}"))
     }
 }

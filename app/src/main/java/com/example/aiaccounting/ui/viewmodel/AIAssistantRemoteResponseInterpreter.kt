@@ -21,17 +21,50 @@ internal class AIAssistantRemoteResponseInterpreter {
 
     fun interpret(remoteResponse: String): RemoteResponseDecision {
         val sanitizedResponse = sanitizeRemoteResponse(remoteResponse)
+        val trimmed = sanitizedResponse.trim()
+
         val actionEnvelope = extractActionEnvelope(sanitizedResponse)
-        val displayReply = extractDisplayReply(sanitizedResponse)
-        return if (actionEnvelope != null) {
-            if (requiresQueryBeforeExecution(actionEnvelope)) {
+        if (actionEnvelope != null) {
+            return if (requiresQueryBeforeExecution(actionEnvelope)) {
                 RemoteResponseDecision.QueryBeforeExecute(actionEnvelope)
             } else {
                 RemoteResponseDecision.ExecuteActions(actionEnvelope)
             }
-        } else {
-            RemoteResponseDecision.ReturnRemoteReply(displayReply)
         }
+
+        val wrappedChoicesContent = extractOpenAIChoicesContent(trimmed)
+        if (!wrappedChoicesContent.isNullOrBlank()) {
+            val wrappedEnvelope = extractActionEnvelope(wrappedChoicesContent)
+            if (wrappedEnvelope != null) {
+                return if (requiresQueryBeforeExecution(wrappedEnvelope)) {
+                    RemoteResponseDecision.QueryBeforeExecute(wrappedEnvelope)
+                } else {
+                    RemoteResponseDecision.ExecuteActions(wrappedEnvelope)
+                }
+            }
+        }
+
+        if (trimmed.startsWith("{")) {
+            extractReplyField(trimmed)?.let { reply ->
+                if (reply.isNotBlank()) {
+                    return RemoteResponseDecision.ReturnRemoteReply(reply)
+                }
+            }
+        }
+
+        return RemoteResponseDecision.ReturnRemoteReply(extractDisplayReply(sanitizedResponse))
+    }
+
+    /**
+     * 从 JSON 中提取 reply 字段
+     * 用于提取 AI 助手的回复文本（如 {"thinking": "...", "reply": "你好！"}）
+     */
+    private fun extractReplyField(jsonText: String): String? {
+        return runCatching {
+            val json = JSONObject(jsonText)
+            val reply = json.optString("reply", "").trim()
+            reply.takeIf { it.isNotEmpty() }
+        }.getOrNull()
     }
 
     private fun extractExecutableJsonCandidate(response: String): String? {
@@ -294,6 +327,9 @@ internal class AIAssistantRemoteResponseInterpreter {
             return trimmed
         }
 
+        // Try to extract from OpenAI-compatible JSON format first
+        extractOpenAIChoicesContent(trimmed)?.let { return it }
+
         val withoutFencedJson = trimmed.replace(fencedJsonRegex, " ").trim()
         val withoutInlineJson = stripDisplayJsonLikeSegments(withoutFencedJson)
             .removeDirtyNullWrappers()
@@ -310,6 +346,42 @@ internal class AIAssistantRemoteResponseInterpreter {
             trimmed.contains('{') ||
             trimmed.contains('[')
         return if (likelyJsonGarbage) "" else trimmed
+    }
+
+    /**
+     * Extract display content from OpenAI-compatible JSON responses like:
+     * {"choices": [{"message": {"content": "您好！"}}]}
+     */
+    private fun extractOpenAIChoicesContent(jsonText: String): String? {
+        return runCatching {
+            val jsonObject = JSONObject(jsonText)
+            val choices = jsonObject.optJSONArray("choices") ?: return@runCatching null
+            if (choices.length() == 0) return@runCatching null
+            val firstChoice = choices.optJSONObject(0) ?: return@runCatching null
+            val message = firstChoice.optJSONObject("message") ?: return@runCatching null
+            val contentValue = message.opt("content") ?: return@runCatching null
+            val content = when (contentValue) {
+                is String -> contentValue
+                is JSONArray -> {
+                    buildString {
+                        for (index in 0 until contentValue.length()) {
+                            val part = contentValue.opt(index)
+                            when (part) {
+                                is JSONObject -> {
+                                    val text = part.optString("text", "")
+                                    if (text.isNotBlank()) {
+                                        append(text)
+                                    }
+                                }
+                                is String -> append(part)
+                            }
+                        }
+                    }
+                }
+                else -> ""
+            }
+            content.trim().takeIf { it.isNotEmpty() }
+        }.getOrNull()
     }
 
     private fun requiresQueryBeforeExecution(envelope: AIAssistantActionEnvelope): Boolean {

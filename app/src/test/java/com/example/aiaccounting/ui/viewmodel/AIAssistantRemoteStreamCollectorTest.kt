@@ -76,4 +76,42 @@ class AIAssistantRemoteStreamCollectorTest {
         assertTrue(!message.contains("boom"))
         coVerify(exactly = 1) { usageFailureRecorder() }
     }
+
+    @Test
+    fun collect_defaultTimeoutSupportsLongRunningRequestWindow() = runTest {
+        coEvery { usageFailureRecorder() } returns Unit
+        val collector = AIAssistantRemoteStreamCollector(
+            sendChatStream = { _, _ ->
+                flow {
+                    delay(240_000)
+                    emit("long-running-success")
+                }
+            },
+            recordUsageFailure = usageFailureRecorder
+        )
+
+        val result = collector.collect(messages, config)
+
+        assertTrue(result is RemoteStreamCollectionResult.Success)
+        assertEquals("long-running-success", (result as RemoteStreamCollectionResult.Success).response)
+    }
+
+    @Test
+    fun collect_defaultTimeoutSupportsRetryAndFallbackBudget() = runTest {
+        coEvery { usageFailureRecorder() } returns Unit
+        val collector = AIAssistantRemoteStreamCollector(
+            sendChatStream = { _, _ ->
+                flow {
+                    delay(610_000)
+                    emit("budget-success")
+                }
+            },
+            recordUsageFailure = usageFailureRecorder
+        )
+
+        val result = collector.collect(messages, config)
+
+        assertTrue(result is RemoteStreamCollectionResult.Success)
+        assertEquals("budget-success", (result as RemoteStreamCollectionResult.Success).response)
+    }
 }

@@ -28,11 +28,17 @@ internal enum class AIAssistantRemoteResponseRequirement {
     ActionEnvelopeRequired
 }
 
+internal enum class AIAssistantRemotePromptScenario {
+    Chat,
+    Bookkeeping
+}
+
 internal data class RemoteExecutionRequest(
     val userMessage: String,
     val continuationPayload: AIAssistantContinuationPayload? = null,
     val stage: AIAssistantInteractionStage = AIAssistantInteractionStage.Execution,
-    val responseRequirement: AIAssistantRemoteResponseRequirement = AIAssistantRemoteResponseRequirement.ReplyAllowed
+    val responseRequirement: AIAssistantRemoteResponseRequirement = AIAssistantRemoteResponseRequirement.ReplyAllowed,
+    val promptScenario: AIAssistantRemotePromptScenario = AIAssistantRemotePromptScenario.Chat
 )
 
 internal data class ModificationExecutionRequest(
@@ -48,7 +54,7 @@ internal sealed class AIAssistantMessageRoute {
         val stage: AIAssistantInteractionStage = AIAssistantInteractionStage.Execution
     ) : AIAssistantMessageRoute()
 
-    data class RemoteOrLocalFallback(val request: RemoteExecutionRequest) : AIAssistantMessageRoute()
+    data class RemoteRequest(val request: RemoteExecutionRequest) : AIAssistantMessageRoute()
 
     data class ModificationFlow(val request: ModificationExecutionRequest) : AIAssistantMessageRoute()
 }
@@ -97,7 +103,7 @@ internal class AIAssistantMessageOrchestrator {
         continuationPayload: AIAssistantContinuationPayload
     ): AIAssistantContinuationDecision {
         return when (route) {
-            is AIAssistantMessageRoute.RemoteOrLocalFallback -> {
+            is AIAssistantMessageRoute.RemoteRequest -> {
                 AIAssistantContinuationDecision.RequestSecondRemote(
                     route.request.copy(continuationPayload = continuationPayload)
                 )
@@ -193,10 +199,11 @@ internal class AIAssistantMessageOrchestrator {
                 when (analysis.topLevelIntent) {
                     AIAssistantTopLevelIntent.DAILY_CHAT -> {
                         if (analysis.engineMode == AIAssistantEngineMode.Remote) {
-                            AIAssistantMessageRoute.RemoteOrLocalFallback(
+                            AIAssistantMessageRoute.RemoteRequest(
                                 RemoteExecutionRequest(
                                     userMessage = analysis.userMessage,
-                                    responseRequirement = AIAssistantRemoteResponseRequirement.ReplyAllowed
+                                    responseRequirement = AIAssistantRemoteResponseRequirement.ReplyAllowed,
+                                    promptScenario = AIAssistantRemotePromptScenario.Chat
                                 )
                             )
                         } else {
@@ -214,10 +221,11 @@ internal class AIAssistantMessageOrchestrator {
                     }
                     AIAssistantTopLevelIntent.BOOKKEEPING -> {
                         if (analysis.engineMode == AIAssistantEngineMode.Remote) {
-                            AIAssistantMessageRoute.RemoteOrLocalFallback(
+                            AIAssistantMessageRoute.RemoteRequest(
                                 RemoteExecutionRequest(
                                     userMessage = analysis.userMessage,
-                                    responseRequirement = AIAssistantRemoteResponseRequirement.ActionEnvelopeRequired
+                                    responseRequirement = AIAssistantRemoteResponseRequirement.ActionEnvelopeRequired,
+                                    promptScenario = AIAssistantRemotePromptScenario.Bookkeeping
                                 )
                             )
                         } else {

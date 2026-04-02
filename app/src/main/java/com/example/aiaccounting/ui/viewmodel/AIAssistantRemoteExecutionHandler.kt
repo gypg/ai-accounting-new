@@ -27,8 +27,10 @@ internal class AIAssistantRemoteExecutionHandler(
                 responseRequirement = responseRequirement,
                 allowEnvelopeCorrectionRetry = true,
                 allowEmptyReplyRetry = true,
+                allowIncompleteRetry = true,
                 hasRetriedEnvelopeCorrection = false,
-                hasRetriedEmptyReply = false
+                hasRetriedEmptyReply = false,
+                hasRetriedIncompleteResponse = false
             )
         } catch (e: CancellationException) {
             throw e
@@ -41,8 +43,10 @@ internal class AIAssistantRemoteExecutionHandler(
         responseRequirement: AIAssistantRemoteResponseRequirement,
         allowEnvelopeCorrectionRetry: Boolean,
         allowEmptyReplyRetry: Boolean,
+        allowIncompleteRetry: Boolean,
         hasRetriedEnvelopeCorrection: Boolean,
-        hasRetriedEmptyReply: Boolean
+        hasRetriedEmptyReply: Boolean,
+        hasRetriedIncompleteResponse: Boolean
     ): AIAssistantRemoteExecutionResult {
         return when (val collected = streamCollector.collect(messages, config)) {
             is RemoteStreamCollectionResult.Timeout -> AIAssistantRemoteExecutionResult.Timeout
@@ -50,48 +54,74 @@ internal class AIAssistantRemoteExecutionHandler(
             is RemoteStreamCollectionResult.Success -> {
                 if (!integrityChecker.isComplete(collected.response)) {
                     recordUsageFailure()
-                    return AIAssistantRemoteExecutionResult.IncompleteResponse
+                    if (allowIncompleteRetry) {
+                        return executeInternal(
+                            messages = messages,
+                            config = config,
+                            responseRequirement = responseRequirement,
+                            allowEnvelopeCorrectionRetry = allowEnvelopeCorrectionRetry,
+                            allowEmptyReplyRetry = allowEmptyReplyRetry,
+                            allowIncompleteRetry = false,
+                            hasRetriedEnvelopeCorrection = hasRetriedEnvelopeCorrection,
+                            hasRetriedEmptyReply = hasRetriedEmptyReply,
+                            hasRetriedIncompleteResponse = true
+                        )
+                    }
+                    return if (hasRetriedIncompleteResponse) {
+                        AIAssistantRemoteExecutionResult.IncompleteResponseAfterRetry
+                    } else {
+                        AIAssistantRemoteExecutionResult.IncompleteResponse
+                    }
                 }
-
-                recordUsageSuccess()
 
                 when (val decision = interpreter.interpret(remoteResponse = collected.response)) {
                     is RemoteResponseDecision.QueryBeforeExecute -> {
+                        recordUsageSuccess()
                         AIAssistantRemoteExecutionResult.QueryBeforeExecutionRequested(decision.envelope)
                     }
                     is RemoteResponseDecision.ExecuteActions -> {
+                        recordUsageSuccess()
                         AIAssistantRemoteExecutionResult.ActionExecutionRequested(decision.envelope)
                     }
                     is RemoteResponseDecision.ReturnRemoteReply -> {
                         if (responseRequirement == AIAssistantRemoteResponseRequirement.ActionEnvelopeRequired) {
                             if (allowEnvelopeCorrectionRetry) {
+                                recordUsageFailure()
                                 return executeInternal(
                                     messages = appendEnvelopeCorrectionMessage(messages),
                                     config = config,
                                     responseRequirement = responseRequirement,
                                     allowEnvelopeCorrectionRetry = false,
                                     allowEmptyReplyRetry = allowEmptyReplyRetry,
+                                    allowIncompleteRetry = allowIncompleteRetry,
                                     hasRetriedEnvelopeCorrection = true,
-                                    hasRetriedEmptyReply = hasRetriedEmptyReply
+                                    hasRetriedEmptyReply = hasRetriedEmptyReply,
+                                    hasRetriedIncompleteResponse = hasRetriedIncompleteResponse
                                 )
                             }
+                            recordUsageFailure()
                             AIAssistantRemoteExecutionResult.TransactionActionMissing(
                                 retriedWithEnvelopeCorrection = hasRetriedEnvelopeCorrection
                             )
                         } else if (decision.reply.isBlank()) {
                             if (allowEmptyReplyRetry) {
+                                recordUsageFailure()
                                 return executeInternal(
                                     messages = messages,
                                     config = config,
                                     responseRequirement = responseRequirement,
                                     allowEnvelopeCorrectionRetry = allowEnvelopeCorrectionRetry,
                                     allowEmptyReplyRetry = false,
+                                    allowIncompleteRetry = allowIncompleteRetry,
                                     hasRetriedEnvelopeCorrection = hasRetriedEnvelopeCorrection,
-                                    hasRetriedEmptyReply = true
+                                    hasRetriedEmptyReply = true,
+                                    hasRetriedIncompleteResponse = hasRetriedIncompleteResponse
                                 )
                             }
+                            recordUsageFailure()
                             AIAssistantRemoteExecutionResult.EmptyRemoteReply(retried = hasRetriedEmptyReply)
                         } else {
+                            recordUsageSuccess()
                             AIAssistantRemoteExecutionResult.RemoteReply(decision.reply)
                         }
                     }

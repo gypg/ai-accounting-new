@@ -98,6 +98,17 @@ class AIAssistantRemoteResponseInterpreterTest {
     }
 
     @Test
+    fun interpret_prefersActions_whenJsonContainsBothReplyAndActions() {
+        val decision = interpreter.interpret(
+            remoteResponse = "{\"reply\":\"收到啦\",\"actions\":[{\"action\":\"add_transaction\",\"amount\":25}]}"
+        )
+
+        assertTrue(decision is RemoteResponseDecision.QueryBeforeExecute)
+        val action = (decision as RemoteResponseDecision.QueryBeforeExecute).envelope.actions.single() as AIAssistantTypedAction.AddTransaction
+        assertEquals(25.0, action.amount, 0.0)
+    }
+
+    @Test
     fun interpret_returnsRemoteReply_whenPlainTextMentionsActionWord() {
         val decision = interpreter.interpret(
             remoteResponse = "我可以根据你的需求决定下一步 action。"
@@ -105,6 +116,58 @@ class AIAssistantRemoteResponseInterpreterTest {
 
         assertTrue(decision is RemoteResponseDecision.ReturnRemoteReply)
         assertEquals("我可以根据你的需求决定下一步 action。", (decision as RemoteResponseDecision.ReturnRemoteReply).reply)
+    }
+
+    @Test
+    fun interpret_returnsReplyField_whenJsonContainsReplyOnly() {
+        val decision = interpreter.interpret(
+            remoteResponse = "{\"thinking\":\"...\",\"reply\":\"你好呀\"}"
+        )
+
+        assertTrue(decision is RemoteResponseDecision.ReturnRemoteReply)
+        assertEquals("你好呀", (decision as RemoteResponseDecision.ReturnRemoteReply).reply)
+    }
+
+    @Test
+    fun interpret_returnsChoicesMessageContent_whenOpenAiCompatibleJsonIsReturned() {
+        val decision = interpreter.interpret(
+            remoteResponse = "{\"choices\":[{\"message\":{\"content\":\"您好，我在呢\"}}]}"
+        )
+
+        assertTrue(decision is RemoteResponseDecision.ReturnRemoteReply)
+        assertEquals("您好，我在呢", (decision as RemoteResponseDecision.ReturnRemoteReply).reply)
+    }
+
+    @Test
+    fun interpret_returnsChoicesMessageContent_whenOpenAiCompatibleJsonUsesArrayContentParts() {
+        val decision = interpreter.interpret(
+            remoteResponse = "{\"choices\":[{\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"您好\"},{\"type\":\"text\",\"text\":\"，我在呢\"}]}}]}"
+        )
+
+        assertTrue(decision is RemoteResponseDecision.ReturnRemoteReply)
+        assertEquals("您好，我在呢", (decision as RemoteResponseDecision.ReturnRemoteReply).reply)
+    }
+
+    @Test
+    fun interpret_returnsQueryBeforeExecute_whenOpenAiChoicesContentContainsActionJson() {
+        val decision = interpreter.interpret(
+            remoteResponse = "{\"choices\":[{\"message\":{\"content\":\"{\\\"action\\\":\\\"add_transaction\\\",\\\"amount\\\":25}\"}}]}"
+        )
+
+        assertTrue(decision is RemoteResponseDecision.QueryBeforeExecute)
+        val action = (decision as RemoteResponseDecision.QueryBeforeExecute).envelope.actions.single() as AIAssistantTypedAction.AddTransaction
+        assertEquals(25.0, action.amount, 0.0)
+    }
+
+    @Test
+    fun interpret_returnsExecuteActions_whenOpenAiChoicesContentContainsActionsEnvelope() {
+        val decision = interpreter.interpret(
+            remoteResponse = "{\"choices\":[{\"message\":{\"content\":\"{\\\"actions\\\":[{\\\"action\\\":\\\"query_accounts\\\"}]}\"}}]}"
+        )
+
+        assertTrue(decision is RemoteResponseDecision.ExecuteActions)
+        val action = (decision as RemoteResponseDecision.ExecuteActions).envelope.actions.single() as AIAssistantTypedAction.Query
+        assertEquals("accounts", action.target)
     }
 
     @Test

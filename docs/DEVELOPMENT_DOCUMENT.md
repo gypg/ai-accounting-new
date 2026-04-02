@@ -43,6 +43,162 @@ AI记账是一款面向中国大陆个人用户的智能记账 Android 应用。
 
 ### 2.2 AI 助手文本消息主链路最新状态
 
+#### 2026-04-01 模块 M9 完成：三主链入口合同重置（聊天 / OCR / 远端记账）
+- 已完成 M9 收口，目标是先把 AI 助手三条主链的入口合同拉回稳定状态，去掉会污染远端记账语义的补丁式回退，并恢复 OCR-to-text → 云端的可用主路径。
+- 本轮改动：
+  - `ui/viewmodel/AIAssistantRemoteResponseInterpreter.kt`
+    - 远端回复判定顺序改为：**先解析动作 envelope，再解析纯 reply**；修复 `{"reply":...,"actions":[...]}` 被错误当作普通聊天展示的问题。
+    - 补充纯 JSON `reply` 提取与 OpenAI-compatible `choices[0].message.content` 提取，保持普通闲聊回复可直接展示。
+  - `ui/viewmodel/AIAssistantMessageOrchestrator.kt`
+    - `AIAssistantMessageRoute.RemoteOrLocalFallback` 重命名为 `RemoteRequest`，显式表达“这是远端请求合同”，不再在命名层面暗示失败后本地兜底。
+  - `ui/viewmodel/AIAssistantMessageExecutionCoordinator.kt`
+    - continuation / local-mode / bookkeeping-trigger 三处合同判断同步切到 `RemoteRequest`，保持 `DAILY_CHAT -> ReplyAllowed`、`BOOKKEEPING -> ActionEnvelopeRequired` 不变。
+  - `ui/viewmodel/AIAssistantViewModel.kt`
+    - 删除远端 BOOKKEEPING 无动作时 `tryLocalBookkeepingParse()` 的本地解析补丁，远端记账失败现在只走安全失败语义，不再混入本地自动执行。
+  - `ui/viewmodel/AIAssistantImageMessageHandler.kt`
+    - 非视觉模型 OCR 分支改为：优先发送 HIGH/MEDIUM 结果；若没有高质量结果，但仍提取出**可用文字 / 关键行 / 标签 / 票据信号**，则继续生成压缩 prompt 发云端。
+    - 对仅 `hasContent=true` 但无文字、关键行、标签、票据信号的纯噪声图片，仍保留“未识别到文字或标签”的拦截，避免错误记账。
+- 本轮新增/更新回归测试：
+  - `AIAssistantRemoteResponseInterpreterTest`
+    - 覆盖 `reply + actions` 同时存在时优先执行动作；
+    - 覆盖纯 `reply` JSON 展示；
+    - 覆盖 OpenAI-compatible `choices.message.content` 展示。
+  - `AIAssistantImageMessageHandlerTest`
+    - 覆盖低置信度但存在可用 OCR 内容时继续送云端；
+    - 覆盖纯噪声图片不会送云端；
+    - 覆盖视觉模型路径仍走 native image pipeline。
+  - `AIAssistantMessageExecutionCoordinatorTest` / `AIAssistantMessageOrchestratorTest`
+    - 同步远端路由命名收口后的合同断言。
+- 本轮验证：
+  - 定向回归：
+    - `./gradlew testDebugUnitTest --tests "com.example.aiaccounting.ui.viewmodel.AIAssistantImageMessageHandlerTest" --tests "com.example.aiaccounting.ui.viewmodel.AIAssistantRemoteResponseInterpreterTest" --tests "com.example.aiaccounting.ui.viewmodel.AIAssistantMessageExecutionCoordinatorTest" --tests "com.example.aiaccounting.ui.viewmodel.AIAssistantMessageOrchestratorTest"` ✅
+- 当前状态：
+  - 普通聊天回复解析优先级已恢复正确；
+  - 远端记账不再被本地 fallback 污染；
+  - OCR-to-text 在“有可用本地提取”时重新具备上云能力，同时保留噪声防护。
+
+#### 2026-04-01 模块 M10 完成：prompt 分场景收口（Chat / Bookkeeping）
+- 已完成 M10 收口，目标是把远端 prompt 从“统一大提示词”拆成“人格常驻 + 场景合同分离”，减少普通聊天携带的记账噪声，并压缩超长账务文本的无关上下文。
+- 本轮改动：
+  - `ui/viewmodel/AIAssistantMessageOrchestrator.kt`
+    - 新增 `AIAssistantRemotePromptScenario.Chat / Bookkeeping`，远端路由在分析阶段即显式绑定 prompt 场景。
+  - `ui/viewmodel/AIAssistantPromptBuilder.kt`
+    - `buildMessages(...)` 新增 `scenario` 参数；普通聊天改用轻量 chat prompt，仅保留 persona + 自然回复合同。
+    - 记账场景改为独立 bookkeeping prompt；超长账务文本自动切到 compact variant，仅保留动作合同、最小账本上下文与简洁 persona 约束。
+    - 账户/分类上下文增加优先裁剪；修复“匹配项超过 12 个时 `take()` 负数崩溃”的边界问题。
+  - `ui/viewmodel/AIAssistantViewModel.kt`
+    - 远端请求构建时改为透传 `promptScenario`，确保 promptBuilder 与路由合同一致。
+  - `ui/viewmodel/AIAssistantMessageExecutionCoordinator.kt`
+    - bookkeeping clarification continuation 现在会同时强制 `ActionEnvelopeRequired + Bookkeeping promptScenario`，避免澄清补全后误落回 chat prompt。
+- 本轮新增/更新回归测试：
+  - `AIAssistantPromptBuilderTest`
+    - 覆盖 chat prompt 不再携带记账负担；
+    - 覆盖 bookkeeping prompt 保留 persona 与动作合同；
+    - 覆盖超长账务文本走 compact prompt；
+    - 覆盖“超过 12 个匹配账户”时上下文仍稳定裁剪。
+  - `AIAssistantMessageExecutionCoordinatorTest`
+    - 覆盖 bookkeeping clarification continuation 的第二次远端请求同时携带 `ActionEnvelopeRequired` 与 `Bookkeeping promptScenario`。
+  - `AIAssistantMessageOrchestratorTest`
+    - 同步远端路由场景断言。
+- 本轮验证：
+  - 定向回归：
+    - `./gradlew testDebugUnitTest --tests "com.example.aiaccounting.ui.viewmodel.AIAssistantPromptBuilderTest" --tests "com.example.aiaccounting.ui.viewmodel.AIAssistantMessageExecutionCoordinatorTest" --tests "com.example.aiaccounting.ui.viewmodel.AIAssistantMessageOrchestratorTest"` ✅
+  - code review：已过，无新的 HIGH 问题。
+- 当前状态：
+  - 聊天 prompt 与记账 prompt 已正式分流，persona 未丢失；
+  - 超长账务文本 prompt 负担已下降，但记账动作合同保持严格；
+  - clarification continuation 不会再出现“记账响应要求 + 聊天 prompt 场景”错配。
+
+#### 2026-04-02 模块 M11 完成：长文本远端传输与超时合同收口（Round 3 / Segment 1）
+- 已完成 M11 第一段，目标是优先解决“站点已收到/处理，但 App 仍长时间转圈、超时或把传输失败当普通文本”的长文本远端稳定性问题。
+- 本轮改动：
+  - `data/service/AIService.kt`
+    - `sendChatStream(...)` 不再把传输异常包装成普通文本 emission；异常现在直接上抛，让上游 collector 正确判定为 transport failure。
+    - 为超长 payload 新增 oversized bypass：当消息总体积超过阈值时，固定模型不再先走伪流式 SSE 再回退，而是直接进入更稳定的 non-stream chat 路径。
+    - 这样可以避免长文本先经历一次低收益的 stream 尝试，减少“站点看起来收到了，但客户端还在等待/重试”的额外时延。
+  - `ui/viewmodel/AIAssistantRemoteStreamCollector.kt`
+    - 默认超时预算从 3 分钟上调并收口为 12 分钟，覆盖长请求读取、重试和模型回退预算，避免 collector 比底层请求策略更早误判超时。
+- 本轮新增/更新回归测试：
+  - `AIServiceStreamStabilityTest`
+    - 覆盖 transport failure 会直接抛出，不再伪装成“请求失败: ...”普通回复；
+    - 覆盖 oversized payload 只发起一次 non-stream 请求，不再先走伪流式路径。
+  - `AIAssistantRemoteStreamCollectorTest`
+    - 覆盖默认超时窗口可容纳长请求；
+    - 覆盖默认预算可覆盖 retry/fallback 的更长执行窗口。
+  - `AIAssistantRemoteExecutionHandlerTest`
+    - 回归确认 transport/timeout/result contract 未被本轮破坏。
+- 本轮验证：
+  - 定向回归：
+    - `./gradlew testDebugUnitTest --tests "com.example.aiaccounting.data.service.AIServiceStreamStabilityTest" --tests "com.example.aiaccounting.ui.viewmodel.AIAssistantRemoteStreamCollectorTest" --tests "com.example.aiaccounting.ui.viewmodel.AIAssistantRemoteExecutionHandlerTest"` ✅
+  - 组合 AI 助手回归：
+    - `./gradlew testDebugUnitTest --tests "com.example.aiaccounting.ui.viewmodel.AIAssistantPromptBuilderTest" --tests "com.example.aiaccounting.ui.viewmodel.AIAssistantMessageExecutionCoordinatorTest" --tests "com.example.aiaccounting.ui.viewmodel.AIAssistantMessageOrchestratorTest" --tests "com.example.aiaccounting.data.service.AIServiceStreamStabilityTest" --tests "com.example.aiaccounting.ui.viewmodel.AIAssistantRemoteStreamCollectorTest" --tests "com.example.aiaccounting.ui.viewmodel.AIAssistantRemoteExecutionHandlerTest"` ✅
+  - code review：已过，无新的 HIGH 问题。
+- 当前状态：
+  - 长文本远端失败已能更早、更准确地区分为 transport failure，而不是被误当普通模型文本；
+  - 超长账务文本默认避开伪流式首跳，直接走稳定 non-stream 主路径；
+  - collector 超时合同已覆盖长请求预算，为下一段继续优化 `max_tokens`/输出预算与远端结果判定打下基础。
+
+#### 2026-04-02 模块 M11 完成：输出预算与远端结果判定收口（Round 3 / Segment 2）
+- 已完成 M11 第二段，目标是继续压缩“站点成功但客户端空回复/慢回复”的尾部失败，重点收口 `max_tokens`、输出预算与远端响应判定。
+- 本轮改动：
+  - `data/service/AIService.kt`
+    - 新增输出预算分档并替换关键聊天路径默认大预算：
+      - `bookkeepingOutputBudgetTokens = 2000`
+      - `longTextOutputBudgetTokens = 2500`
+      - `defaultOutputBudgetTokens = 4000`
+      - `resolveOutputBudgetTokens(...)` 统一按场景下发 `max_tokens`。
+    - OpenAI 兼容响应判定补强：`choices/message/content` 缺失或空值统一归类为 `OpenAIChatFailure.EmptyReply`，并按既有重试合同处理。
+    - Gemini 鉴权从 URL query `?key=` 收口到请求头 `x-goog-api-key`，避免 key 出现在 URL。
+  - `ui/viewmodel/AIAssistantRemoteResponseInterpreter.kt`
+    - 新增 wrapped content 二次动作解析：当顶层是 OpenAI 包裹 JSON 时，会从 `choices[0].message.content` 继续解析动作 envelope。
+    - `content` 提取支持 `String` 与 `JSONArray` 片段拼接，避免 array 内容形态被误判为空回复。
+  - `ui/viewmodel/AIAssistantRemoteResponseIntegrityChecker.kt`
+    - 结构化完整性校验从“仅 object”扩展为“object + array”，并继续覆盖 wrapped content 的二次完整性校验。
+  - `ui/viewmodel/AIAssistantRemoteExecutionHandler.kt`
+    - 新增不完整响应的一次自动重试收口，二次失败返回 `IncompleteResponseAfterRetry`。
+    - usage 计数时机调整到最终分支结果，避免过早 success 记账导致统计偏差。
+  - `ui/viewmodel/AIAssistantViewModel.kt`
+    - 补齐 `IncompleteResponseAfterRetry` 的用户可见提示语义。
+- 本轮新增/更新回归测试：
+  - `AIServiceStreamStabilityTest`：覆盖长文本/记账预算下发与 empty content 重试语义。
+  - `AIAssistantRemoteResponseInterpreterTest`：覆盖 wrapped `choices.message.content` 的动作与文本提取。
+  - `AIAssistantRemoteResponseIntegrityCheckerTest`：覆盖 array-root JSON 与 wrapped 半截 JSON 判定。
+  - `AIAssistantRemoteExecutionHandlerTest`：覆盖 incomplete retry 终态与 usage success/failure 计数语义。
+- 本轮验证：
+  - 定向回归：
+    - `./gradlew :app:testDebugUnitTest --tests "com.example.aiaccounting.data.service.AIServiceStreamStabilityTest" --tests "com.example.aiaccounting.ui.viewmodel.AIAssistantRemoteExecutionHandlerTest" --tests "com.example.aiaccounting.ui.viewmodel.AIAssistantRemoteResponseIntegrityCheckerTest" --tests "com.example.aiaccounting.ui.viewmodel.AIAssistantRemoteResponseInterpreterTest" --tests "com.example.aiaccounting.data.service.AIServiceModelFallbackTest"` ✅
+  - code review：已收敛，无新的 HIGH 问题。
+- 当前状态：
+  - 远端长文本路径已具备更稳的输出预算与空回复判定；
+  - 兼容包裹响应（含 array content）时不会再漏掉可执行动作；
+  - 为第三段“长文本记账端到端闭环验证”提供了稳定输入合同。
+
+#### 2026-04-02 第三轮第三段完成：长文本记账端到端闭环验证（Round 3 / Segment 3）
+- 已完成第三段，目标是验证“长文本输入 → 远端 wrapped envelope → 本地记账执行 → 用户可见结果”闭环，并确认 stage-2 收口点在主链可落地。
+- 本轮改动（测试增强，低改动范围）：
+  - `data/service/AIServiceStreamStabilityTest.kt`
+    - 新增 `sendChatStream_whenPayloadIsOversized_andNonStreamReturnsActionEnvelopeContent_emitsEnvelopeJsonChunk`
+    - 覆盖超长 payload 走 non-stream 时，`choices.message.content` 中的 envelope JSON 会原样透传到上游，不被截断/改写。
+  - `ui/viewmodel/AIAssistantRemoteExecutionHandlerTest.kt`
+    - 新增 wrapped content 场景断言，并将用例名收口为语义真实覆盖：
+      - `execute_returnsQueryBeforeExecutionRequested_whenWrappedChoicesContentContainsEnvelope`
+    - 覆盖 wrapped OpenAI 响应在记账合同下会被正确判定为 `QueryBeforeExecutionRequested`。
+  - `ui/viewmodel/AIAssistantActionExecutorTest.kt`
+    - 新增 `executeQueryBeforeExecution_whenEnvelopeComesFromWrappedChoicesContent_returnsUserVisibleReplyWithExecutionSummary`
+    - 使用真实 interpreter 先解析 wrapped 响应，再执行 `executeQueryBeforeExecution(...)`，断言用户可见文案同时包含：
+      - 远端 reply（如“已整理长文本账单”）
+      - 查询前置摘要（“已先查询本地上下文，再执行记账”）
+      - 最终记账结果（“已记账”）
+- 本轮验证：
+  - 闭环定向回归：
+    - `./gradlew :app:testDebugUnitTest --tests "com.example.aiaccounting.data.service.AIServiceStreamStabilityTest" --tests "com.example.aiaccounting.ui.viewmodel.AIAssistantActionExecutorTest" --tests "com.example.aiaccounting.ui.viewmodel.AIAssistantRemoteExecutionHandlerTest"` ✅
+  - 补充回归（stage-2 核心不回退）：
+    - `./gradlew :app:testDebugUnitTest --tests "com.example.aiaccounting.data.service.AIServiceModelFallbackTest" --tests "com.example.aiaccounting.ui.viewmodel.AIAssistantRemoteResponseIntegrityCheckerTest" --tests "com.example.aiaccounting.ui.viewmodel.AIAssistantRemoteResponseInterpreterTest"` ✅
+- 当前状态：
+  - 长文本记账主链端到端闭环已具备可验证回归保护；
+  - wrapped content 从传输、解释到执行与用户文案展示链路已打通；
+  - 第三轮阶段性目标（Segment 1/2/3）已完成。
+
 #### 2026-03-28 综合审查结论与 P0 修复入口：连接测试成功 ≠ 聊天链路可用
 - 已确认当前 P0 断层：AI 设置页 `testConnection()` 的成功结果，并不等于 AI 助手真实对话链路可用。
 - 已确认的链路差异：

@@ -16,13 +16,14 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import kotlinx.coroutines.test.runTest
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AIAssistantImageMessageHandlerTest {
 
     @Test
-    fun buildImagePrompt_returnsErrorWhenNoHighConfidenceResultExists() = runTest {
+    fun buildImagePrompt_fallsBackToAnyContentWhenNoHighConfidenceResultExists() = runTest {
         val aiService = mockk<AIService>(relaxed = true)
         val imageProcessingService = mockk<ImageProcessingService>()
         val aiUsageRepository = mockk<AIUsageRepository>(relaxed = true)
@@ -40,21 +41,23 @@ class AIAssistantImageMessageHandlerTest {
             personality = ButlerPersonality.CUTE,
             specialties = emptyList()
         )
+        val lowConfidenceResult = ImageProcessingService.ImageAnalysisResult(
+            rawText = "a\n1\n?",
+            text = "模糊票据文本",
+            keyLines = emptyList(),
+            labels = emptyList(),
+            receiptSignals = ImageProcessingService.ReceiptSignals(),
+            qualityScore = 18,
+            confidence = ImageProcessingService.OcrConfidence.LOW,
+            hasContent = true
+        )
 
         coEvery {
             imageProcessingService.analyzeMultipleImages(listOf(uri), context, timeoutMs = 8000)
-        } returns listOf(
-            ImageProcessingService.ImageAnalysisResult(
-                rawText = "a\n1\n?",
-                text = "",
-                keyLines = emptyList(),
-                labels = emptyList(),
-                receiptSignals = ImageProcessingService.ReceiptSignals(),
-                qualityScore = 18,
-                confidence = ImageProcessingService.OcrConfidence.LOW,
-                hasContent = true
-            )
-        )
+        } returns listOf(lowConfidenceResult)
+        every {
+            imageProcessingService.generateCompactPrompt(listOf(lowConfidenceResult), eq("帮我记账"))
+        } returns "低置信度也继续送云端"
 
         val result = handler.buildImagePrompt(
             message = "帮我记账",
@@ -64,8 +67,8 @@ class AIAssistantImageMessageHandlerTest {
             isNativeImageSupported = false
         )
 
-        assertTrue(result is ImagePromptResult.Error)
-        assertTrue((result as ImagePromptResult.Error).message.contains("置信度"))
+        assertTrue(result is ImagePromptResult.Success)
+        assertEquals("低置信度也继续送云端", (result as ImagePromptResult.Success).prompt)
     }
 
     @Test
@@ -193,5 +196,99 @@ class AIAssistantImageMessageHandlerTest {
         assertTrue((result as ImageMessageProcessingResult.Error).message.contains("网络不可用"))
         coVerify(exactly = 0) { imageProcessingService.analyzeMultipleImages(any(), any(), any()) }
         verify(exactly = 0) { aiService.isImageSupported(any()) }
+    }
+
+    @Test
+    fun processImageMessage_usesNativePipelineWhenImageModelSupported() = runTest {
+        val aiService = mockk<AIService>()
+        val imageProcessingService = mockk<ImageProcessingService>(relaxed = true)
+        val aiUsageRepository = mockk<AIUsageRepository>(relaxed = true)
+        val handler = AIAssistantImageMessageHandler(aiService, imageProcessingService, aiUsageRepository)
+
+        val firstUri = mockk<Uri>()
+        val secondUri = mockk<Uri>()
+        val context = mockk<Context>()
+        val butler = Butler(
+            id = "cat",
+            name = "小财娘",
+            title = "可爱管家",
+            avatarResId = 0,
+            description = "",
+            systemPrompt = "你是助手",
+            personality = ButlerPersonality.CUTE,
+            specialties = emptyList()
+        )
+        val config = AIConfig(provider = AIProvider.CUSTOM, apiKey = "key", apiUrl = "https://example.com", isEnabled = true)
+
+        every { aiService.isImageSupported(config) } returns true
+        coEvery {
+            aiService.analyzeImageAndRecord(firstUri, config, context, any())
+        } returns com.example.aiaccounting.data.service.ImageAnalysisResult(success = true, message = "第一张识别结果", actions = null)
+        coEvery {
+            aiService.analyzeImageAndRecord(secondUri, config, context, any())
+        } returns com.example.aiaccounting.data.service.ImageAnalysisResult(success = true, message = "第二张识别结果", actions = null)
+
+        val result = handler.processImageMessage(
+            message = "帮我看下这两张票据",
+            imageUris = listOf(firstUri, secondUri),
+            context = context,
+            currentButler = butler,
+            config = config,
+            isNetworkAvailable = true
+        )
+
+        assertTrue(result is ImageMessageProcessingResult.Success)
+        assertEquals(
+            "第一张识别结果\n\n第二张识别结果",
+            (result as ImageMessageProcessingResult.Success).message
+        )
+        coVerify(exactly = 0) { imageProcessingService.analyzeMultipleImages(any(), any(), any()) }
+    }
+
+    @Test
+    fun buildImagePrompt_returnsErrorWhenOnlyNoiseExistsWithoutStructuredContent() = runTest {
+        val aiService = mockk<AIService>(relaxed = true)
+        val imageProcessingService = mockk<ImageProcessingService>()
+        val aiUsageRepository = mockk<AIUsageRepository>(relaxed = true)
+        val handler = AIAssistantImageMessageHandler(aiService, imageProcessingService, aiUsageRepository)
+
+        val uri = mockk<Uri>()
+        val context = mockk<Context>()
+        val butler = Butler(
+            id = "cat",
+            name = "小财娘",
+            title = "可爱管家",
+            avatarResId = 0,
+            description = "",
+            systemPrompt = "你是助手",
+            personality = ButlerPersonality.CUTE,
+            specialties = emptyList()
+        )
+
+        coEvery {
+            imageProcessingService.analyzeMultipleImages(listOf(uri), context, timeoutMs = 8000)
+        } returns listOf(
+            ImageProcessingService.ImageAnalysisResult(
+                rawText = "a\n1\n?",
+                text = "",
+                keyLines = emptyList(),
+                labels = emptyList(),
+                receiptSignals = ImageProcessingService.ReceiptSignals(),
+                qualityScore = 18,
+                confidence = ImageProcessingService.OcrConfidence.LOW,
+                hasContent = true
+            )
+        )
+
+        val result = handler.buildImagePrompt(
+            message = "帮我记账",
+            imageUris = listOf(uri),
+            context = context,
+            currentButler = butler,
+            isNativeImageSupported = false
+        )
+
+        assertTrue(result is ImagePromptResult.Error)
+        assertTrue((result as ImagePromptResult.Error).message.contains("没有在图片里识别到文字或标签"))
     }
 }

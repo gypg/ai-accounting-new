@@ -167,22 +167,10 @@ class AIAssistantMessageExecutionCoordinatorTest {
         coEvery { aiReasoningEngine.reason(any(), any(), any()) } returns reasoningResult
         coEvery { messageOrchestrator.analyze(any(), any(), any(), any(), any(), any(), any()) } returns defaultAnalysis
         coEvery { messageOrchestrator.route(defaultAnalysis) } returns
-            AIAssistantMessageRoute.RemoteOrLocalFallback(
+            AIAssistantMessageRoute.RemoteRequest(
                 request = RemoteExecutionRequest(userMessage = resumedMessage)
             )
-        coEvery { messageOrchestrator.decideContinuation(any(), any()) } returns
-            AIAssistantContinuationDecision.RequestSecondRemote(
-                request = RemoteExecutionRequest(
-                    userMessage = resumedMessage,
-                    continuationPayload = AIAssistantContinuationPayload(
-                        originalMessage = pendingState.originalMessage,
-                        resumedMessage = resumedMessage,
-                        trigger = pendingState.trigger,
-                        nextStep = AIAssistantContinuationStep.RequestSecondRemote
-                    ),
-                    responseRequirement = AIAssistantRemoteResponseRequirement.ActionEnvelopeRequired
-                )
-            )
+        coEvery { messageOrchestrator.decideContinuation(any(), any()) } answers { callOriginal() }
 
         val result = coordinator.execute(
             message = "二十五元",
@@ -222,6 +210,7 @@ class AIAssistantMessageExecutionCoordinatorTest {
         )
         assertEquals(1, remoteCallCount)
         assertEquals(AIAssistantRemoteResponseRequirement.ActionEnvelopeRequired, remoteRequest?.responseRequirement)
+        assertEquals(AIAssistantRemotePromptScenario.Bookkeeping, remoteRequest?.promptScenario)
     }
 
     @Test
@@ -233,7 +222,7 @@ class AIAssistantMessageExecutionCoordinatorTest {
         coEvery { aiReasoningEngine.reason(any(), any(), any()) } returns reasoningResult
         coEvery { messageOrchestrator.analyze(any(), any(), any(), any(), any(), any(), any()) } returns defaultAnalysis
         coEvery { messageOrchestrator.route(defaultAnalysis) } returns
-            AIAssistantMessageRoute.RemoteOrLocalFallback(
+            AIAssistantMessageRoute.RemoteRequest(
                 request = RemoteExecutionRequest(userMessage = "帮我记一笔午饭 二十五元")
             )
         coEvery { messageOrchestrator.decideContinuation(any(), any()) } returns
@@ -380,7 +369,7 @@ class AIAssistantMessageExecutionCoordinatorTest {
         coEvery { aiReasoningEngine.reason(any(), any(), any()) } returns reasoningResult
         coEvery { messageOrchestrator.analyze(any(), any(), any(), any(), any(), any(), any()) } returns defaultAnalysis
         coEvery { messageOrchestrator.route(defaultAnalysis) } returns
-            AIAssistantMessageRoute.RemoteOrLocalFallback(
+            AIAssistantMessageRoute.RemoteRequest(
                 request = RemoteExecutionRequest(userMessage = "帮我记一笔午饭")
             )
 
@@ -410,6 +399,7 @@ class AIAssistantMessageExecutionCoordinatorTest {
             result
         )
         assertEquals(AIAssistantRemoteResponseRequirement.ReplyAllowed, capturedRequest?.responseRequirement)
+        assertEquals(AIAssistantRemotePromptScenario.Chat, capturedRequest?.promptScenario)
     }
 
     @Test
@@ -513,7 +503,7 @@ class AIAssistantMessageExecutionCoordinatorTest {
         coEvery { aiReasoningEngine.reason(any(), any(), any()) } returns reasoningResult
         coEvery { messageOrchestrator.analyze(any(), any(), any(), any(), any(), any(), any()) } returns expectedAnalysis
         coEvery { messageOrchestrator.route(expectedAnalysis) } returns
-            AIAssistantMessageRoute.RemoteOrLocalFallback(
+            AIAssistantMessageRoute.RemoteRequest(
                 request = RemoteExecutionRequest(userMessage = "你好")
             )
 
@@ -628,7 +618,7 @@ class AIAssistantMessageExecutionCoordinatorTest {
         coEvery { aiReasoningEngine.executeActions(localReasoningResult.actions) } returns "本地续执行回复"
         coEvery { messageOrchestrator.analyze(any(), any(), any(), any(), any(), any(), any()) } returns localAnalysis
 
-        val fallbackRoute = AIAssistantMessageRoute.RemoteOrLocalFallback(
+        val fallbackRoute = AIAssistantMessageRoute.RemoteRequest(
             request = RemoteExecutionRequest(userMessage = resumedMessage)
         )
         coEvery { messageOrchestrator.route(localAnalysis) } returns fallbackRoute
@@ -692,7 +682,7 @@ class AIAssistantMessageExecutionCoordinatorTest {
         coEvery { aiReasoningEngine.executeActions(ocrReasoningResult.actions) } returns "OCR 本地回复"
         coEvery { messageOrchestrator.analyze(any(), any(), any(), any(), any(), any(), any()) } returns ocrAnalysis
         coEvery { messageOrchestrator.route(ocrAnalysis) } returns
-            AIAssistantMessageRoute.RemoteOrLocalFallback(
+            AIAssistantMessageRoute.RemoteRequest(
                 request = RemoteExecutionRequest(userMessage = "data:image/png;base64,abc")
             )
 
@@ -738,10 +728,11 @@ class AIAssistantMessageExecutionCoordinatorTest {
         coEvery { aiReasoningEngine.reason(any(), any(), any()) } returns bookkeepingReasoningResult
         coEvery { messageOrchestrator.analyze(any(), any(), any(), any(), any(), any(), any()) } returns bookkeepingAnalysis
         coEvery { messageOrchestrator.route(bookkeepingAnalysis) } returns
-            AIAssistantMessageRoute.RemoteOrLocalFallback(
+            AIAssistantMessageRoute.RemoteRequest(
                 request = RemoteExecutionRequest(
                     userMessage = "帮我记一笔午饭 25 元",
-                    responseRequirement = AIAssistantRemoteResponseRequirement.ActionEnvelopeRequired
+                    responseRequirement = AIAssistantRemoteResponseRequirement.ActionEnvelopeRequired,
+                    promptScenario = AIAssistantRemotePromptScenario.Bookkeeping
                 )
             )
 
@@ -771,6 +762,7 @@ class AIAssistantMessageExecutionCoordinatorTest {
             result
         )
         assertEquals(AIAssistantRemoteResponseRequirement.ActionEnvelopeRequired, capturedRequest?.responseRequirement)
+        assertEquals(AIAssistantRemotePromptScenario.Bookkeeping, capturedRequest?.promptScenario)
     }
 
     @Test
@@ -787,7 +779,7 @@ class AIAssistantMessageExecutionCoordinatorTest {
         coEvery { aiReasoningEngine.executeActions(any()) } returns "不应触发本地执行"
         coEvery { messageOrchestrator.analyze(any(), any(), any(), any(), any(), any(), any()) } returns bookkeepingAnalysis
         coEvery { messageOrchestrator.route(bookkeepingAnalysis) } returns
-            AIAssistantMessageRoute.RemoteOrLocalFallback(
+            AIAssistantMessageRoute.RemoteRequest(
                 request = RemoteExecutionRequest(
                     userMessage = "帮我记一笔午饭 25 元",
                     responseRequirement = AIAssistantRemoteResponseRequirement.ActionEnvelopeRequired
@@ -830,7 +822,7 @@ class AIAssistantMessageExecutionCoordinatorTest {
         coEvery { aiReasoningEngine.executeActions(any()) } returns "不应触发本地执行"
         coEvery { messageOrchestrator.analyze(any(), any(), any(), any(), any(), any(), any()) } returns chatAnalysis
         coEvery { messageOrchestrator.route(chatAnalysis) } returns
-            AIAssistantMessageRoute.RemoteOrLocalFallback(
+            AIAssistantMessageRoute.RemoteRequest(
                 request = RemoteExecutionRequest(
                     userMessage = "你好呀",
                     responseRequirement = AIAssistantRemoteResponseRequirement.ReplyAllowed
