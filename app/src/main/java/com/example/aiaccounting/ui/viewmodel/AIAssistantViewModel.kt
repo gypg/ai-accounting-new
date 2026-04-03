@@ -534,7 +534,19 @@ class AIAssistantViewModel @Inject constructor(
 
                 val assistantMessage = when (processingResult) {
                     is ImageMessageProcessingResult.Error -> processingResult.message
-                    is ImageMessageProcessingResult.Success -> processingResult.message
+                    is ImageMessageProcessingResult.TextReply -> processingResult.message
+                    is ImageMessageProcessingResult.ExecuteEnvelope -> {
+                        actionExecutor.executeQueryBeforeExecution(processingResult.envelope)
+                    }
+                    is ImageMessageProcessingResult.RemoteBookkeepingPrompt -> {
+                        processRemoteExecutionRequest(
+                            RemoteExecutionRequest(
+                                userMessage = processingResult.prompt,
+                                responseRequirement = AIAssistantRemoteResponseRequirement.ActionEnvelopeRequired,
+                                promptScenario = AIAssistantRemotePromptScenario.Bookkeeping
+                            )
+                        )
+                    }
                 }
                 conversationRepository.addAssistantMessage(assistantMessage)
                 chatSessionRepository.addMessage(sessionId, com.example.aiaccounting.data.local.entity.MessageRole.ASSISTANT, assistantMessage)

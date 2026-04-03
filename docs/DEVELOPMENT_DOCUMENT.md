@@ -26,6 +26,52 @@ AI记账是一款面向中国大陆个人用户的智能记账 Android 应用。
 
 ## 二、最近功能与技术变更
 
+### 2.3 2026-04-03 图片记账与长文本记账回归修复（Round 4 / Regression Fix 1）
+- 本轮目标：修复两类真实用户回归，而不是只修单测层语义：
+  1. 图片消息在修复后被过早拦截，出现“没有在图片里识别到文字或标签”，无法进入记账执行链；
+  2. 长文本账单虽然能送远端，但在账本为空时 prompt 合同过严，模型退化成只查账户/分类，不再输出可执行记账动作。
+- 根因归纳：
+  - `ui/viewmodel/AIAssistantImageMessageHandler.kt`
+    - 图片 OCR fallback 的放行条件仍然过于依赖高质量文本结果；真实图片中存在“弱 OCR 文本可用，但不足以形成强票据信号”的情况，被前置拦截后直接报错。
+    - 同时保留噪声防护，不能把“只有标签、没有任何文字”的图片也送远端，否则会扩大误执行面。
+  - `ui/viewmodel/AIAssistantPromptBuilder.kt`
+    - bookkeeping prompt 在“暂无账户 / 暂无分类”时仍要求 `accountRef.id` / `categoryRef.id`，并鼓励优先 query，导致模型在空账本场景无法直接给出动作，只能回复“先看看现有账户和分类”。
+- 本轮改动：
+  - `ui/viewmodel/AIAssistantImageMessageHandler.kt`
+    - 新增 `hasAnyOcrSignal(...)` 统一判定是否具备可上云 OCR 内容。
+    - 允许“弱 OCR 文本 / keyLines”继续进入远端记账链，不再要求强 receiptSignals。
+    - 安全收口：**只有标签、没有文字** 的图片仍视为不可执行，不送远端，避免把纯视觉标签误当账单执行。
+  - `ui/viewmodel/AIAssistantPromptBuilder.kt`
+    - bookkeeping prompt 改为按账本上下文分支：
+      - 当已有账户/分类时，继续优先 `accountRef.id` / `categoryRef.id`；
+      - 当账本为空时，允许优先使用 `accountRef.name` / `categoryRef.name`，由执行阶段自动解析或补全；
+      - 明确保留“商家名不是账户名，支付渠道才是账户”的约束，避免再次把瑞幸/美团/医院误建成账户。
+    - 空账本场景下不再把 query 作为默认退路，避免远端只回复查询意图而不记账。
+  - `ai/AIReasoningEngine.kt`
+    - 保留并验证结构化账单文本（日期 + 金额列表）会被识别为 `RECORD_TRANSACTION`，确保长文本能稳定进入 bookkeeping 远端合同。
+- 本轮新增/更新回归测试：
+  - `AIAssistantPromptBuilderTest`
+    - 覆盖空账本时允许 name-based resolution，而非强制 id；
+    - 覆盖已有账本时继续优先 id，并保留“商家名不是账户名”。
+  - `AIAssistantImageMessageHandlerTest`
+    - 覆盖低置信但存在弱 OCR 文本时仍可生成 remote bookkeeping prompt；
+    - 覆盖 batch 为空时单图回退可恢复；
+    - 覆盖“只有标签没有文字”会被安全拦截，不送远端。
+  - `AIReasoningEngineTest`
+    - 覆盖结构化长文本账单在无显式“记账”关键词时仍判定为 `RECORD_TRANSACTION`。
+- 本轮验证：
+  - 定向回归：
+    - `./gradlew testDebugUnitTest --tests "com.example.aiaccounting.ui.viewmodel.AIAssistantPromptBuilderTest"` ✅
+    - `./gradlew testDebugUnitTest --tests "com.example.aiaccounting.ui.viewmodel.AIAssistantImageMessageHandlerTest"` ✅
+    - `./gradlew testDebugUnitTest --tests "com.example.aiaccounting.ai.AIReasoningEngineTest"` ✅
+  - 全量单测：
+    - `./gradlew testDebugUnitTest` ✅
+- 当前状态：
+  - 图片消息在存在弱 OCR 文本时，已恢复进入远端记账主链的能力；
+  - 纯标签、无文字图片仍会被安全拦截，不引入新的误执行面；
+  - 长文本账单在账本为空时，远端不再被 prompt 合同卡成“只查不记”，而是可直接输出可执行动作；
+  - “商家名 ≠ 账户名、支付渠道才是账户”的收口仍保留。
+
 ### 2.1 v1.8.3 发布准备完成项
 
 1. **应用标识确认**

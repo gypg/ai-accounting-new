@@ -182,6 +182,20 @@ class AIReasoningEngineTest {
     }
 
     @Test
+    fun reason_returnsRecordTransaction_forStructuredLedgerTextWithoutExplicitBookkeepingKeywords() = runTest {
+        stubNonIdentityAndNonModification()
+
+        val result = engine.reason(
+            context = AIReasoningEngine.ReasoningContext(
+                userMessage = "📅 2026年3月31日（周二）\n-12.00 餐饮（咖啡+三明治）——瑞幸（微信）\n-42.00 餐饮（午餐：麻辣香锅外卖）——美团外卖\n+5000.00 工资（4月预发部分）——银行代发"
+            ),
+            currentButlerId = "xiaocainiang"
+        )
+
+        assertEquals(AIReasoningEngine.UserIntent.RECORD_TRANSACTION, result.intent)
+    }
+
+    @Test
     fun reason_returnsRequestClarification_forExplicitRecordRequestWithoutAccount_whenMultipleAccountsExist() = runTest {
         stubNonIdentityAndNonModification()
         coEvery { accountRepository.getAllAccountsList() } returns listOf(

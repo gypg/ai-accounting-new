@@ -12,6 +12,7 @@ import com.example.aiaccounting.data.local.entity.TransactionType
 import com.example.aiaccounting.data.repository.AccountRepository
 import com.example.aiaccounting.data.repository.CategoryRepository
 import kotlinx.coroutines.CancellationException
+import kotlin.math.abs
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -58,7 +59,20 @@ class AIAssistantActionExecutor @Inject constructor(
       }
 
       val aiReply = envelope.reply.trim().removeDirtyNullWrappers()
-      if (aiReply.isNotBlank()) {
+      val compactSummary = maybeBuildCompactBatchSummary(results)
+      val shouldPreferCompactSummary = compactSummary.isNotBlank() && aiReply.length > 120
+
+      if (shouldPreferCompactSummary) {
+        val maxDetailsToShow = 4
+        val truncatedDetails = if (results.size > maxDetailsToShow) {
+          (results.take(maxDetailsToShow) + "…（其余 ${results.size - maxDetailsToShow} 笔已执行）").joinToString("\n")
+        } else {
+          results.joinToString("\n").trim()
+        }
+        listOf(compactSummary, truncatedDetails)
+          .filter { it.isNotBlank() }
+          .joinToString("\n\n")
+      } else if (aiReply.isNotBlank()) {
         listOf(aiReply, results.joinToString("\n").trim())
           .filter { it.isNotBlank() }
           .joinToString("\n\n")
@@ -80,7 +94,20 @@ class AIAssistantActionExecutor @Inject constructor(
       }
 
       val aiReply = envelope.reply.trim().removeDirtyNullWrappers()
-      if (aiReply.isNotBlank()) {
+      val compactSummary = maybeBuildCompactBatchSummary(results)
+      val shouldPreferCompactSummary = compactSummary.isNotBlank() && aiReply.length > 120
+
+      if (shouldPreferCompactSummary) {
+        val maxDetailsToShow = 4
+        val truncatedDetails = if (results.size > maxDetailsToShow) {
+          (results.take(maxDetailsToShow) + "…（其余 ${results.size - maxDetailsToShow} 笔已执行）").joinToString("\n")
+        } else {
+          results.joinToString("\n").trim()
+        }
+        listOf(compactSummary, truncatedDetails)
+          .filter { it.isNotBlank() }
+          .joinToString("\n\n")
+      } else if (aiReply.isNotBlank()) {
         listOf(aiReply, results.joinToString("\n").trim())
           .filter { it.isNotBlank() }
           .joinToString("\n\n")
@@ -259,24 +286,13 @@ class AIAssistantActionExecutor @Inject constructor(
     action: AIAssistantTypedAction.AddTransaction,
     traceContext: AITraceContext
   ): AddTransactionExecutionResolution {
-    val amount = action.amount
+    val rawAmount = action.amount
     val typeStr = action.transactionTypeRaw
     val transactionTypeStr = action.transactionTypeRaw
 
     val safeTypeStr = when (typeStr) {
       "add_transaction", "create_account", "query", "create_category" -> ""
       else -> typeStr
-    }
-
-    val categoryRef = action.categoryRef
-    val accountRef = action.accountRef
-    val transferAccountRef = action.transferAccountRef
-
-    if (amount <= 0) {
-      return AddTransactionExecutionResolution(
-        transactionType = TransactionType.EXPENSE,
-        failureMessage = "记账失败：金额必须大于0"
-      )
     }
 
     val effectiveTypeStr = transactionTypeStr.ifBlank { safeTypeStr.ifBlank { "expense" } }
@@ -286,6 +302,21 @@ class AIAssistantActionExecutor @Inject constructor(
       "TRANSFER", "转账" -> TransactionType.TRANSFER
       else -> TransactionType.EXPENSE
     }
+    val amount = when (transactionType) {
+      TransactionType.EXPENSE, TransactionType.INCOME -> abs(rawAmount)
+      TransactionType.TRANSFER -> rawAmount
+    }
+
+    val categoryRef = action.categoryRef
+    val accountRef = action.accountRef
+    val transferAccountRef = action.transferAccountRef
+
+    if (amount <= 0) {
+      return AddTransactionExecutionResolution(
+        transactionType = transactionType,
+        failureMessage = "记账失败：金额必须大于0"
+      )
+    }
 
     if (transactionType == TransactionType.TRANSFER) {
       val effectiveAccountName = when {
@@ -293,12 +324,16 @@ class AIAssistantActionExecutor @Inject constructor(
         accountRef.rawIdText.isNotBlank() && accountRef.id == null -> accountRef.rawIdText
         else -> ""
       }
+      val sourceAccountAmbiguous = looksLikeAmbiguousReference(effectiveAccountName)
+      val sourceAccountNameForResolution = if (sourceAccountAmbiguous) "" else effectiveAccountName
       val targetRef = transferAccountRef
       val effectiveTargetAccountName = when {
         targetRef?.name?.isNotBlank() == true -> targetRef.name
         targetRef?.rawIdText?.isNotBlank() == true && targetRef.id == null -> targetRef.rawIdText
         else -> ""
       }
+      val targetAccountAmbiguous = looksLikeAmbiguousReference(effectiveTargetAccountName)
+      val targetAccountNameForResolution = if (targetAccountAmbiguous) "" else effectiveTargetAccountName
 
       if (targetRef == null || (targetRef.id == null && effectiveTargetAccountName.isBlank())) {
         val fromLabel = effectiveAccountName.ifBlank { accountRef.id?.let { "ID=$it" } ?: "源账户" }
@@ -331,13 +366,14 @@ class AIAssistantActionExecutor @Inject constructor(
         accountRepository = accountRepository,
         aiOperationExecutor = aiOperationExecutor,
         accountId = accountRef.id?.takeIf { it > 0 },
-        accountName = effectiveAccountName,
-        fallbackAccountName = effectiveAccountName.ifBlank { "默认账户" },
+        accountName = sourceAccountNameForResolution,
+        fallbackAccountName = sourceAccountNameForResolution.ifBlank { "默认账户" },
         fallbackAccountType = AccountType.CASH,
         enableFuzzyNameMatch = true,
         enableTypeMatch = true,
         excludeArchived = true,
-        allowExplicitFallbackCreation = true,
+        allowExplicitFallbackCreation = !sourceAccountAmbiguous,
+        allowImplicitFallbackCreation = !sourceAccountAmbiguous,
         traceContext = traceContext
       )
       val sourceAccount = accountResolution.account
@@ -367,13 +403,14 @@ class AIAssistantActionExecutor @Inject constructor(
         accountRepository = accountRepository,
         aiOperationExecutor = aiOperationExecutor,
         accountId = targetRef.id?.takeIf { it > 0 },
-        accountName = effectiveTargetAccountName,
-        fallbackAccountName = effectiveTargetAccountName.ifBlank { "目标账户" },
+        accountName = targetAccountNameForResolution,
+        fallbackAccountName = targetAccountNameForResolution.ifBlank { "目标账户" },
         fallbackAccountType = AccountType.CASH,
         enableFuzzyNameMatch = true,
         enableTypeMatch = true,
         excludeArchived = true,
-        allowExplicitFallbackCreation = true,
+        allowExplicitFallbackCreation = !targetAccountAmbiguous,
+        allowImplicitFallbackCreation = !targetAccountAmbiguous,
         traceContext = traceContext
       )
       val targetAccount = targetAccountResolution.account
@@ -414,20 +451,23 @@ class AIAssistantActionExecutor @Inject constructor(
         )
       }
 
+      val transferCategoryName = when {
+        categoryRef.name.isNotBlank() -> categoryRef.name
+        categoryRef.rawIdText.isNotBlank() && categoryRef.id == null -> categoryRef.rawIdText
+        else -> ""
+      }
+
       val transferCategoryResolution = AITransactionEntityResolver.resolveCategory(
         categoryRepository = categoryRepository,
         aiOperationExecutor = aiOperationExecutor,
         transactionType = TransactionType.TRANSFER,
         categoryId = categoryRef.id?.takeIf { it > 0 },
-        categoryName = when {
-          categoryRef.name.isNotBlank() -> categoryRef.name
-          categoryRef.rawIdText.isNotBlank() && categoryRef.id == null -> categoryRef.rawIdText
-          else -> ""
-        },
+        categoryName = transferCategoryName,
         fallbackCategoryName = "转账",
         emergencyCategoryName = "转账",
         allowAnyTypeFallback = false,
-        allowExplicitFallbackCreation = true,
+        allowExplicitFallbackCreation = !looksLikeAmbiguousReference(transferCategoryName),
+        allowImplicitFallbackCreation = !looksLikeAmbiguousReference(transferCategoryName),
         traceContext = traceContext
       )
       val transferCategory = transferCategoryResolution.category
@@ -480,12 +520,16 @@ class AIAssistantActionExecutor @Inject constructor(
       categoryRef.rawIdText.isNotBlank() && categoryRef.id == null -> categoryRef.rawIdText
       else -> ""
     }
+    val categoryAmbiguous = looksLikeAmbiguousReference(effectiveCategoryName)
+    val categoryNameForResolution = if (categoryAmbiguous) "" else effectiveCategoryName
 
     val effectiveAccountName = when {
       accountRef.name.isNotBlank() -> accountRef.name
       accountRef.rawIdText.isNotBlank() && accountRef.id == null -> accountRef.rawIdText
       else -> ""
     }
+    val accountAmbiguous = looksLikeAmbiguousReference(effectiveAccountName)
+    val accountNameForResolution = if (accountAmbiguous) "" else effectiveAccountName
 
     if (BuildConfig.DEBUG) {
       logDebug("解析交易字段已提取")
@@ -497,13 +541,14 @@ class AIAssistantActionExecutor @Inject constructor(
       accountRepository = accountRepository,
       aiOperationExecutor = aiOperationExecutor,
       accountId = accountRef.id?.takeIf { it > 0 },
-      accountName = effectiveAccountName,
-      fallbackAccountName = effectiveAccountName.ifBlank { "默认账户" },
+      accountName = accountNameForResolution,
+      fallbackAccountName = accountNameForResolution.ifBlank { "默认账户" },
       fallbackAccountType = AccountType.CASH,
       enableFuzzyNameMatch = true,
       enableTypeMatch = true,
       excludeArchived = true,
-      allowExplicitFallbackCreation = true,
+      allowExplicitFallbackCreation = !accountAmbiguous,
+      allowImplicitFallbackCreation = !accountAmbiguous,
       traceContext = traceContext
     )
     val account = accountResolution.account
@@ -534,13 +579,14 @@ class AIAssistantActionExecutor @Inject constructor(
       aiOperationExecutor = aiOperationExecutor,
       transactionType = transactionType,
       categoryId = categoryRef.id?.takeIf { it > 0 },
-      categoryName = effectiveCategoryName,
-      fallbackCategoryName = effectiveCategoryName.ifBlank {
+      categoryName = categoryNameForResolution,
+      fallbackCategoryName = categoryNameForResolution.ifBlank {
         if (transactionType == TransactionType.INCOME) "其他收入" else "其他支出"
       },
       emergencyCategoryName = null,
       allowAnyTypeFallback = true,
-      allowExplicitFallbackCreation = true,
+      allowExplicitFallbackCreation = !categoryAmbiguous,
+      allowImplicitFallbackCreation = !categoryAmbiguous,
       traceContext = traceContext
     )
     val category = categoryResolution.category
@@ -833,6 +879,84 @@ class AIAssistantActionExecutor @Inject constructor(
       .replace(Regex("^(?:null\\s*)+"), "")
       .replace(Regex("(?:\\s*null)+$"), "")
       .trim()
+  }
+
+  private fun maybeBuildCompactBatchSummary(results: List<String>): String {
+    if (results.size < 3) {
+      return ""
+    }
+
+    val successCount = results.count { it.contains("✅") || it.contains("已记账") || it.contains("已转账") || it.contains("已创建") }
+    val failureCount = results.count { it.contains("❌") || it.contains("失败") }
+
+    var expenseTotal = 0.0
+    var incomeTotal = 0.0
+    var transferTotal = 0.0
+
+    results.forEach { result ->
+      val amountMatch = Regex("¥([0-9]+(?:\\.[0-9]+)?)").find(result)
+      val amount = amountMatch?.groupValues?.getOrNull(1)?.toDoubleOrNull() ?: return@forEach
+      when {
+        result.contains("收入") -> incomeTotal += amount
+        result.contains("转账") -> transferTotal += amount
+        result.contains("支出") -> expenseTotal += amount
+      }
+    }
+
+    if (successCount == 0 && failureCount == 0 && expenseTotal == 0.0 && incomeTotal == 0.0 && transferTotal == 0.0) {
+      return ""
+    }
+
+    return buildString {
+      append("记账完成：成功")
+      append(successCount)
+      append("笔")
+      if (failureCount > 0) {
+        append("，失败")
+        append(failureCount)
+        append("笔")
+      }
+      if (incomeTotal > 0.0 || expenseTotal > 0.0 || transferTotal > 0.0) {
+        append("。")
+        val segments = buildList {
+          if (expenseTotal > 0.0) add("支出¥${formatAmount(expenseTotal)}")
+          if (incomeTotal > 0.0) add("收入¥${formatAmount(incomeTotal)}")
+          if (transferTotal > 0.0) add("转账¥${formatAmount(transferTotal)}")
+        }
+        append(segments.joinToString("，"))
+      }
+    }
+  }
+
+  private fun formatAmount(value: Double): String {
+    val normalized = if (abs(value) < 0.0000001) 0.0 else value
+    val rounded = kotlin.math.round(normalized * 100) / 100
+    return if (rounded % 1.0 == 0.0) {
+      rounded.toInt().toString()
+    } else {
+      rounded.toString()
+    }
+  }
+
+  private fun looksLikeAmbiguousReference(value: String): Boolean {
+    val normalized = value.trim().lowercase()
+    if (normalized.isBlank()) {
+      return false
+    }
+
+    // Only match truly deictic/indefinite pronouns — not legitimate account names
+    val chineseAmbiguousExactTokens = setOf(
+      "这个", "那个", "这里", "那里", "随便", "任意", "都行", "猜一个"
+    )
+    if (normalized in chineseAmbiguousExactTokens) {
+      return true
+    }
+
+    // Narrow to true pronouns only — remove "default"/"any" which can be real names
+    val englishAmbiguousTokens = setOf("this", "that", "whatever", "same")
+    val englishTokens = normalized.split(Regex("[^a-z0-9]+"))
+      .filter { token -> token.isNotBlank() }
+    return englishTokens.any { token -> token in englishAmbiguousTokens }
   }
 
   private fun parseAccountType(typeStr: String): com.example.aiaccounting.data.local.entity.AccountType {

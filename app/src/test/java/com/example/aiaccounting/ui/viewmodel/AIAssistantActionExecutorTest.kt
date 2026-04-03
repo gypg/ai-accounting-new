@@ -121,6 +121,40 @@ class AIAssistantActionExecutorTest {
     }
 
     @Test
+    fun executeAIActions_acceptsNegativeExpenseAmount_andExecutesAsPositiveExpense() = runTest {
+        coEvery { aiLocalProcessor.ensureBasicCategoriesExist() } returns Unit
+        coEvery { accountRepository.getAllAccountsList() } returns listOf(
+            Account(id = 1, name = "微信", type = AccountType.WECHAT)
+        )
+        coEvery { categoryRepository.getAllCategoriesList() } returns listOf(
+            Category(id = 1, name = "餐饮", type = TransactionType.EXPENSE)
+        )
+        coEvery {
+            aiOperationExecutor.executeOperation(
+                match<AIOperation.AddTransaction> {
+                    it.amount == 12.0 &&
+                        it.type == TransactionType.EXPENSE &&
+                        it.accountId == 1L &&
+                        it.categoryId == 1L
+                }
+            )
+        } returns AIOperationExecutor.AIOperationResult.Success("ok")
+
+        val result = executor.executeAIActions(
+            """
+            {"action":"add_transaction","amount":-12,"transactionType":"expense","category":"餐饮","account":"微信","note":"咖啡"}
+            """.trimIndent()
+        )
+
+        assertTrue(result.contains("已记账"))
+        assertTrue(result.contains("支出"))
+        assertTrue(result.contains("¥12.0") || result.contains("¥12"))
+        coVerify(exactly = 1) {
+            aiOperationExecutor.executeOperation(any<AIOperation.AddTransaction>())
+        }
+    }
+
+    @Test
     fun executeAIActions_reportsEachActionResult_whenBatchHasMixedOutcome() = runTest {
         coEvery { aiLocalProcessor.ensureBasicCategoriesExist() } returns Unit
         coEvery { accountRepository.getAllAccountsList() } returnsMany listOf(
@@ -213,6 +247,58 @@ class AIAssistantActionExecutorTest {
 
         assertTrue(result.contains("已记账"))
         assertTrue(result.contains("自动创建账户") && result.contains("旅行卡"))
+    }
+
+    @Test
+    fun executeAIActions_doesNotAutoCreateWhenAccountReferenceLooksAmbiguous() = runTest {
+        coEvery { aiLocalProcessor.ensureBasicCategoriesExist() } returns Unit
+        coEvery { accountRepository.getAllAccountsList() } returns emptyList()
+        coEvery { categoryRepository.getAllCategoriesList() } returns listOf(
+            Category(id = 2, name = "餐饮", type = TransactionType.EXPENSE)
+        )
+
+        val result = executor.executeAIActions(
+            """
+            {"action":"add_transaction","amount":18,"type":"expense","account":"随便","category":"餐饮","note":"早餐"}
+            """.trimIndent()
+        )
+
+        assertTrue(result.contains("无法创建或找到账户") || result.contains("未找到指定账户"))
+        coVerify(exactly = 0) { aiOperationExecutor.executeOperation(any<AIOperation.AddAccount>()) }
+        coVerify(exactly = 0) { aiOperationExecutor.executeOperation(any<AIOperation.AddTransaction>()) }
+    }
+
+    @Test
+    fun executeAIActions_usesExistingDefaultAccount_whenAccountReferenceLooksAmbiguous() = runTest {
+        coEvery { aiLocalProcessor.ensureBasicCategoriesExist() } returns Unit
+        coEvery { accountRepository.getAllAccountsList() } returns listOf(
+            Account(id = 9, name = "默认账户", type = AccountType.CASH, isDefault = true),
+            Account(id = 12, name = "日常卡", type = AccountType.BANK)
+        )
+        coEvery { categoryRepository.getAllCategoriesList() } returns listOf(
+            Category(id = 2, name = "餐饮", type = TransactionType.EXPENSE)
+        )
+        coEvery {
+            aiOperationExecutor.executeOperation(
+                match<AIOperation.AddTransaction> {
+                    it.accountId == 9L &&
+                        it.categoryId == 2L &&
+                        it.amount == 18.0
+                }
+            )
+        } returns AIOperationExecutor.AIOperationResult.Success("ok")
+
+        val result = executor.executeAIActions(
+            """
+            {"action":"add_transaction","amount":18,"type":"expense","account":"随便","category":"餐饮","note":"早餐"}
+            """.trimIndent()
+        )
+
+        assertTrue(result.contains("已记账"))
+        assertTrue(result.contains("账户: 默认账户"))
+        coVerify(exactly = 0) {
+            aiOperationExecutor.executeOperation(match<AIOperation.AddAccount> { true })
+        }
     }
 
     @Test
@@ -780,5 +866,143 @@ class AIAssistantActionExecutorTest {
 
         assertTrue(result.contains("未知的操作类型"))
         assertTrue(result.contains("delete_everything"))
+    }
+
+    @Test
+    fun executeAIActions_doesNotReturnUnknownOperation_forTypeOnlyExpenseIncomeBatch() = runTest {
+        coEvery { aiLocalProcessor.ensureBasicCategoriesExist() } returns Unit
+        coEvery { accountRepository.getAllAccountsList() } returnsMany listOf(
+            listOf(Account(id = 10, name = "银行卡", type = AccountType.BANK)),
+            listOf(Account(id = 10, name = "银行卡", type = AccountType.BANK)),
+            listOf(Account(id = 10, name = "银行卡", type = AccountType.BANK)),
+            listOf(Account(id = 10, name = "银行卡", type = AccountType.BANK))
+        )
+        coEvery { categoryRepository.getAllCategoriesList() } returnsMany listOf(
+            listOf(
+                Category(id = 20, name = "餐饮", type = TransactionType.EXPENSE),
+                Category(id = 21, name = "工资", type = TransactionType.INCOME)
+            ),
+            listOf(
+                Category(id = 20, name = "餐饮", type = TransactionType.EXPENSE),
+                Category(id = 21, name = "工资", type = TransactionType.INCOME)
+            ),
+            listOf(
+                Category(id = 20, name = "餐饮", type = TransactionType.EXPENSE),
+                Category(id = 21, name = "工资", type = TransactionType.INCOME)
+            ),
+            listOf(
+                Category(id = 20, name = "餐饮", type = TransactionType.EXPENSE),
+                Category(id = 21, name = "工资", type = TransactionType.INCOME)
+            )
+        )
+        coEvery {
+            aiOperationExecutor.executeOperation(
+                match<AIOperation.AddTransaction> {
+                    it.accountId == 10L &&
+                        it.categoryId == 20L &&
+                        it.type == TransactionType.EXPENSE
+                }
+            )
+        } returns AIOperationExecutor.AIOperationResult.Success("expense-ok")
+        coEvery {
+            aiOperationExecutor.executeOperation(
+                match<AIOperation.AddTransaction> {
+                    it.accountId == 10L &&
+                        it.categoryId == 21L &&
+                        it.type == TransactionType.INCOME
+                }
+            )
+        } returns AIOperationExecutor.AIOperationResult.Success("income-ok")
+
+        val result = executor.executeAIActions(
+            """
+            {
+              "actions": [
+                {"action":"create_account","name":"银行卡","accountType":"BANK","balance":0},
+                {"type":"EXPENSE","amount":25,"account":"银行卡","category":"餐饮","note":"午饭"},
+                {"type":"INCOME","amount":3000,"account":"银行卡","category":"工资","note":"月薪"}
+              ]
+            }
+            """.trimIndent()
+        )
+
+        assertTrue(!result.contains("未知的操作类型：EXPENSE"))
+        assertTrue(!result.contains("未知的操作类型：INCOME"))
+        assertTrue(result.contains("已记账"))
+        val executedOperations = mutableListOf<AIOperation>()
+        coVerify(exactly = 3) {
+            aiOperationExecutor.executeOperation(capture(executedOperations))
+        }
+        assertEquals(1, executedOperations.filterIsInstance<AIOperation.AddAccount>().size)
+        assertEquals(2, executedOperations.filterIsInstance<AIOperation.AddTransaction>().size)
+    }
+
+    @Test
+    fun executeAIActions_whenLongReplyAndBatchResults_prefersCompactSummaryHeader() = runTest {
+        coEvery { aiLocalProcessor.ensureBasicCategoriesExist() } returns Unit
+        coEvery { accountRepository.getAllAccountsList() } returnsMany listOf(
+            listOf(Account(id = 10, name = "银行卡", type = AccountType.BANK)),
+            listOf(Account(id = 10, name = "银行卡", type = AccountType.BANK)),
+            listOf(Account(id = 10, name = "银行卡", type = AccountType.BANK)),
+            listOf(Account(id = 10, name = "银行卡", type = AccountType.BANK)),
+            listOf(Account(id = 10, name = "银行卡", type = AccountType.BANK)),
+            listOf(Account(id = 10, name = "银行卡", type = AccountType.BANK))
+        )
+        coEvery { categoryRepository.getAllCategoriesList() } returnsMany listOf(
+            listOf(
+                Category(id = 20, name = "餐饮", type = TransactionType.EXPENSE),
+                Category(id = 21, name = "工资", type = TransactionType.INCOME)
+            ),
+            listOf(
+                Category(id = 20, name = "餐饮", type = TransactionType.EXPENSE),
+                Category(id = 21, name = "工资", type = TransactionType.INCOME)
+            ),
+            listOf(
+                Category(id = 20, name = "餐饮", type = TransactionType.EXPENSE),
+                Category(id = 21, name = "工资", type = TransactionType.INCOME)
+            ),
+            listOf(
+                Category(id = 20, name = "餐饮", type = TransactionType.EXPENSE),
+                Category(id = 21, name = "工资", type = TransactionType.INCOME)
+            ),
+            listOf(
+                Category(id = 20, name = "餐饮", type = TransactionType.EXPENSE),
+                Category(id = 21, name = "工资", type = TransactionType.INCOME)
+            ),
+            listOf(
+                Category(id = 20, name = "餐饮", type = TransactionType.EXPENSE),
+                Category(id = 21, name = "工资", type = TransactionType.INCOME)
+            )
+        )
+        coEvery {
+            aiOperationExecutor.executeOperation(match<AIOperation.AddTransaction> { it.type == TransactionType.EXPENSE })
+        } returnsMany listOf(
+            AIOperationExecutor.AIOperationResult.Success("expense-ok"),
+            AIOperationExecutor.AIOperationResult.Success("expense-ok")
+        )
+        coEvery {
+            aiOperationExecutor.executeOperation(match<AIOperation.AddTransaction> { it.type == TransactionType.INCOME })
+        } returns AIOperationExecutor.AIOperationResult.Success("income-ok")
+
+        val longReply = "这是一段很长的执行说明".repeat(12)
+        val result = executor.executeAIActions(
+            """
+            {
+              "reply":"$longReply",
+              "actions": [
+                {"type":"EXPENSE","amount":25,"account":"银行卡","category":"餐饮","note":"午饭"},
+                {"type":"EXPENSE","amount":42,"account":"银行卡","category":"餐饮","note":"晚饭"},
+                {"type":"INCOME","amount":3000,"account":"银行卡","category":"工资","note":"月薪"}
+              ]
+            }
+            """.trimIndent()
+        )
+
+        assertTrue(result.startsWith("记账完成：成功3笔"))
+        assertTrue(result.contains("支出¥67"))
+        assertTrue(result.contains("收入¥3000"))
+        assertTrue(result.contains("1."))
+        assertTrue(result.contains("2."))
+        assertTrue(result.contains("3."))
     }
 }

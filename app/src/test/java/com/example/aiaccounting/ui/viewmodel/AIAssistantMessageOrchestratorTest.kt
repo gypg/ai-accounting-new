@@ -414,12 +414,14 @@ class AIAssistantMessageOrchestratorTest {
     }
 
     @Test
-    fun buildBookkeepingEnvelopeCorrectionMessage_returnsStrictJsonEnvelopeInstruction() {
+    fun buildBookkeepingEnvelopeCorrectionMessage_requiresSingleJsonEnvelopeWithoutMarkdown() {
         val message = orchestrator.buildBookkeepingEnvelopeCorrectionMessage()
 
-        assertTrue(message.contains("仅返回"))
-        assertTrue(message.contains("JSON"))
-        assertTrue(message.contains("actions"))
+        assertTrue(message.contains("仅输出 JSON"))
+        assertTrue(message.contains("{\"actions\":[...],\"reply\":\"...\" }"))
+        assertTrue(message.contains("不要 markdown"))
+        assertTrue(message.contains("不要代码块"))
+        assertTrue(message.contains("全部输出"))
     }
 
     private fun reasoningResult(

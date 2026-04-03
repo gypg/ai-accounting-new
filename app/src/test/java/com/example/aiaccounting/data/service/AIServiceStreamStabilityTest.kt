@@ -272,6 +272,8 @@ class AIServiceStreamStabilityTest {
             request.body.readUtf8()
         }
         assertTrue(body.contains("\"max_tokens\":2000"))
+        assertTrue(body.contains("\"max_input_tokens\":10000"))
+        assertFalse(request.getHeader("Content-Encoding") == "gzip")
     }
 
     @Test

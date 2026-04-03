@@ -262,7 +262,7 @@ internal class AIAssistantMessageOrchestrator {
     }
 
     fun buildBookkeepingEnvelopeCorrectionMessage(): String {
-        return "请仅返回可执行动作 envelope。不要输出解释性文本，不要 markdown，不要代码块。仅输出 JSON，对象格式为 {\"actions\":[...],\"reply\":\"...\" }。"
+        return "请仅输出 JSON。必须是单个对象，格式为 {\"actions\":[...],\"reply\":\"...\" }。不要 markdown，不要代码块，不要解释性文本，务必把识别到的多笔交易全部输出到 actions。"
     }
 
     private fun resolveTopLevelIntent(

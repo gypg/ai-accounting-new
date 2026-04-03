@@ -4,12 +4,10 @@ import android.content.Context
 import android.net.Uri
 import com.example.aiaccounting.data.model.AIConfig
 import com.example.aiaccounting.data.model.Butler
-import com.example.aiaccounting.data.model.ChatMessage
-import com.example.aiaccounting.data.model.MessageRole
 import com.example.aiaccounting.data.repository.AIUsageRepository
 import com.example.aiaccounting.data.service.AIService
+import com.example.aiaccounting.data.service.ImageAction
 import com.example.aiaccounting.data.service.ImageProcessingService
-import kotlinx.coroutines.withTimeoutOrNull
 
 internal sealed class ImagePromptResult {
     data class Success(val prompt: String) : ImagePromptResult()
@@ -17,7 +15,9 @@ internal sealed class ImagePromptResult {
 }
 
 internal sealed class ImageMessageProcessingResult {
-    data class Success(val message: String) : ImageMessageProcessingResult()
+    data class TextReply(val message: String) : ImageMessageProcessingResult()
+    data class ExecuteEnvelope(val envelope: AIAssistantActionEnvelope) : ImageMessageProcessingResult()
+    data class RemoteBookkeepingPrompt(val prompt: String) : ImageMessageProcessingResult()
     data class Error(val message: String) : ImageMessageProcessingResult()
 }
 
@@ -26,6 +26,10 @@ internal class AIAssistantImageMessageHandler(
     private val imageProcessingService: ImageProcessingService,
     private val aiUsageRepository: AIUsageRepository
 ) {
+    private companion object {
+        const val OCR_BATCH_TIMEOUT_MS = 15_000L
+        const val OCR_SINGLE_TIMEOUT_MS = 10_000L
+    }
     fun isNativeImageSupported(config: AIConfig): Boolean {
         return aiService.isImageSupported(config)
     }
@@ -46,8 +50,8 @@ internal class AIAssistantImageMessageHandler(
             return ImageMessageProcessingResult.Error("🔑 请先配置支持图片的模型和 API 密钥，才能使用图片识别功能。")
         }
 
-        val isNativeImageSupported = isNativeImageSupported(config)
-        if (isNativeImageSupported) {
+        val nativeImageSupported = isNativeImageSupported(config)
+        if (nativeImageSupported) {
             return processNativeImageMessage(
                 message = message,
                 imageUris = imageUris,
@@ -67,12 +71,7 @@ internal class AIAssistantImageMessageHandler(
             )
         ) {
             is ImagePromptResult.Error -> ImageMessageProcessingResult.Error(promptResult.message)
-            is ImagePromptResult.Success -> ImageMessageProcessingResult.Success(
-                requestImageReply(
-                    prompt = promptResult.prompt,
-                    config = config
-                )
-            )
+            is ImagePromptResult.Success -> ImageMessageProcessingResult.RemoteBookkeepingPrompt(promptResult.prompt)
         }
     }
 
@@ -94,21 +93,36 @@ internal class AIAssistantImageMessageHandler(
             }
         }.trim()
 
-        val replies = imageUris.mapNotNull { imageUri ->
+        val typedActions = mutableListOf<AIAssistantTypedAction>()
+        val replies = mutableListOf<String>()
+
+        imageUris.forEach { imageUri ->
             val analysisResult = aiService.analyzeImageAndRecord(
                 imageUri = imageUri,
                 config = config,
                 context = context,
                 promptContext = promptContext
             )
-            analysisResult.message.takeIf { it.isNotBlank() }
+            analysisResult.actions
+                ?.mapNotNull(::toTypedAction)
+                ?.let { typedActions.addAll(it) }
+            analysisResult.message.takeIf { it.isNotBlank() }?.let(replies::add)
+        }
+
+        if (typedActions.isNotEmpty()) {
+            return ImageMessageProcessingResult.ExecuteEnvelope(
+                envelope = AIAssistantActionEnvelope(
+                    actions = typedActions,
+                    reply = replies.joinToString("\n\n")
+                )
+            )
         }
 
         if (replies.isEmpty()) {
             return ImageMessageProcessingResult.Error("😥 没有在图片里识别到有效内容，请尝试更清晰的图片。")
         }
 
-        return ImageMessageProcessingResult.Success(replies.joinToString("\n\n"))
+        return ImageMessageProcessingResult.TextReply(replies.joinToString("\n\n"))
     }
 
     suspend fun buildImagePrompt(
@@ -133,27 +147,18 @@ internal class AIAssistantImageMessageHandler(
         }
 
         val analysisResults = imageProcessingService.analyzeMultipleImages(
-            imageUris, context, timeoutMs = 8000
+            imageUris, context, timeoutMs = OCR_BATCH_TIMEOUT_MS
         )
-        val hasContent = analysisResults.any { it.hasContent }
-        if (!hasContent) {
-            return ImagePromptResult.Error("😥 没有在图片里识别到文字或标签，可能图片过模糊或无法读取。请尝试更清晰的账单照片再试一次。")
-        }
-
-        val acceptedResults = analysisResults.filter {
-            it.confidence == ImageProcessingService.OcrConfidence.HIGH ||
-                it.confidence == ImageProcessingService.OcrConfidence.MEDIUM
-        }
-        val resultsForPrompt = acceptedResults.ifEmpty {
-            analysisResults.filter { result ->
-                result.hasContent && (
-                    result.text.isNotBlank() ||
-                        result.keyLines.isNotEmpty() ||
-                        result.labels.isNotEmpty() ||
-                        result.receiptSignals.hasStrongReceiptSignals
-                    )
+        val effectiveResults = if (analysisResults.any { it.hasContent }) {
+            analysisResults
+        } else {
+            imageUris.map { imageUri ->
+                imageProcessingService.analyzeImage(imageUri, context, timeoutMs = OCR_SINGLE_TIMEOUT_MS)
             }
         }
+
+        val resultsForPrompt = effectiveResults.filter { it.hasContent }
+
         if (resultsForPrompt.isEmpty()) {
             return ImagePromptResult.Error("😥 没有在图片里识别到文字或标签，可能图片过模糊或无法读取。请尝试更清晰的账单照片再试一次。")
         }
@@ -163,22 +168,39 @@ internal class AIAssistantImageMessageHandler(
         )
     }
 
-    suspend fun requestImageReply(
-        prompt: String,
-        config: AIConfig
-    ): String {
-        val chatMessages = listOf(
-            ChatMessage(
-                role = MessageRole.USER,
-                content = prompt
-            )
-        )
 
-        val aiResponse = withTimeoutOrNull(90000L) {
-            aiService.chat(chatMessages, config)
+    private fun toTypedAction(action: ImageAction): AIAssistantTypedAction? {
+        if (action.action.trim().lowercase() != "add_transaction") {
+            return null
+        }
+        if (action.amount <= 0) {
+            return null
         }
 
-        aiUsageRepository.recordCall(success = aiResponse != null)
-        return aiResponse ?: "图片处理超时，请稍后重试。"
+        val transactionTypeRaw = when (action.type.trim().lowercase()) {
+            "income", "收入" -> "income"
+            "transfer", "转账" -> "transfer"
+            else -> "expense"
+        }
+
+        return AIAssistantTypedAction.AddTransaction(
+            amount = action.amount,
+            transactionTypeRaw = transactionTypeRaw,
+            categoryRef = AIAssistantEntityReference(
+                id = null,
+                name = action.category,
+                rawIdText = "",
+                kind = "category"
+            ),
+            accountRef = AIAssistantEntityReference(
+                id = null,
+                name = action.account,
+                rawIdText = "",
+                kind = "account"
+            ),
+            transferAccountRef = null,
+            note = action.note,
+            dateTimestamp = System.currentTimeMillis()
+        )
     }
 }

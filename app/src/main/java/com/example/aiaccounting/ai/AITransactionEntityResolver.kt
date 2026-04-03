@@ -35,6 +35,7 @@ internal object AITransactionEntityResolver {
         enableTypeMatch: Boolean = false,
         excludeArchived: Boolean = false,
         allowExplicitFallbackCreation: Boolean = false,
+        allowImplicitFallbackCreation: Boolean = true,
         traceContext: AITraceContext = AITraceContext(sourceType = "AI_LOCAL")
     ): AccountResolutionResult {
         var accounts = loadAccounts(accountRepository, excludeArchived)
@@ -86,6 +87,13 @@ internal object AITransactionEntityResolver {
             )
         }
 
+        if (account == null && !allowImplicitFallbackCreation) {
+            return AccountResolutionResult(
+                account = null,
+                requestedLabel = requestedLabel
+            )
+        }
+
         var autoCreated = false
         if (account == null) {
             when (
@@ -128,6 +136,7 @@ internal object AITransactionEntityResolver {
         emergencyCategoryName: String? = null,
         allowAnyTypeFallback: Boolean = true,
         allowExplicitFallbackCreation: Boolean = false,
+        allowImplicitFallbackCreation: Boolean = true,
         traceContext: AITraceContext = AITraceContext(sourceType = "AI_LOCAL")
     ): CategoryResolutionResult {
         var categories = categoryRepository.getAllCategoriesList()
@@ -167,6 +176,14 @@ internal object AITransactionEntityResolver {
             return CategoryResolutionResult(
                 category = null,
                 creationError = "未找到指定分类",
+                terminalCreationError = null,
+                requestedLabel = requestedLabel
+            )
+        }
+        if (category == null && !allowImplicitFallbackCreation) {
+            return CategoryResolutionResult(
+                category = null,
+                creationError = null,
                 terminalCreationError = null,
                 requestedLabel = requestedLabel
             )

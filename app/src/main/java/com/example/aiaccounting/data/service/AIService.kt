@@ -59,6 +59,7 @@ class AIService @Inject constructor(
     private val longTextOutputBudgetTokens = 2_500
     private val defaultOutputBudgetTokens = 4_000
     private val longTextOutputBudgetThresholdChars = 8_000
+    private val bookkeepingMaxInputTokens = 10_000
     private val modelCache = ConcurrentHashMap<ModelCacheKey, CachedRemoteModels>()
 
     private fun modelSelectionStrategy(config: AIConfig): ModelSelectionStrategy {
@@ -471,7 +472,8 @@ class AIService @Inject constructor(
             url = url,
             apiKey = config.apiKey,
             requestKind = AIRequestKind.CONNECTION_TEST,
-            requestBody = requestBody
+            requestBody = requestBody,
+            messages = messages
         )
 
         try {
@@ -700,7 +702,8 @@ class AIService @Inject constructor(
         url: String,
         apiKey: String,
         requestKind: AIRequestKind,
-        requestBody: JSONObject
+        requestBody: JSONObject,
+        messages: List<ChatMessage> = emptyList()
     ): Request {
         val payload = requestBody.toString()
         val requestBodyBuilder = Request.Builder()
@@ -708,7 +711,7 @@ class AIService @Inject constructor(
             .header("Authorization", "Bearer ${apiKey.trim()}")
             .header("Content-Type", "application/json")
 
-        val compressedBody = compressRequestBodyIfNeeded(requestKind, payload)
+        val compressedBody = compressRequestBodyIfNeeded(requestKind, payload, messages)
         val okHttpBody = if (compressedBody != null) {
             requestBodyBuilder.header("Content-Encoding", "gzip")
             compressedBody.toRequestBody(jsonMediaType)
@@ -721,8 +724,15 @@ class AIService @Inject constructor(
             .build()
     }
 
-    private fun compressRequestBodyIfNeeded(requestKind: AIRequestKind, payload: String): ByteArray? {
+    private fun compressRequestBodyIfNeeded(
+        requestKind: AIRequestKind,
+        payload: String,
+        messages: List<ChatMessage>
+    ): ByteArray? {
         if (requestKind == AIRequestKind.STREAM_CHAT) {
+            return null
+        }
+        if (requestKind == AIRequestKind.NON_STREAM_CHAT && isBookkeepingEnvelopeScenario(messages)) {
             return null
         }
         if (payload.toByteArray(StandardCharsets.UTF_8).size < compressionThresholdBytes) {
@@ -840,6 +850,7 @@ class AIService @Inject constructor(
             })
         }
 
+        val bookkeepingScenario = isBookkeepingEnvelopeScenario(messages)
         val requestBody = JSONObject().apply {
             // Keep AUTO semantics consistent: when model is blank, this call site should already have
             // resolved a model (sendOpenAIChatNonStream resolves via /v1/models).
@@ -847,6 +858,9 @@ class AIService @Inject constructor(
             put("messages", messagesArray)
             put("temperature", 0.7)
             put("max_tokens", resolveOutputBudgetTokens(messages))
+            if (bookkeepingScenario) {
+                put("max_input_tokens", bookkeepingMaxInputTokens)
+            }
             put("stream", false)
         }
 
@@ -854,7 +868,8 @@ class AIService @Inject constructor(
             url = url,
             apiKey = config.apiKey,
             requestKind = AIRequestKind.NON_STREAM_CHAT,
-            requestBody = requestBody
+            requestBody = requestBody,
+            messages = messages
         )
 
         try {
@@ -1300,8 +1315,8 @@ suspend fun analyzeImageAndRecord(
     }
 
     try {
-        // 读取图片并转换为base64
-        val base64Image = uriToBase64(imageUri, context)
+        // 读取图片并转换为base64（保留真实图片MIME，避免PNG/WebP等被错误标记）
+        val encodedImage = uriToBase64(imageUri, context)
             ?: return@withContext ImageAnalysisResult(
                 success = false,
                 message = "无法读取图片",
@@ -1360,7 +1375,12 @@ ${promptContext?.takeIf { it.isNotBlank() } ?: "你是\"小财娘\"，一位可�
         val result = when (config.provider) {
             AIProvider.QWEN, AIProvider.DEEPSEEK, AIProvider.ZHIPU, AIProvider.BAIDU, AIProvider.CUSTOM -> {
                 try {
-                    sendOpenAIImageRequest(base64Image, systemPrompt, config)
+                    sendOpenAIImageRequest(
+                        base64Image = encodedImage.base64,
+                        mimeType = encodedImage.mimeType,
+                        systemPrompt = systemPrompt,
+                        config = config
+                    )
                 } catch (e: Exception) {
                     if (e.message == "UNSUPPORTED_MODEL") {
                         // Best-effort fallback: try another vision-capable model from /v1/models.
@@ -1371,7 +1391,12 @@ ${promptContext?.takeIf { it.isNotBlank() } ?: "你是\"小财娘\"，一位可�
                             requireImageSupport = true
                         )
                             ?: throw e
-                        sendOpenAIImageRequest(base64Image, systemPrompt, config.copy(model = fallback))
+                        sendOpenAIImageRequest(
+                            base64Image = encodedImage.base64,
+                            mimeType = encodedImage.mimeType,
+                            systemPrompt = systemPrompt,
+                            config = config.copy(model = fallback)
+                        )
                     } else {
                         throw e
                     }
@@ -1393,7 +1418,7 @@ ${promptContext?.takeIf { it.isNotBlank() } ?: "你是\"小财娘\"，一位可�
 /**
  * 将URI转换为Base64编码的图片
  */
-private fun uriToBase64(uri: Uri, context: Context): String? {
+private fun uriToBase64(uri: Uri, context: Context): EncodedImage? {
     return try {
         val inputStream: InputStream? = context.contentResolver.openInputStream(uri)
         inputStream?.use { stream ->
@@ -1404,9 +1429,16 @@ private fun uriToBase64(uri: Uri, context: Context): String? {
                 outputStream.write(buffer, 0, bytesRead)
             }
             val imageBytes = outputStream.toByteArray()
-            // 压缩图片，限制大小
-            val compressedBytes = compressImageIfNeeded(imageBytes)
-            Base64.encodeToString(compressedBytes, Base64.NO_WRAP)
+            val detectedMimeType = context.contentResolver.getType(uri)
+                ?.lowercase()
+                ?.takeIf { it.startsWith("image/") }
+                ?: "image/jpeg"
+            // 压缩图片，限制大小，同时返回压缩后真实MIME
+            val compressedImage = compressImageIfNeeded(imageBytes, detectedMimeType)
+            EncodedImage(
+                base64 = Base64.encodeToString(compressedImage.bytes, Base64.NO_WRAP),
+                mimeType = compressedImage.mimeType
+            )
         }
     } catch (e: Exception) {
         null
@@ -1417,17 +1449,17 @@ private fun uriToBase64(uri: Uri, context: Context): String? {
  * 压缩图片（如果需要）
  * 使用JPEG压缩算法，确保图片质量的同时限制大小
  */
-private fun compressImageIfNeeded(imageBytes: ByteArray): ByteArray {
-    // 如果图片小于1MB，直接返回
+private fun compressImageIfNeeded(imageBytes: ByteArray, detectedMimeType: String): CompressedImage {
+    // 如果图片小于1MB，直接返回，避免对清晰截图无必要重编码
     if (imageBytes.size < 1024 * 1024) {
-        return imageBytes
+        return CompressedImage(bytes = imageBytes, mimeType = detectedMimeType)
     }
-    
+
     return try {
         // 解码图片
         val bitmap = android.graphics.BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
-            ?: return imageBytes // 解码失败返回原图
-        
+            ?: return CompressedImage(bytes = imageBytes, mimeType = detectedMimeType) // 解码失败返回原图
+
         // 如果图片尺寸过大，先缩小尺寸
         val maxDimension = 1920 // 最大边长
         val scaledBitmap = if (bitmap.width > maxDimension || bitmap.height > maxDimension) {
@@ -1440,26 +1472,38 @@ private fun compressImageIfNeeded(imageBytes: ByteArray): ByteArray {
         } else {
             bitmap
         }
-        
-        // 使用JPEG压缩
-        val outputStream = java.io.ByteArrayOutputStream()
+
+        // 先尝试无损PNG压缩，尽量保留文字边缘
+        val pngOutputStream = java.io.ByteArrayOutputStream()
+        scaledBitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, pngOutputStream)
+        val pngBytes = pngOutputStream.toByteArray()
+        if (pngBytes.size <= 1024 * 1024) {
+            if (scaledBitmap != bitmap) {
+                scaledBitmap.recycle()
+            }
+            bitmap.recycle()
+            return CompressedImage(bytes = pngBytes, mimeType = "image/png")
+        }
+
+        // PNG仍过大时再降级到JPEG压缩
+        val jpegOutputStream = java.io.ByteArrayOutputStream()
         var quality = 90
         do {
-            outputStream.reset()
-            scaledBitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, quality, outputStream)
+            jpegOutputStream.reset()
+            scaledBitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, quality, jpegOutputStream)
             quality -= 10
-        } while (outputStream.size() > 1024 * 1024 && quality > 30)
-        
+        } while (jpegOutputStream.size() > 1024 * 1024 && quality > 30)
+
         // 回收Bitmap
         if (scaledBitmap != bitmap) {
             scaledBitmap.recycle()
         }
         bitmap.recycle()
-        
-        outputStream.toByteArray()
+
+        CompressedImage(bytes = jpegOutputStream.toByteArray(), mimeType = "image/jpeg")
     } catch (e: Exception) {
         // 压缩失败返回原图
-        imageBytes
+        CompressedImage(bytes = imageBytes, mimeType = detectedMimeType)
     }
 }
 
@@ -1468,6 +1512,7 @@ private fun compressImageIfNeeded(imageBytes: ByteArray): ByteArray {
  */
 private fun sendOpenAIImageRequest(
     base64Image: String,
+    mimeType: String,
     systemPrompt: String,
     config: AIConfig
 ): String {
@@ -1490,7 +1535,7 @@ private fun sendOpenAIImageRequest(
     contentArray.put(JSONObject().apply {
         put("type", "image_url")
         put("image_url", JSONObject().apply {
-            put("url", "data:image/jpeg;base64,$base64Image")
+            put("url", "data:$mimeType;base64,$base64Image")
         })
     })
     
@@ -1551,6 +1596,7 @@ private fun sendOpenAIImageRequest(
  */
 private fun sendClaudeImageRequest(
     base64Image: String,
+    mimeType: String,
     systemPrompt: String,
     config: AIConfig
 ): String {
@@ -1565,7 +1611,7 @@ private fun sendClaudeImageRequest(
         put("type", "image")
         put("source", JSONObject().apply {
             put("type", "base64")
-            put("media_type", "image/jpeg")
+            put("media_type", mimeType)
             put("data", base64Image)
         })
     })
@@ -1617,6 +1663,7 @@ private fun sendClaudeImageRequest(
  */
 private fun sendGeminiImageRequest(
     base64Image: String,
+    mimeType: String,
     systemPrompt: String,
     config: AIConfig
 ): String {
@@ -1629,7 +1676,7 @@ private fun sendGeminiImageRequest(
     })
     partsArray.put(JSONObject().apply {
         put("inline_data", JSONObject().apply {
-            put("mime_type", "image/jpeg")
+            put("mime_type", mimeType)
             put("data", base64Image)
         })
     })
@@ -1780,6 +1827,16 @@ data class ParsedTransaction(
     val type: String,
     val category: String,
     val note: String
+)
+
+data class CompressedImage(
+    val bytes: ByteArray,
+    val mimeType: String
+)
+
+data class EncodedImage(
+    val base64: String,
+    val mimeType: String
 )
 
 /**

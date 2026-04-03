@@ -381,4 +381,69 @@ class AIAssistantRemoteResponseInterpreterTest {
         assertTrue(decision is RemoteResponseDecision.ReturnRemoteReply)
         assertEquals("", (decision as RemoteResponseDecision.ReturnRemoteReply).reply)
     }
+
+    @Test
+    fun interpret_mapsExpenseAndIncomeTypeOnlyActions_toAddTransactionActions() {
+        val decision = interpreter.interpret(
+            remoteResponse = """
+                {
+                  "actions": [
+                    {"type":"EXPENSE","amount":25,"account":"微信","category":"餐饮","note":"午饭"},
+                    {"type":"INCOME","amount":3000,"account":"银行卡","category":"工资","note":"月薪"}
+                  ]
+                }
+            """.trimIndent()
+        )
+
+        assertTrue(decision is RemoteResponseDecision.QueryBeforeExecute)
+        val actions = (decision as RemoteResponseDecision.QueryBeforeExecute).envelope.actions
+        assertEquals(2, actions.size)
+        assertTrue(actions[0] is AIAssistantTypedAction.AddTransaction)
+        assertTrue(actions[1] is AIAssistantTypedAction.AddTransaction)
+        assertEquals("EXPENSE", (actions[0] as AIAssistantTypedAction.AddTransaction).transactionTypeRaw)
+        assertEquals("INCOME", (actions[1] as AIAssistantTypedAction.AddTransaction).transactionTypeRaw)
+    }
+
+    @Test
+    fun interpret_handlesMixedCreateAccountAndTypeOnlyTransactions_withoutUnknownActions() {
+        val decision = interpreter.interpret(
+            remoteResponse = """
+                {
+                  "actions": [
+                    {"action":"create_account","name":"银行卡","accountType":"BANK","balance":0},
+                    {"type":"EXPENSE","amount":25,"account":"银行卡","category":"餐饮","note":"午饭"},
+                    {"type":"INCOME","amount":3000,"account":"银行卡","category":"工资","note":"月薪"}
+                  ]
+                }
+            """.trimIndent()
+        )
+
+        assertTrue(decision is RemoteResponseDecision.QueryBeforeExecute)
+        val actions = (decision as RemoteResponseDecision.QueryBeforeExecute).envelope.actions
+        assertEquals(3, actions.size)
+        assertTrue(actions[0] is AIAssistantTypedAction.CreateAccount)
+        assertTrue(actions[1] is AIAssistantTypedAction.AddTransaction)
+        assertTrue(actions[2] is AIAssistantTypedAction.AddTransaction)
+        assertTrue(actions.none { it is AIAssistantTypedAction.Unknown })
+    }
+
+    @Test
+    fun interpret_filtersStandaloneExpenseIncomeUnknownActions_inEnvelope() {
+        val decision = interpreter.interpret(
+            remoteResponse = """
+                {
+                  "actions": [
+                    {"type":"EXPENSE"},
+                    {"type":"INCOME"},
+                    {"action":"query_accounts"}
+                  ]
+                }
+            """.trimIndent()
+        )
+
+        assertTrue(decision is RemoteResponseDecision.ExecuteActions)
+        val actions = (decision as RemoteResponseDecision.ExecuteActions).envelope.actions
+        assertEquals(1, actions.size)
+        assertTrue(actions.single() is AIAssistantTypedAction.Query)
+    }
 }

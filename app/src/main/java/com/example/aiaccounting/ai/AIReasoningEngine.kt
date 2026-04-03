@@ -299,13 +299,18 @@ class AIReasoningEngine @Inject constructor(
             "花了", "消费", "支出", "收入", "转账", "买", "卖", "付", "赚",
             "记账", "记录", "花了", "用了", "收到", "工资", "奖金"
         )
-        
+
+        // 结构化记账文本特征：日期格式 + 金额格式（如截图/复制粘贴的账单）
+        // 匹配 📅2026年3月31日 格式，或 多行金额列表 格式
+        val hasStructuredDateFormat = containsStructuredDateFormat(message)
+        val hasStructuredAmountFormat = containsStructuredAmountFormat(message)
+
         // 查询意图特征
         val queryPatterns = listOf(
             "查", "看", "显示", "告诉", "多少", "余额", "资产",
             "账户", "分类", "记录", "明细", "账单", "有哪些"
         )
-        
+
         // 分析意图特征
         val transactionScore = transactionPatterns.count { lowerMessage.contains(it) }
         val queryScore = queryPatterns.count { lowerMessage.contains(it) }
@@ -324,34 +329,98 @@ class AIReasoningEngine @Inject constructor(
                 isExplicitRecordRequest -> {
                 IntentAnalysis(UserIntent.RECORD_TRANSACTION, 0.85f)
             }
-            
+
+            // 结构化记账文本检测：日期格式 + 金额格式同时存在 = 强记账信号
+            // 这处理OCR截图、复制粘贴账单等无显式"记账"关键词的场景
+            hasStructuredDateFormat && hasStructuredAmountFormat -> {
+                IntentAnalysis(UserIntent.RECORD_TRANSACTION, 0.88f)
+            }
+
+            // 结构化记账文本检测：只有金额格式但多行/多笔
+            // 匹配 "-12.00 餐饮" 或 "+5000.00 工资" 格式
+            hasStructuredAmountFormat && countAmountPatterns(message) >= 2 -> {
+                IntentAnalysis(UserIntent.RECORD_TRANSACTION, 0.82f)
+            }
+
             // 高置信度查询
             queryScore >= 2 && !keywordMatcher.containsActionKeywords(lowerMessage) -> {
                 IntentAnalysis(UserIntent.QUERY_INFORMATION, 0.80f)
             }
-            
+
             // 分析意图
             keywordMatcher.containsAnalysisKeywords(lowerMessage) -> {
                 IntentAnalysis(UserIntent.ANALYZE_DATA, 0.75f)
             }
-            
+
             // 账户管理
             keywordMatcher.containsAccountManagementKeywords(lowerMessage) -> {
                 IntentAnalysis(UserIntent.MANAGE_ACCOUNT, 0.70f)
             }
-            
+
             // 分类管理
             keywordMatcher.containsCategoryManagementKeywords(lowerMessage) -> {
                 IntentAnalysis(UserIntent.MANAGE_CATEGORY, 0.70f)
             }
-            
+
             // 问候或简单对话
             keywordMatcher.isGreetingOrSimpleConversation(lowerMessage) -> {
                 IntentAnalysis(UserIntent.GENERAL_CONVERSATION, 0.90f)
             }
-            
+
             else -> IntentAnalysis(UserIntent.UNKNOWN, 0.30f)
         }
+    }
+
+    /**
+     * 检测是否包含结构化日期格式
+     * 如：📅2026年3月31日、2026年3月31日（周二）、📅 2026-01-01
+     */
+    private fun containsStructuredDateFormat(message: String): Boolean {
+        // 日期emoji格式
+        if (message.contains("📅")) return true
+
+        // 年月日完整格式：2026年3月31日、2026-3-31、2026/3/31
+        val fullDatePatterns = listOf(
+            Regex("""20\d{2}年\d{1,2}月\d{1,2}[日号]?"""),
+            Regex("""20\d{2}[-/]\d{1,2}[-/]\d{1,2}""")
+        )
+        if (fullDatePatterns.any { it.containsMatchIn(message) }) return true
+
+        // 多行文本中有多个日期（如账单截图包含多个日期）
+        val dateCount = Regex("""20\d{2}年\d{1,2}月\d{1,2}""").findAll(message).count()
+        if (dateCount >= 2) return true
+
+        return false
+    }
+
+    /**
+     * 检测是否包含结构化金额格式
+     * 如：-12.00、+5000.00、¥45.00、￥123.45
+     */
+    private fun containsStructuredAmountFormat(message: String): Boolean {
+        // 匹配带符号的金额：-12.00、+5000.00
+        val signedAmountPattern = Regex("""[+-]\d+\.\d{2}""")
+        if (signedAmountPattern.containsMatchIn(message)) return true
+
+        // 匹配货币符号金额：¥45.00、￥123.45
+        val currencyAmountPattern = Regex("""[¥￥]\d+\.?\d*""")
+        if (currencyAmountPattern.containsMatchIn(message)) return true
+
+        return false
+    }
+
+    /**
+     * 统计消息中的金额模式数量
+     */
+    private fun countAmountPatterns(message: String): Int {
+        // 带符号金额
+        val signedCount = Regex("""[+-]\d+\.\d{2}""").findAll(message).count()
+        // 货币符号金额
+        val currencyCount = Regex("""[¥￥]\d+\.?\d*""").findAll(message).count()
+        // messageParser的金额（如果有）
+        val parserHasAmount = messageParser.containsAmount(message)
+
+        return signedCount + currencyCount + if (parserHasAmount && signedCount == 0 && currencyCount == 0) 1 else 0
     }
 
     /**

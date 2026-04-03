@@ -18,6 +18,7 @@ internal class AIAssistantRemoteResponseInterpreter {
     private val fencedJsonRegex = Regex("```(?:json)?\\s*([\\s\\S]*?)\\s*```")
     private val dirtyNullWrapperRegex = Regex("^(?:null\\s*)+")
     private val trailingDirtyNullWrapperRegex = Regex("(?:\\s*null)+$")
+    private val ignorableUnknownActionNames = setOf("income", "expense", "transfer", "收入", "支出", "转账")
 
     fun interpret(remoteResponse: String): RemoteResponseDecision {
         val sanitizedResponse = sanitizeRemoteResponse(remoteResponse)
@@ -143,7 +144,7 @@ internal class AIAssistantRemoteResponseInterpreter {
                 AIAssistantActionEnvelope(
                     actions = List(actionsArray.length()) { index ->
                         parseTypedAction(actionsArray.getJSONObject(index))
-                    }
+                    }.filterNot(::isIgnorableUnknownAction)
                 )
             } else {
                 val jsonObject = JSONObject(jsonText)
@@ -152,12 +153,12 @@ internal class AIAssistantRemoteResponseInterpreter {
                     AIAssistantActionEnvelope(
                         actions = List(actionsArray.length()) { index ->
                             parseTypedAction(actionsArray.getJSONObject(index))
-                        },
+                        }.filterNot(::isIgnorableUnknownAction),
                         reply = jsonObject.optString("reply").trim().removeDirtyNullWrappers()
                     )
                 } else {
                     AIAssistantActionEnvelope(
-                        actions = listOf(parseTypedAction(jsonObject)),
+                        actions = listOf(parseTypedAction(jsonObject)).filterNot(::isIgnorableUnknownAction),
                         reply = jsonObject.optString("reply").trim().removeDirtyNullWrappers()
                     )
                 }
@@ -301,18 +302,50 @@ internal class AIAssistantRemoteResponseInterpreter {
     private fun normalizeActionName(actionJson: JSONObject): String {
         val explicitAction = actionJson.optString("action", "").trim()
         if (explicitAction.isNotBlank()) {
-            return when (explicitAction) {
+            return when (explicitAction.lowercase()) {
                 "query_accounts", "query_categories", "query_transactions" -> "query"
                 else -> explicitAction
             }
         }
 
-        return when (actionJson.optString("type", "").trim()) {
+        val rawType = actionJson.optString("type", "").trim()
+        return when (rawType.lowercase()) {
             "query_accounts" -> "query"
             "query_categories" -> "query"
             "query_transactions" -> "query"
-            else -> actionJson.optString("type", "").trim()
+            "add_transaction" -> "add_transaction"
+            "income", "expense", "收入", "支出" -> {
+                if (looksLikeTransactionPayload(actionJson)) {
+                    "add_transaction"
+                } else {
+                    rawType
+                }
+            }
+            "transfer", "转账" -> {
+                if (looksLikeTransactionPayload(actionJson)) {
+                    "transfer"
+                } else {
+                    rawType
+                }
+            }
+            else -> rawType
         }
+    }
+
+    private fun looksLikeTransactionPayload(actionJson: JSONObject): Boolean {
+        return actionJson.has("amount") ||
+            actionJson.has("account") ||
+            actionJson.has("accountId") ||
+            actionJson.has("accountRef") ||
+            actionJson.has("category") ||
+            actionJson.has("categoryId") ||
+            actionJson.has("categoryRef") ||
+            actionJson.has("transactionType")
+    }
+
+    private fun isIgnorableUnknownAction(action: AIAssistantTypedAction): Boolean {
+        return action is AIAssistantTypedAction.Unknown &&
+            ignorableUnknownActionNames.contains(action.rawAction.trim().lowercase())
     }
 
     private fun containsActionMarkers(candidate: String): Boolean {
