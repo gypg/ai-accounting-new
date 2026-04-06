@@ -14,6 +14,8 @@ import com.example.aiaccounting.data.local.dao.TransactionDao
 import com.example.aiaccounting.data.local.dao.TransactionTemplateDao
 import com.example.aiaccounting.data.local.dao.CustomButlerDao
 import com.example.aiaccounting.data.local.dao.AIOperationTraceDao
+import com.example.aiaccounting.data.local.dao.AppLogEntryDao
+import com.example.aiaccounting.data.local.dao.YearlyWealthAnalysisDao
 import com.example.aiaccounting.data.local.database.AppDatabase
 import com.example.aiaccounting.data.repository.AccountRepository
 import com.example.aiaccounting.data.repository.AIConversationRepository
@@ -23,6 +25,8 @@ import com.example.aiaccounting.data.repository.ChatSessionRepository
 import com.example.aiaccounting.data.repository.TransactionRepository
 import com.example.aiaccounting.data.repository.TransactionTemplateRepository
 import com.example.aiaccounting.data.repository.AIOperationTraceRepository
+import com.example.aiaccounting.data.repository.AppLogRepository
+import com.example.aiaccounting.data.repository.YearlyWealthAnalysisRepository
 import com.example.aiaccounting.security.SecurityManager
 import dagger.Module
 import dagger.Provides
@@ -58,7 +62,7 @@ object DatabaseModule {
             AppDatabase.DATABASE_NAME
         )
             .openHelperFactory(factory)
-            .addMigrations(AppDatabase.MIGRATION_4_5, AppDatabase.MIGRATION_5_6, AppDatabase.MIGRATION_6_7, AppDatabase.MIGRATION_7_8)
+            .addMigrations(AppDatabase.MIGRATION_4_5, AppDatabase.MIGRATION_5_6, AppDatabase.MIGRATION_6_7, AppDatabase.MIGRATION_7_8, AppDatabase.MIGRATION_8_9, AppDatabase.MIGRATION_9_10)
             .fallbackToDestructiveMigration() // For development only
             .build()
     }
@@ -171,6 +175,12 @@ object DatabaseModule {
         return AIOperationTraceRepository(traceDao)
     }
 
+    @Provides
+    @Singleton
+    fun provideAppLogRepository(appLogEntryDao: AppLogEntryDao): AppLogRepository {
+        return AppLogRepository(appLogEntryDao)
+    }
+
     // Chat Session DAOs
     @Provides
     @Singleton
@@ -197,6 +207,22 @@ object DatabaseModule {
     @Provides
     fun provideAIOperationTraceDao(database: AppDatabase): AIOperationTraceDao {
         return database.aiOperationTraceDao()
+    }
+
+    @Provides
+    fun provideAppLogEntryDao(database: AppDatabase): AppLogEntryDao {
+        return database.appLogEntryDao()
+    }
+
+    @Provides
+    fun provideYearlyWealthAnalysisDao(database: AppDatabase): YearlyWealthAnalysisDao {
+        return database.yearlyWealthAnalysisDao()
+    }
+
+    @Provides
+    @Singleton
+    fun provideYearlyWealthAnalysisRepository(dao: YearlyWealthAnalysisDao): YearlyWealthAnalysisRepository {
+        return YearlyWealthAnalysisRepository(dao)
     }
 
     @Provides

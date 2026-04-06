@@ -628,9 +628,10 @@ fun AccountTypeSelector(
     selectedType: AccountType,
     onTypeSelected: (AccountType) -> Unit
 ) {
-    Row(
+    FlowRow(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         AccountType.values().forEach { type ->
             FilterChip(
@@ -682,5 +683,5 @@ val AccountType.displayName: String
         AccountType.DEBIT_CARD -> "借记卡"
         AccountType.ALIPAY -> "支付宝"
         AccountType.WECHAT -> "微信"
-        AccountType.OTHER -> "其他"
+        AccountType.OTHER -> "自定义"
     }

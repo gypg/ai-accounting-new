@@ -6,7 +6,8 @@ import com.example.aiaccounting.data.service.ImageProcessingService
 enum class OcrPreprocessingProfile {
     BASE,
     DETAIL,
-    DOCUMENT
+    DOCUMENT,
+    SCREENSHOT
 }
 
 data class ImageQualityMetrics(

@@ -3,8 +3,10 @@ package com.example.aiaccounting.ui.navigation
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -12,6 +14,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.navArgument
 import com.example.aiaccounting.data.local.prefs.AppStateManager
+import com.example.aiaccounting.logging.AppLogLogger
 import com.example.aiaccounting.ui.components.BottomNavBar
 import com.example.aiaccounting.ui.components.BottomNavItems
 import com.example.aiaccounting.ui.components.HorseBottomNavBar
@@ -26,7 +29,9 @@ sealed class Screen(val route: String) {
     object Login : Screen("login")
     object InitialSetup : Screen("initial_setup")
     object Home : Screen("home")
-    object AddTransaction : Screen("add_transaction")
+    object AddTransaction : Screen("add_transaction?entrySource={entrySource}") {
+        fun createRoute(entrySource: String = "direct_add") = "add_transaction?entrySource=$entrySource"
+    }
     object EditTransaction : Screen("edit_transaction/{transactionId}") {
         fun createRoute(transactionId: Long) = "edit_transaction/$transactionId"
     }
@@ -42,12 +47,53 @@ sealed class Screen(val route: String) {
     object Templates : Screen("templates")
     object Import : Screen("import")
     object AISettings : Screen("ai_settings")
+    object LogBrowser : Screen("log_browser")
+    object MonthlyCalendar : Screen("monthly_calendar/{year}/{month}") {
+        fun createRoute(year: Int, month: Int) = "monthly_calendar/$year/$month"
+    }
+    object MonthlyTransactions : Screen("transactions_month/{year}/{month}?day={day}") {
+        fun createRoute(year: Int, month: Int, day: Int? = null): String {
+            require(month in 1..12) { "month must be between 1 and 12" }
+            require(day == null || day in 1..31) { "day must be between 1 and 31" }
+            return buildString {
+                append("transactions_month/")
+                append(year)
+                append("/")
+                append(month)
+                if (day != null) {
+                    append("?day=")
+                    append(day)
+                }
+            }
+        }
+    }
+    object YearlyWealth : Screen("yearly_wealth/{year}") {
+        fun createRoute(year: Int) = "yearly_wealth/$year"
+    }
     object ButlerSettings : Screen("butler_settings")
     object Tags : Screen("tags")
     object ButlerMarket : Screen("butler_market")
     object ButlerEditor : Screen("butler_editor/{butlerId}") {
         fun createRoute(butlerId: String?) = "butler_editor/${butlerId ?: "new"}"
     }
+}
+
+private fun materializeRoute(entry: NavBackStackEntry): String? {
+    val template = entry.destination.route ?: return null
+    val arguments = entry.arguments ?: return template
+    val replacements = listOf("transactionId", "butlerId", "year", "month", "day", "entrySource")
+    var actualRoute = template
+    replacements.forEach { key ->
+        if (actualRoute.contains("{$key}")) {
+            val value = arguments.get(key)?.toString() ?: return@forEach
+            actualRoute = actualRoute.replace("{$key}", value)
+        }
+    }
+    val day = arguments.getInt("day", -1).takeIf { it > 0 }
+    if (day != null && !actualRoute.contains("day=") && template.contains("?day={day}")) {
+        actualRoute = actualRoute.replace("?day={day}", "?day=$day")
+    }
+    return actualRoute
 }
 
 /**
@@ -58,6 +104,7 @@ fun AppNavigation(
     navController: NavHostController,
     startDestination: String,
     appStateManager: AppStateManager,
+    appLogLogger: AppLogLogger,
     onSetupComplete: (String) -> Unit = {},
     onLoginSuccess: (String) -> Unit = {},
     onInitialSetupComplete: () -> Unit = {},
@@ -67,6 +114,8 @@ fun AppNavigation(
 ) {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
+    val currentActualRoute = navBackStackEntry?.let(::materializeRoute)
+    val currentEntrySource = navBackStackEntry?.arguments?.getString("entrySource")
 
     // 判断是否需要显示底部导航栏
     val showBottomBar = currentRoute in listOf(
@@ -77,6 +126,33 @@ fun AppNavigation(
     val currentTheme = appStateManager.getTheme()
     val isHorseTheme = currentTheme == "horse_2026"
     val isFreshSciTheme = currentTheme == "fresh_sci"
+
+    LaunchedEffect(currentRoute, currentActualRoute, currentTheme, currentEntrySource) {
+        currentRoute?.let { route ->
+            val routeDetails = buildString {
+                append("route_template=")
+                append(route)
+                append(",route_actual=")
+                append(currentActualRoute ?: route)
+                if (currentEntrySource != null) {
+                    append(",entrySource=")
+                    append(currentEntrySource)
+                }
+                append(",theme=")
+                append(currentTheme)
+                append(",showBottomBar=")
+                append(showBottomBar)
+                append(",startDestination=")
+                append(startDestination)
+            }
+            appLogLogger.info(
+                source = "UI",
+                category = "route_change",
+                message = "导航路由切换",
+                details = routeDetails
+            )
+        }
+    }
 
     Scaffold(
         bottomBar = {
@@ -186,7 +262,7 @@ fun AppNavigation(
                 if (isHorseTheme) {
                     HorseOverviewScreen(
                         onNavigateToAddTransaction = {
-                            navController.navigate(Screen.AddTransaction.route)
+                            navController.navigate(Screen.AddTransaction.createRoute("overview_menu"))
                         },
                         onNavigateToAI = {
                             navController.navigate(Screen.AIAssistant.route)
@@ -194,20 +270,29 @@ fun AppNavigation(
                         onNavigateToButlerMarket = {
                             navController.navigate(Screen.ButlerSettings.route)
                         },
-                        onNavigateToTransactions = {
-                            navController.navigate("transactions")
+                        onNavigateToTransactions = { route ->
+                            navController.navigate(route)
                         },
                         onNavigateToStatistics = {
                             navController.navigate("statistics")
                         },
                         onNavigateToAccounts = {
                             navController.navigate(Screen.Accounts.route)
+                        },
+                        onNavigateToBudgets = {
+                            navController.navigate(Screen.Budgets.route)
+                        },
+                        onNavigateToCalendar = { year, month ->
+                            navController.navigate(Screen.MonthlyCalendar.createRoute(year, month))
+                        },
+                        onNavigateToYearlyWealth = { year ->
+                            navController.navigate(Screen.YearlyWealth.createRoute(year))
                         }
                     )
                 } else if (isFreshSciTheme) {
                     FreshOverviewScreen(
                         onNavigateToAddTransaction = {
-                            navController.navigate(Screen.AddTransaction.route)
+                            navController.navigate(Screen.AddTransaction.createRoute("overview_menu"))
                         },
                         onNavigateToAI = {
                             navController.navigate(Screen.AIAssistant.route)
@@ -215,26 +300,50 @@ fun AppNavigation(
                         onNavigateToButlerMarket = {
                             navController.navigate(Screen.ButlerSettings.route)
                         },
-                        onNavigateToTransactions = {
-                            navController.navigate("transactions")
+                        onNavigateToTransactions = { route ->
+                            navController.navigate(route)
                         },
                         onNavigateToStatistics = {
                             navController.navigate("statistics")
                         },
                         onNavigateToAccounts = {
                             navController.navigate(Screen.Accounts.route)
+                        },
+                        onNavigateToBudgets = {
+                            navController.navigate(Screen.Budgets.route)
+                        },
+                        onNavigateToCalendar = { year, month ->
+                            navController.navigate(Screen.MonthlyCalendar.createRoute(year, month))
+                        },
+                        onNavigateToYearlyWealth = { year ->
+                            navController.navigate(Screen.YearlyWealth.createRoute(year))
                         }
                     )
                 } else {
                     OverviewScreen(
                         onNavigateToAddTransaction = {
-                            navController.navigate(Screen.AddTransaction.route)
+                            navController.navigate(Screen.AddTransaction.createRoute("overview_menu"))
                         },
                         onNavigateToAI = {
                             navController.navigate(Screen.AIAssistant.route)
                         },
                         onNavigateToButlerMarket = {
                             navController.navigate(Screen.ButlerSettings.route)
+                        },
+                        onNavigateToBudgets = {
+                            navController.navigate(Screen.Budgets.route)
+                        },
+                        onNavigateToTransactions = { year, month, day ->
+                            navController.navigate(Screen.MonthlyTransactions.createRoute(year, month, day))
+                        },
+                        onNavigateToAccounts = {
+                            navController.navigate(Screen.Accounts.route)
+                        },
+                        onNavigateToCalendar = { year, month ->
+                            navController.navigate(Screen.MonthlyCalendar.createRoute(year, month))
+                        },
+                        onNavigateToYearlyWealth = { year ->
+                            navController.navigate(Screen.YearlyWealth.createRoute(year))
                         }
                     )
                 }
@@ -245,25 +354,90 @@ fun AppNavigation(
                 if (isHorseTheme) {
                     HorseTransactionScreen(
                         onNavigateToAddTransaction = {
-                            navController.navigate(Screen.AddTransaction.route)
+                            navController.navigate(Screen.AddTransaction.createRoute("direct_add"))
                         }
                     )
                 } else if (isFreshSciTheme) {
                     FreshTransactionScreen(
                         onNavigateToAddTransaction = {
-                            navController.navigate(Screen.AddTransaction.route)
+                            navController.navigate(Screen.AddTransaction.createRoute("direct_add"))
                         }
                     )
                 } else {
                     TransactionListScreen(
                         onNavigateToAddTransaction = {
-                            navController.navigate(Screen.AddTransaction.route)
+                            navController.navigate(Screen.AddTransaction.createRoute("direct_add"))
                         },
                         onNavigateToExport = {
                             navController.navigate(Screen.Export.route)
                         }
                     )
                 }
+            }
+
+            composable(
+                route = Screen.MonthlyCalendar.route,
+                arguments = listOf(
+                    navArgument("year") { type = NavType.IntType },
+                    navArgument("month") { type = NavType.IntType }
+                )
+            ) { backStackEntry ->
+                val year = backStackEntry.arguments?.getInt("year")
+                val month = backStackEntry.arguments?.getInt("month")
+                if (year == null || month == null) {
+                    navController.popBackStack()
+                    return@composable
+                }
+                MonthlyCalendarScreen(
+                    year = year,
+                    month = month,
+                    onBack = { navController.popBackStack() },
+                    onNavigateToDayTransactions = { targetYear, targetMonth, targetDay ->
+                        navController.navigate(Screen.MonthlyTransactions.createRoute(targetYear, targetMonth, targetDay))
+                    }
+                )
+            }
+
+            composable(
+                route = Screen.YearlyWealth.route,
+                arguments = listOf(navArgument("year") { type = NavType.IntType })
+            ) { backStackEntry ->
+                val year = backStackEntry.arguments?.getInt("year")
+                if (year == null) {
+                    navController.popBackStack()
+                    return@composable
+                }
+                YearlyWealthScreen(
+                    year = year,
+                    onBack = { navController.popBackStack() }
+                )
+            }
+
+            composable(
+                route = Screen.MonthlyTransactions.route,
+                arguments = listOf(
+                    navArgument("year") { type = NavType.IntType },
+                    navArgument("month") { type = NavType.IntType },
+                    navArgument("day") {
+                        type = NavType.IntType
+                        defaultValue = -1
+                    }
+                )
+            ) { backStackEntry ->
+                val year = backStackEntry.arguments?.getInt("year")
+                val month = backStackEntry.arguments?.getInt("month")
+                val day = backStackEntry.arguments?.getInt("day")?.takeIf { it > 0 }
+                TransactionListScreen(
+                    onNavigateToAddTransaction = {
+                        navController.navigate(Screen.AddTransaction.createRoute("direct_add"))
+                    },
+                    onNavigateToExport = {
+                        navController.navigate(Screen.Export.route)
+                    },
+                    initialYear = year,
+                    initialMonth = month,
+                    initialDay = day
+                )
             }
 
             // 统计 (使用底部导航)
@@ -317,6 +491,9 @@ fun AppNavigation(
                         onNavigateToAISettings = {
                             navController.navigate(Screen.AISettings.route)
                         },
+                        onNavigateToLogBrowser = {
+                            navController.navigate(Screen.LogBrowser.route)
+                        },
                         onNavigateToBudgets = {
                             navController.navigate(Screen.Budgets.route)
                         },
@@ -364,6 +541,9 @@ fun AppNavigation(
                         },
                         onNavigateToAISettings = {
                             navController.navigate(Screen.AISettings.route)
+                        },
+                        onNavigateToLogBrowser = {
+                            navController.navigate(Screen.LogBrowser.route)
                         },
                         onNavigateToBudgets = {
                             navController.navigate(Screen.Budgets.route)
@@ -413,6 +593,9 @@ fun AppNavigation(
                         onNavigateToAISettings = {
                             navController.navigate(Screen.AISettings.route)
                         },
+                        onNavigateToLogBrowser = {
+                            navController.navigate(Screen.LogBrowser.route)
+                        },
                         onNavigateToBudgets = {
                             navController.navigate(Screen.Budgets.route)
                         },
@@ -433,8 +616,19 @@ fun AppNavigation(
             }
 
             // Add Transaction
-            composable(Screen.AddTransaction.route) {
+            composable(
+                route = Screen.AddTransaction.route,
+                arguments = listOf(
+                    navArgument("entrySource") {
+                        type = NavType.StringType
+                        defaultValue = "direct_add"
+                        nullable = false
+                    }
+                )
+            ) { backStackEntry ->
+                val entrySource = backStackEntry.arguments?.getString("entrySource") ?: "direct_add"
                 AddTransactionScreen(
+                    entrySource = entrySource,
                     onBack = {
                         navController.popBackStack()
                     },
@@ -543,7 +737,7 @@ fun AppNavigation(
                         navController.popBackStack()
                     },
                     onNavigateToAddTransaction = {
-                        navController.navigate(Screen.AddTransaction.route)
+                        navController.navigate(Screen.AddTransaction.createRoute("template_flow"))
                     }
                 )
             }
@@ -566,6 +760,15 @@ fun AppNavigation(
                 )
             }
             
+            // Log Browser
+            composable(Screen.LogBrowser.route) {
+                LogBrowserScreen(
+                    onBack = {
+                        navController.popBackStack()
+                    }
+                )
+            }
+
             // Butler Settings (alias to Market for a closed-loop entry experience)
             composable(Screen.ButlerSettings.route) {
                 ButlerMarketScreen(

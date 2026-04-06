@@ -627,15 +627,26 @@ private fun computeFreshCategoryStats(
     return expenseTransactions
         .groupBy { it.categoryId }
         .map { (categoryId, transList) ->
-            val amount = transList.sumOf { it.amount }
+            val amount = transList.sumOf { kotlin.math.abs(it.amount) }
             val category = categoryMap[categoryId]
             val categoryName = category?.name ?: "未分类"
+            val fallbackColor = freshCategoryFallbackColor(categoryId, colors)
             val color = category?.color?.let {
-                try { Color(android.graphics.Color.parseColor(it)) } catch (e: Exception) { colors[categoryId.toInt() % colors.size] }
-            } ?: colors[categoryId.toInt() % colors.size]
+                try {
+                    Color(android.graphics.Color.parseColor(it))
+                } catch (e: Exception) {
+                    fallbackColor
+                }
+            } ?: fallbackColor
             FreshCategoryStat(name = categoryName, amount = amount, color = color)
         }
         .sortedByDescending { it.amount }
+}
+
+internal fun freshCategoryFallbackColor(categoryId: Long, colors: List<Color>): Color {
+    if (colors.isEmpty()) return FreshSciThemeColors.primary
+    val safeIndex = Math.floorMod(categoryId.toInt(), colors.size)
+    return colors[safeIndex]
 }
 
 @Composable

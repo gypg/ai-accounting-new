@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.aiaccounting.data.local.entity.Account
 import com.example.aiaccounting.data.local.entity.AccountType
 import com.example.aiaccounting.data.repository.AccountRepository
+import com.example.aiaccounting.logging.AppLogLogger
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -15,7 +16,8 @@ import javax.inject.Inject
  */
 @HiltViewModel
 class AccountViewModel @Inject constructor(
-    private val accountRepository: AccountRepository
+    private val accountRepository: AccountRepository,
+    private val appLogLogger: AppLogLogger
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(AccountUiState())
@@ -61,8 +63,21 @@ class AccountViewModel @Inject constructor(
                 )
                 
                 accountRepository.insertAccount(account)
+                appLogLogger.info(
+                    source = "ACCOUNT",
+                    category = "account_create",
+                    message = "创建账户成功",
+                    details = "name=$name,type=$type,balance=$initialBalance",
+                    entityType = "account"
+                )
                 _uiState.update { it.copy(isLoading = false, showAddDialog = false) }
             } catch (e: Exception) {
+                appLogLogger.error(
+                    source = "ACCOUNT",
+                    category = "account_create",
+                    message = "创建账户失败",
+                    details = e.message
+                )
                 _uiState.update { it.copy(isLoading = false, error = e.message) }
             }
         }

@@ -21,11 +21,32 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.max
 import kotlin.math.min
+
+internal fun calculateTrendChartMaxValue(
+    data: List<MonthlyData>,
+    showIncome: Boolean,
+    showExpense: Boolean
+): Double {
+    val visibleIncomeMax = if (showIncome) data.maxOfOrNull { it.income } ?: 0.0 else 0.0
+    val visibleExpenseMax = if (showExpense) data.maxOfOrNull { it.expense } ?: 0.0 else 0.0
+    val visibleMax = max(visibleIncomeMax, visibleExpenseMax)
+    return visibleMax * 1.2
+}
+
+internal fun formatTrendAxisLabel(value: Double): String {
+    return when {
+        value >= 10_000 -> "¥${String.format("%.1f", value / 10_000)}w"
+        value >= 1_000 -> "¥${String.format("%.1f", value / 1_000)}k"
+        value > 0 -> "¥${String.format("%.0f", value)}"
+        else -> "0"
+    }
+}
 
 /**
  * 月度数据点
@@ -139,18 +160,22 @@ fun TrendChart(
             // Y轴标签
             val maxIncome = data.maxOfOrNull { it.income } ?: 0.0
             val maxExpense = data.maxOfOrNull { it.expense } ?: 0.0
-            val maxValue = max(maxIncome, maxExpense) * 1.2
+            val maxValue = calculateTrendChartMaxValue(
+                data = data,
+                showIncome = showIncome,
+                showExpense = showExpense
+            )
 
             Column(
-                modifier = Modifier.width(40.dp),
+                modifier = Modifier.width(56.dp),
                 verticalArrangement = Arrangement.SpaceBetween,
                 horizontalAlignment = Alignment.End
             ) {
                 if (maxValue > 0) {
-                    Text("¥${(maxValue / 1000).toInt()}k", fontSize = 10.sp, color = Color.Gray)
-                    Text("¥${(maxValue * 0.75 / 1000).toInt()}k", fontSize = 10.sp, color = Color.Gray)
-                    Text("¥${(maxValue * 0.5 / 1000).toInt()}k", fontSize = 10.sp, color = Color.Gray)
-                    Text("¥${(maxValue * 0.25 / 1000).toInt()}k", fontSize = 10.sp, color = Color.Gray)
+                    Text(formatTrendAxisLabel(maxValue), fontSize = 10.sp, color = Color.Gray)
+                    Text(formatTrendAxisLabel(maxValue * 0.75), fontSize = 10.sp, color = Color.Gray)
+                    Text(formatTrendAxisLabel(maxValue * 0.5), fontSize = 10.sp, color = Color.Gray)
+                    Text(formatTrendAxisLabel(maxValue * 0.25), fontSize = 10.sp, color = Color.Gray)
                 }
                 Text("0", fontSize = 10.sp, color = Color.Gray)
             }
@@ -309,6 +334,7 @@ fun TrendChart(
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
+                            .testTag("trend_chart_click_layer")
                             .pointerInput(data) {
                                 detectTapGestures { offset ->
                                     val canvasWidth = size.width.toFloat()
@@ -316,8 +342,7 @@ fun TrendChart(
                                     val chartWidth = canvasWidth - padding * 2
                                     val effectiveDataSize = max(data.size, 2)
                                     val xStep = chartWidth / (effectiveDataSize - 1)
-                                    
-                                    // 找到最近的数据点
+
                                     val index = if (data.size == 1) {
                                         0
                                     } else {
@@ -337,7 +362,7 @@ fun TrendChart(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 48.dp, end = 16.dp, top = 4.dp),
+                .padding(start = 56.dp, end = 16.dp, top = 4.dp),
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             if (data.size == 1) {
@@ -559,15 +584,15 @@ fun BarChart(
 
             // Y轴标签
             Column(
-                modifier = Modifier.width(40.dp),
+                modifier = Modifier.width(56.dp),
                 verticalArrangement = Arrangement.SpaceBetween,
                 horizontalAlignment = Alignment.End
             ) {
                 if (maxValue > 0) {
-                    Text("¥${(maxValue / 1000).toInt()}k", fontSize = 10.sp, color = Color.Gray)
-                    Text("¥${(maxValue * 0.75 / 1000).toInt()}k", fontSize = 10.sp, color = Color.Gray)
-                    Text("¥${(maxValue * 0.5 / 1000).toInt()}k", fontSize = 10.sp, color = Color.Gray)
-                    Text("¥${(maxValue * 0.25 / 1000).toInt()}k", fontSize = 10.sp, color = Color.Gray)
+                    Text(formatTrendAxisLabel(maxValue), fontSize = 10.sp, color = Color.Gray)
+                    Text(formatTrendAxisLabel(maxValue * 0.75), fontSize = 10.sp, color = Color.Gray)
+                    Text(formatTrendAxisLabel(maxValue * 0.5), fontSize = 10.sp, color = Color.Gray)
+                    Text(formatTrendAxisLabel(maxValue * 0.25), fontSize = 10.sp, color = Color.Gray)
                 }
                 Text("0", fontSize = 10.sp, color = Color.Gray)
             }
@@ -661,7 +686,7 @@ fun BarChart(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 48.dp, end = 16.dp, top = 4.dp),
+                .padding(start = 56.dp, end = 16.dp, top = 4.dp),
             horizontalArrangement = if (data.size == 1) Arrangement.Center else Arrangement.SpaceBetween
         ) {
             if (data.size == 1) {

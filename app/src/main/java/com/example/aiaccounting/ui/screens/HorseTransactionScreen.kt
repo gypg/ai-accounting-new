@@ -175,7 +175,7 @@ fun ViewToggle(
 
 @Composable
 fun TransactionListView(transactions: List<Transaction>) {
-    val dateFormat = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
+    val dateFormat = remember { SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()) }
 
     if (transactions.isNotEmpty()) {
         LazyColumn(
@@ -183,7 +183,7 @@ fun TransactionListView(transactions: List<Transaction>) {
             contentPadding = PaddingValues(bottom = 100.dp)
         ) {
             items(transactions, key = { it.id }) { transaction ->
-                TransactionCard(transaction = transaction, dateFormat = dateFormat)
+                SafeHorseTransactionCard(transaction = transaction, dateFormat = dateFormat)
                 Spacer(modifier = Modifier.height(8.dp))
             }
         }
@@ -213,6 +213,46 @@ fun TransactionListView(transactions: List<Transaction>) {
             }
         }
     }
+}
+
+@Composable
+private fun SafeHorseTransactionCard(
+    transaction: Transaction,
+    dateFormat: SimpleDateFormat
+) {
+    val safeNote = remember(transaction.note) { safeTransactionNote(transaction.note) }
+    val safeDate = remember(transaction.date) {
+        safeTransactionDateText(transaction.date, dateFormat)
+    }
+    val safeAmount = remember(transaction.amount) {
+        safeTransactionAmountText(transaction.amount)
+    }
+
+    TransactionCard(
+        transaction = transaction,
+        dateFormat = dateFormat,
+        noteText = safeNote,
+        dateText = safeDate,
+        amountText = safeAmount
+    )
+}
+
+internal fun safeTransactionNote(note: String): String {
+    return note.takeIf { it.isNotBlank() } ?: "未备注"
+}
+
+internal fun safeTransactionDateText(
+    timestamp: Long,
+    dateFormat: SimpleDateFormat
+): String {
+    return runCatching { dateFormat.format(Date(timestamp)) }
+        .getOrElse { "时间异常" }
+}
+
+internal fun safeTransactionAmountText(amount: Double): String {
+    if (!amount.isFinite()) return "0.00"
+    return runCatching { String.format("%.2f", amount) }
+        .getOrElse { "0.00" }
 }
 
 @Composable
@@ -634,7 +674,10 @@ fun BlueMonthlyCard(
 @Composable
 fun TransactionCard(
     transaction: Transaction,
-    dateFormat: SimpleDateFormat
+    dateFormat: SimpleDateFormat,
+    noteText: String = transaction.note.takeIf { it.isNotBlank() } ?: "未备注",
+    dateText: String = dateFormat.format(Date(transaction.date)),
+    amountText: String = String.format("%.2f", transaction.amount)
 ) {
     val isExpense = transaction.type == TransactionType.EXPENSE
     val amountColor = if (isExpense) HorseTheme2026Colors.Expense else HorseTheme2026Colors.Income
@@ -692,20 +735,20 @@ fun TransactionCard(
                 Spacer(modifier = Modifier.width(12.dp))
                 Column {
                     Text(
-                        text = transaction.note.takeIf { it.isNotBlank() } ?: "未备注",
+                        text = noteText,
                         color = HorseTheme2026Colors.TextPrimary,
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Medium
                     )
                     Text(
-                        text = dateFormat.format(Date(transaction.date)),
+                        text = dateText,
                         color = HorseTheme2026Colors.TextSecondary,
                         fontSize = 12.sp
                     )
                 }
             }
             Text(
-                text = "$amountPrefix¥${String.format("%.2f", transaction.amount)}",
+                text = "$amountPrefix¥$amountText",
                 color = amountColor,
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Bold
@@ -728,7 +771,6 @@ private fun rememberTransactionCategoryStats(
 ): List<TransactionCategoryStat> {
     return remember(transactions, categories) {
         val expenseTransactions = transactions.filter { it.type == TransactionType.EXPENSE }
-        val totalExpense = expenseTransactions.sumOf { it.amount }
 
         // 创建分类ID到名称的映射
         val categoryMap = categories.associateBy { it.id }
@@ -736,7 +778,7 @@ private fun rememberTransactionCategoryStats(
         expenseTransactions
             .groupBy { it.categoryId }
             .map { (categoryId, transList) ->
-                val amount = transList.sumOf { it.amount }
+                val amount = transList.sumOf { kotlin.math.abs(it.amount) }
                 // 从分类映射中获取真实名称，如果没有则显示"未分类"
                 val category = categoryMap[categoryId]
                 val categoryName = category?.name ?: "未分类"

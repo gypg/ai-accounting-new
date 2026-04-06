@@ -15,6 +15,8 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -22,6 +24,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -37,6 +42,7 @@ import com.example.aiaccounting.ui.theme.FreshSciThemeColors
 import com.example.aiaccounting.ui.theme.LocalUiScale
 import com.example.aiaccounting.ui.navigation.Screen
 import com.example.aiaccounting.ui.viewmodel.OverviewViewModel
+import com.example.aiaccounting.utils.NumberUtils
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -47,10 +53,14 @@ fun FreshOverviewScreen(
     onNavigateToAddTransaction: () -> Unit = {},
     onNavigateToAI: () -> Unit = {},
     onNavigateToButlerMarket: () -> Unit = {},
-    onNavigateToTransactions: () -> Unit = {},
+    onNavigateToTransactions: (String) -> Unit = {},
     onNavigateToStatistics: () -> Unit = {},
-    onNavigateToAccounts: () -> Unit = {}
+    onNavigateToAccounts: () -> Unit = {},
+    onNavigateToBudgets: () -> Unit = {},
+    onNavigateToCalendar: (Int, Int) -> Unit = { _, _ -> },
+    onNavigateToYearlyWealth: (Int) -> Unit = {}
 ) {
+    val selectedYear by viewModel.selectedYear.collectAsState()
     val monthlyStats by viewModel.monthlyStats.collectAsState()
     val recentTransactions by viewModel.recentTransactions.collectAsState()
     val yearlyTrendData by viewModel.yearlyTrendData.collectAsState()
@@ -58,14 +68,51 @@ fun FreshOverviewScreen(
     val categories by viewModel.categories.collectAsState()
     val todayStats by viewModel.todayStats.collectAsState()
     val weekStats by viewModel.weekStats.collectAsState()
+    val yearlyBudgetProgress by viewModel.yearlyBudgetProgress.collectAsState()
+    val totalBudgetProgress by viewModel.totalBudgetProgress.collectAsState()
+    val lifecycleOwner = LocalLifecycleOwner.current
 
     // UI scaling
     val uiScale = LocalUiScale.current
-    val overviewScale = uiScale.overviewScale
+    val cardScale = uiScale.cardScale
     val fontScale = uiScale.fontScale
 
-    var selectedYear by remember { mutableStateOf(Calendar.getInstance().get(Calendar.YEAR)) }
+    var showAddMenu by remember { mutableStateOf(false) }
     val currentMonth = Calendar.getInstance().get(Calendar.MONTH) + 1
+
+    LaunchedEffect(Unit) {
+        viewModel.logOverviewScreenEnter(
+            theme = "fresh_sci",
+            selectedYear = selectedYear,
+            accountCount = accounts.size,
+            categoryCount = categories.size,
+            recentTransactionCount = recentTransactions.size
+        )
+    }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                viewModel.refreshCurrentYearMonth()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    AddTransactionMenu(
+        isVisible = showAddMenu,
+        onDismiss = { showAddMenu = false },
+        onAIAccounting = {
+            viewModel.logOverviewEntrySelected(theme = "fresh_sci", entry = "ai_accounting")
+            onNavigateToAI()
+        },
+        onManualAccounting = {
+            viewModel.logOverviewEntrySelected(theme = "fresh_sci", entry = "manual_accounting")
+            onNavigateToAddTransaction()
+        }
+    )
 
     Scaffold(
         topBar = {
@@ -76,7 +123,7 @@ fun FreshOverviewScreen(
                         horizontalArrangement = Arrangement.Center,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        IconButton(onClick = { selectedYear = selectedYear - 1 }) {
+                        IconButton(onClick = { viewModel.setSelectedYear(selectedYear - 1) }) {
                             Icon(
                                 imageVector = Icons.Default.ChevronLeft,
                                 contentDescription = "上一年",
@@ -89,7 +136,7 @@ fun FreshOverviewScreen(
                             fontWeight = FontWeight.Bold,
                             color = FreshSciThemeColors.onPrimary
                         )
-                        IconButton(onClick = { selectedYear = selectedYear + 1 }) {
+                        IconButton(onClick = { viewModel.setSelectedYear(selectedYear + 1) }) {
                             Icon(
                                 imageVector = Icons.Default.ChevronRight,
                                 contentDescription = "下一年",
@@ -114,7 +161,10 @@ fun FreshOverviewScreen(
         },
         containerColor = Color.Transparent,
         floatingActionButton = {
-            FreshSciAIButton(onClick = onNavigateToAI)
+            FreshSciAIButton(onClick = {
+                viewModel.logOverviewAddMenuOpened(theme = "fresh_sci")
+                showAddMenu = true
+            })
         }
     ) { padding ->
         FreshSciBackground {
@@ -135,7 +185,7 @@ fun FreshOverviewScreen(
                         balance = monthlyStats.totalIncome - monthlyStats.totalExpense,
                         butlerName = butlerName,
                         primaryColor = FreshSciThemeColors.primary,
-                        overviewScale = overviewScale,
+                        cardScale = cardScale,
                         fontScale = fontScale
                     )
 
@@ -148,12 +198,34 @@ fun FreshOverviewScreen(
                         monthlyExpense = monthlyStats.monthlyExpense,
                         yearlyExpense = monthlyStats.totalExpense,
                         accountCount = accounts.size,
-                        onNavigateToTransactions = onNavigateToTransactions,
+                        accountPreview = accounts.sortedByDescending { kotlin.math.abs(it.balance) }.take(3),
+                        onNavigateToTransactions = {
+                            onNavigateToTransactions(Screen.MonthlyTransactions.createRoute(selectedYear, currentMonth))
+                        },
                         onNavigateToStatistics = onNavigateToStatistics,
                         onNavigateToAccounts = onNavigateToAccounts,
+                        onNavigateToCalendar = onNavigateToCalendar,
+                        onNavigateToYearlyWealth = onNavigateToYearlyWealth,
                         primaryColor = FreshSciThemeColors.primary,
-                        overviewScale = overviewScale,
+                        selectedYear = selectedYear,
+                        cardScale = cardScale,
                         fontScale = fontScale
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    BudgetOverviewCard(
+                        title = "${selectedYear}年度预算",
+                        budgetProgress = yearlyBudgetProgress,
+                        onClick = onNavigateToBudgets
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    BudgetOverviewCard(
+                        title = "${selectedYear}年${Calendar.getInstance().get(Calendar.MONTH) + 1}月预算",
+                        budgetProgress = totalBudgetProgress,
+                        onClick = onNavigateToBudgets
                     )
 
                     Spacer(modifier = Modifier.height(16.dp))
@@ -162,7 +234,7 @@ fun FreshOverviewScreen(
                     MonthlyTrendCard(
                         yearlyTrendData = yearlyTrendData,
                         primaryColor = FreshSciThemeColors.primary,
-                        overviewScale = overviewScale,
+                        cardScale = cardScale,
                         fontScale = fontScale
                     )
 
@@ -173,7 +245,7 @@ fun FreshOverviewScreen(
                         recentTransactions = recentTransactions,
                         categories = categories,
                         primaryColor = FreshSciThemeColors.primary,
-                        overviewScale = overviewScale,
+                        cardScale = cardScale,
                         fontScale = fontScale
                     )
 
@@ -183,7 +255,7 @@ fun FreshOverviewScreen(
                     RecentTransactionsCard(
                         transactions = recentTransactions,
                         primaryColor = FreshSciThemeColors.primary,
-                        overviewScale = overviewScale,
+                        cardScale = cardScale,
                         fontScale = fontScale
                     )
 
@@ -208,7 +280,7 @@ fun YearlySummaryCard(
     balance: Double,
     butlerName: String,
     primaryColor: Color,
-    overviewScale: Float = 1f,
+    cardScale: Float = 1f,
     fontScale: Float = 1f
 ) {
     Card(
@@ -240,7 +312,7 @@ fun YearlySummaryCard(
                     color = Color(0xFF4CAF50), // green
                     icon = Icons.AutoMirrored.Filled.TrendingUp,
                     primaryColor = primaryColor,
-                    overviewScale = overviewScale,
+                    cardScale = cardScale,
                     fontScale = fontScale
                 )
 
@@ -250,7 +322,7 @@ fun YearlySummaryCard(
                     color = Color(0xFFFF6B35), // orange
                     icon = Icons.AutoMirrored.Filled.TrendingDown,
                     primaryColor = primaryColor,
-                    overviewScale = overviewScale,
+                    cardScale = cardScale,
                     fontScale = fontScale
                 )
 
@@ -260,7 +332,7 @@ fun YearlySummaryCard(
                     color = primaryColor,
                     icon = Icons.Default.AccountBalance,
                     primaryColor = primaryColor,
-                    overviewScale = overviewScale,
+                    cardScale = cardScale,
                     fontScale = fontScale
                 )
             }
@@ -275,7 +347,7 @@ fun SummaryItem(
     color: Color,
     icon: ImageVector,
     primaryColor: Color,
-    overviewScale: Float = 1f,
+    cardScale: Float = 1f,
     fontScale: Float = 1f
 ) {
     Column(
@@ -283,7 +355,7 @@ fun SummaryItem(
     ) {
         Box(
             modifier = Modifier
-                .size((40 * overviewScale).dp)
+                .size((40 * cardScale).dp)
                 .clip(CircleShape)
                 .background(color.copy(alpha = 0.2f)),
             contentAlignment = Alignment.Center
@@ -292,7 +364,7 @@ fun SummaryItem(
                 imageVector = icon,
                 contentDescription = label,
                 tint = color,
-                modifier = Modifier.size((24 * overviewScale).dp)
+                modifier = Modifier.size((24 * cardScale).dp)
             )
         }
         Spacer(modifier = Modifier.height(8.dp))
@@ -318,203 +390,127 @@ fun QuickActionCards(
     monthlyExpense: Double,
     yearlyExpense: Double,
     accountCount: Int,
+    accountPreview: List<com.example.aiaccounting.data.local.entity.Account> = emptyList(),
     onNavigateToTransactions: () -> Unit,
     onNavigateToStatistics: () -> Unit,
     onNavigateToAccounts: () -> Unit = {},
+    onNavigateToCalendar: (Int, Int) -> Unit,
+    onNavigateToYearlyWealth: (Int) -> Unit,
     primaryColor: Color,
-    overviewScale: Float = 1f,
+    selectedYear: Int,
+    cardScale: Float = 1f,
     fontScale: Float = 1f
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        // 日历 - 点击跳转到交易明细
-        ActionCard(
-            title = "日历",
-            subtitle = "",
-            icon = Icons.Default.CalendarMonth,
-            content = {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    val today = Calendar.getInstance()
-                    val currentYear = today.get(Calendar.YEAR)
-                    val currentMonthNum = today.get(Calendar.MONTH) + 1
-                    val currentDay = today.get(Calendar.DAY_OF_MONTH)
+    val today = Calendar.getInstance()
+    val dateLabel = "${today.get(Calendar.MONTH) + 1}月${today.get(Calendar.DAY_OF_MONTH)}日"
+    val weekDays = listOf("周日", "周一", "周二", "周三", "周四", "周五", "周六")
+    val incomeText = if (monthlyIncome >= 10000) "${String.format("%.1f", monthlyIncome / 10000)}万" else NumberUtils.formatMoney(monthlyIncome)
+    val expenseText = if (monthlyExpense >= 10000) "${String.format("%.1f", monthlyExpense / 10000)}万" else NumberUtils.formatMoney(monthlyExpense)
+    val trendText = if (yearlyExpense >= 10000) "${String.format("%.1f", yearlyExpense / 10000)}万" else NumberUtils.formatMoney(yearlyExpense)
 
-                    Text(
-                        text = "$currentYear",
-                        color = Color(0xFF0D1B2E),
-                        fontSize = (26 * overviewScale * fontScale).sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = "${currentMonthNum}月${currentDay}日",
-                        color = primaryColor,
-                        fontSize = (14 * fontScale).sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                    Spacer(modifier = Modifier.height(2.dp))
-                    val weekDays = listOf("周日", "周一", "周二", "周三", "周四", "周五", "周六")
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            ActionCard(
+                title = "日历",
+                subtitle = "${selectedYear}年${currentMonth}月",
+                icon = Icons.Default.CalendarMonth,
+                content = {
                     Text(
                         text = weekDays[today.get(Calendar.DAY_OF_WEEK) - 1],
-                        color = primaryColor.copy(alpha = 0.7f),
-                        fontSize = (12 * fontScale).sp
+                        color = primaryColor,
+                        fontSize = (14 * fontScale).sp,
+                        fontWeight = FontWeight.SemiBold
                     )
-                }
-            },
-            onClick = onNavigateToTransactions,
-            modifier = Modifier.weight(1f),
-            primaryColor = primaryColor,
-            overviewScale = overviewScale,
-            fontScale = fontScale
-        )
-
-        // 本月收支 - 点击跳转到交易明细
-        ActionCard(
-            title = "本月收支",
-            subtitle = "",
-            icon = Icons.Default.AccountBalanceWallet,
-            content = {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    val incomeText = if (monthlyIncome >= 10000) {
-                        "${(monthlyIncome / 10000).toInt()}万"
-                    } else {
-                        monthlyIncome.toInt().toString()
-                    }
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(
-                            text = "收",
-                            color = primaryColor.copy(alpha = 0.7f),
-                            fontSize = (11 * fontScale).sp,
-                            modifier = Modifier.width(20.dp)
-                        )
-                        Text(
-                            text = "¥$incomeText",
-                            color = Color(0xFF4CAF50),
-                            fontSize = (16 * fontScale).sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(4.dp))
-
-                    val expenseText = if (monthlyExpense >= 10000) {
-                        "${(monthlyExpense / 10000).toInt()}万"
-                    } else {
-                        monthlyExpense.toInt().toString()
-                    }
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(
-                            text = "支",
-                            color = primaryColor.copy(alpha = 0.7f),
-                            fontSize = (11 * fontScale).sp,
-                            modifier = Modifier.width(20.dp)
-                        )
-                        Text(
-                            text = "¥$expenseText",
-                            color = Color(0xFFFF6B35),
-                            fontSize = (16 * fontScale).sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-            },
-            onClick = onNavigateToTransactions,
-            modifier = Modifier.weight(1f),
-            primaryColor = primaryColor,
-            overviewScale = overviewScale,
-            fontScale = fontScale
-        )
-
-        // 账户明细 - 点击跳转到账户列表
-        ActionCard(
-            title = "账户明细",
-            icon = Icons.Default.Receipt,
-            content = {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size((40 * overviewScale).dp)
-                            .clip(CircleShape)
-                            .background(primaryColor.copy(alpha = 0.2f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Receipt,
-                            contentDescription = null,
-                            tint = primaryColor,
-                            modifier = Modifier.size((24 * overviewScale).dp)
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "${accountCount}个账户",
-                        color = primaryColor.copy(alpha = 0.7f),
+                        text = dateLabel,
+                        color = primaryColor.copy(alpha = 0.75f),
                         fontSize = (11 * fontScale).sp
                     )
-                }
-            },
-            onClick = onNavigateToAccounts,
-            modifier = Modifier.weight(1f),
-            primaryColor = primaryColor,
-            overviewScale = overviewScale,
-            fontScale = fontScale
-        )
+                },
+                onClick = { onNavigateToCalendar(selectedYear, currentMonth) },
+                modifier = Modifier.weight(1f),
+                primaryColor = primaryColor,
+                cardScale = cardScale,
+                fontScale = fontScale
+            )
 
-        // 年度趋势 - 点击跳转到统计
-        ActionCard(
-            title = "年度趋势",
-            icon = Icons.AutoMirrored.Filled.ShowChart,
-            content = {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size((40 * overviewScale).dp)
-                            .clip(CircleShape)
-                            .background(primaryColor.copy(alpha = 0.2f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ShowChart,
-                            contentDescription = null,
-                            tint = primaryColor,
-                            modifier = Modifier.size((24 * overviewScale).dp)
-                        )
+            ActionCard(
+                title = "本月收支",
+                subtitle = "${currentMonth}月",
+                icon = Icons.Default.AccountBalanceWallet,
+                content = {
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Text("收 $incomeText", color = Color(0xFF4CAF50), fontSize = (13 * fontScale).sp, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text("支 $expenseText", color = Color(0xFFFF6B35), fontSize = (13 * fontScale).sp, fontWeight = FontWeight.Bold)
                     }
-                    Spacer(modifier = Modifier.height(4.dp))
+                },
+                onClick = onNavigateToTransactions,
+                modifier = Modifier.weight(1f),
+                primaryColor = primaryColor,
+                cardScale = cardScale,
+                fontScale = fontScale
+            )
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            ActionCard(
+                title = "账户明细",
+                subtitle = "共${accountCount}个",
+                icon = Icons.Default.Receipt,
+                content = {
+                    if (accountPreview.isEmpty()) {
+                        Text(
+                            text = "暂无账户",
+                            color = primaryColor.copy(alpha = 0.75f),
+                            fontSize = (12 * fontScale).sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    } else {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            accountPreview.forEach { account ->
+                                Text(
+                                    text = "${account.name} ${NumberUtils.formatMoney(account.balance)}",
+                                    color = primaryColor.copy(alpha = 0.75f),
+                                    fontSize = (11 * fontScale).sp,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                    }
+                },
+                onClick = onNavigateToAccounts,
+                modifier = Modifier.weight(1f),
+                primaryColor = primaryColor,
+                cardScale = cardScale,
+                fontScale = fontScale
+            )
+
+            ActionCard(
+                title = "年度趋势",
+                subtitle = "${selectedYear}年财富分析",
+                icon = Icons.AutoMirrored.Filled.ShowChart,
+                content = {
                     Text(
-                        text = "¥${String.format("%.2f", yearlyExpense)}",
+                        text = trendText,
                         color = primaryColor,
                         fontSize = (14 * fontScale).sp,
                         fontWeight = FontWeight.Bold
                     )
-                }
-            },
-            onClick = onNavigateToStatistics,
-            modifier = Modifier.weight(1f),
-            primaryColor = primaryColor,
-            overviewScale = overviewScale,
-            fontScale = fontScale
-        )
+                },
+                onClick = { onNavigateToYearlyWealth(selectedYear) },
+                modifier = Modifier.weight(1f),
+                primaryColor = primaryColor,
+                cardScale = cardScale,
+                fontScale = fontScale
+            )
+        }
     }
 }
 
@@ -527,13 +523,13 @@ fun ActionCard(
     onClick: () -> Unit = {},
     modifier: Modifier = Modifier,
     primaryColor: Color,
-    overviewScale: Float = 1f,
+    cardScale: Float = 1f,
     fontScale: Float = 1f
 ) {
     Card(
         modifier = modifier
             .clickable(onClick = onClick)
-            .height((130 * overviewScale).dp),
+            .height((130 * cardScale).dp),
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(
             containerColor = Color(0xFFFFFFFF).copy(alpha = 0.88f)
@@ -579,7 +575,7 @@ fun ActionCard(
 fun MonthlyTrendCard(
     yearlyTrendData: List<com.example.aiaccounting.ui.components.charts.MonthlyData>,
     primaryColor: Color,
-    overviewScale: Float = 1f,
+    cardScale: Float = 1f,
     fontScale: Float = 1f
 ) {
     var selectedMonth by remember { mutableStateOf<com.example.aiaccounting.ui.components.charts.MonthlyData?>(null) }
@@ -642,7 +638,7 @@ fun MonthlyTrendCard(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height((100 * overviewScale).dp),
+                        .height((100 * cardScale).dp),
                     horizontalArrangement = Arrangement.SpaceEvenly,
                     verticalAlignment = Alignment.Bottom
                 ) {
@@ -660,7 +656,7 @@ fun MonthlyTrendCard(
                             Box(
                                 modifier = Modifier
                                     .width((12 * fontScale).dp)
-                                    .height((incomeHeight * 40 * overviewScale).dp)
+                                    .height((incomeHeight * 40 * cardScale).dp)
                                     .clip(RoundedCornerShape(2.dp))
                                     .background(
                                         if (isSelected) Color(0xFF4CAF50)
@@ -673,7 +669,7 @@ fun MonthlyTrendCard(
                             Box(
                                 modifier = Modifier
                                     .width((12 * fontScale).dp)
-                                    .height((expenseHeight * 40 * overviewScale).dp)
+                                    .height((expenseHeight * 40 * cardScale).dp)
                                     .clip(RoundedCornerShape(2.dp))
                                     .background(
                                         if (isSelected) Color(0xFF2196F3)
@@ -733,7 +729,7 @@ fun CategorySummaryCard(
     recentTransactions: List<com.example.aiaccounting.data.local.entity.Transaction>,
     categories: List<com.example.aiaccounting.data.local.entity.Category>,
     primaryColor: Color,
-    overviewScale: Float = 1f,
+    cardScale: Float = 1f,
     fontScale: Float = 1f
 ) {
     val categoryStats = rememberCategoryStats(recentTransactions, categories)
@@ -786,7 +782,7 @@ fun CategorySummaryCard(
                             progress = { stat.percentage },
                             modifier = Modifier
                                 .weight(1f)
-                                .height((6 * overviewScale).dp)
+                                .height((6 * cardScale).dp)
                                 .clip(RoundedCornerShape(3.dp)),
                             color = stat.color,
                             trackColor = primaryColor.copy(alpha = 0.1f)
@@ -818,7 +814,7 @@ fun CategorySummaryCard(
 fun RecentTransactionsCard(
     transactions: List<com.example.aiaccounting.data.local.entity.Transaction>,
     primaryColor: Color,
-    overviewScale: Float = 1f,
+    cardScale: Float = 1f,
     fontScale: Float = 1f
 ) {
     val dateFormat = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
@@ -869,7 +865,7 @@ fun RecentTransactionsCard(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Box(
                                 modifier = Modifier
-                                    .size((36 * overviewScale).dp)
+                                    .size((36 * cardScale).dp)
                                     .clip(RoundedCornerShape(8.dp))
                                     .background(
                                         if (isExpense)
@@ -883,7 +879,7 @@ fun RecentTransactionsCard(
                                     imageVector = if (isExpense) Icons.Default.ShoppingCart else Icons.Default.AttachMoney,
                                     contentDescription = null,
                                     tint = amountColor,
-                                    modifier = Modifier.size((20 * overviewScale).dp)
+                                    modifier = Modifier.size((20 * cardScale).dp)
                                 )
                             }
                             Spacer(modifier = Modifier.width(10.dp))

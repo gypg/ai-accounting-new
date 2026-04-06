@@ -48,10 +48,16 @@ interface BudgetDao {
     fun getYearlyBudgets(year: Int): Flow<List<Budget>>
 
     /**
-     * 获取总预算（不关联分类的预算）
+     * 获取月度总预算（不关联分类的预算）
      */
     @Query("SELECT * FROM budgets WHERE categoryId IS NULL AND period = 'MONTHLY' AND year = :year AND month = :month AND isActive = 1")
     fun getTotalBudget(year: Int, month: Int): Flow<Budget?>
+
+    /**
+     * 获取年度总预算（不关联分类的预算）
+     */
+    @Query("SELECT * FROM budgets WHERE categoryId IS NULL AND period = 'YEARLY' AND year = :year AND isActive = 1")
+    fun getYearlyTotalBudget(year: Int): Flow<Budget?>
 
     /**
      * 获取分类预算

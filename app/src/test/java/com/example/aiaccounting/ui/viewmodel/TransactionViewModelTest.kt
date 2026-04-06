@@ -13,6 +13,7 @@ import com.example.aiaccounting.data.repository.AIOperationTraceRepository
 import com.example.aiaccounting.data.repository.CategoryRepository
 import com.example.aiaccounting.data.repository.TagRepository
 import com.example.aiaccounting.data.repository.TransactionRepository
+import com.example.aiaccounting.logging.AppLogLogger
 import com.example.aiaccounting.widget.WidgetUpdateService
 import io.mockk.MockKAnnotations
 import io.mockk.Runs
@@ -64,6 +65,9 @@ class TransactionViewModelTest {
     @MockK
     private lateinit var aiOperationTraceRepository: AIOperationTraceRepository
 
+    @MockK(relaxed = true)
+    private lateinit var appLogLogger: AppLogLogger
+
     private lateinit var viewModel: TransactionViewModel
     private lateinit var context: Context
 
@@ -93,6 +97,7 @@ class TransactionViewModelTest {
             tagRepository,
             aiOperationTraceRepository,
             widgetUpdateService,
+            appLogLogger,
             context
         )
     }

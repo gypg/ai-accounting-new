@@ -5,6 +5,7 @@ import com.example.aiaccounting.data.local.entity.Transaction
 import com.example.aiaccounting.data.local.entity.TransactionType
 import com.example.aiaccounting.data.repository.CategoryRepository
 import com.example.aiaccounting.data.repository.TransactionRepository
+import com.example.aiaccounting.logging.AppLogLogger
 import io.mockk.MockKAnnotations
 import io.mockk.coEvery
 import io.mockk.every
@@ -35,6 +36,9 @@ class TransactionListViewModelTest {
 
     @MockK
     private lateinit var categoryRepository: CategoryRepository
+
+    @MockK(relaxed = true)
+    private lateinit var appLogLogger: AppLogLogger
 
     private val testDispatcher = StandardTestDispatcher()
     private lateinit var viewModel: TransactionListViewModel
@@ -87,7 +91,7 @@ class TransactionListViewModelTest {
         )
         every { categoryRepository.getAllCategories() } returns flowOf(emptyList())
 
-        viewModel = TransactionListViewModel(transactionRepository, categoryRepository)
+        viewModel = TransactionListViewModel(transactionRepository, categoryRepository, appLogLogger)
     }
 
     @After

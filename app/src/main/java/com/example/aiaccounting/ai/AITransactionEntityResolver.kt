@@ -24,6 +24,21 @@ internal data class CategoryResolutionResult(
 
 internal object AITransactionEntityResolver {
 
+    fun inferAccountType(accountName: String, fallbackType: AccountType = AccountType.CASH): AccountType {
+        val normalized = accountName.trim().lowercase()
+        if (normalized.isBlank()) return fallbackType
+
+        return when {
+            normalized.contains("微信") -> AccountType.WECHAT
+            normalized.contains("支付宝") -> AccountType.ALIPAY
+            normalized.contains("信用卡") -> AccountType.CREDIT_CARD
+            normalized.contains("借记卡") -> AccountType.DEBIT_CARD
+            normalized.contains("银行卡") || normalized.contains("银行") || normalized.contains("工资卡") || normalized.contains("银行代发") -> AccountType.BANK
+            normalized.contains("现金") || normalized.contains("人民币") || normalized.contains("备用金") || normalized.contains("私房钱") -> AccountType.CASH
+            else -> fallbackType
+        }
+    }
+
     suspend fun resolveAccount(
         accountRepository: AccountRepository,
         aiOperationExecutor: AIOperationExecutor,
@@ -100,7 +115,7 @@ internal object AITransactionEntityResolver {
                 val result = aiOperationExecutor.executeOperation(
                     AIOperation.AddAccount(
                         name = fallbackAccountName,
-                        type = fallbackAccountType,
+                        type = inferAccountType(fallbackAccountName, fallbackAccountType),
                         balance = 0.0,
                         traceContext = traceContext
                     )

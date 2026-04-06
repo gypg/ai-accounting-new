@@ -2,6 +2,9 @@ package com.example.aiaccounting.ui.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.aiaccounting.data.local.prefs.AppStateManager
+import com.example.aiaccounting.data.local.prefs.LogAutoClearPreferences
+import com.example.aiaccounting.logging.AppLogLogger
 import com.example.aiaccounting.security.SecurityManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
@@ -17,7 +20,8 @@ data class SettingsUiState(
   val isAIConfigured: Boolean = false,
   val aiModel: String = "",
   val isLoading: Boolean = false,
-  val error: String? = null
+  val error: String? = null,
+  val logAutoClearPreferences: LogAutoClearPreferences = LogAutoClearPreferences()
 )
 
 /**
@@ -25,7 +29,9 @@ data class SettingsUiState(
  */
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
-  private val securityManager: SecurityManager
+  private val securityManager: SecurityManager,
+  private val appStateManager: AppStateManager,
+  private val appLogLogger: AppLogLogger
 ) : ViewModel() {
 
   private val _uiState = MutableStateFlow(SettingsUiState())
@@ -39,7 +45,8 @@ class SettingsViewModel @Inject constructor(
     viewModelScope.launch {
       _uiState.update { it.copy(
         isBiometricEnabled = securityManager.isBiometricEnabled(),
-        isPinSet = securityManager.getPinState() is SecurityManager.PinState.Set
+        isPinSet = securityManager.getPinState() is SecurityManager.PinState.Set,
+        logAutoClearPreferences = appStateManager.getLogAutoClearPreferences()
       ) }
     }
   }
@@ -88,6 +95,39 @@ class SettingsViewModel @Inject constructor(
         isPinSet = securityManager.getPinState() is SecurityManager.PinState.Set
       ) }
     }
+  }
+
+  fun updateLogAutoClearEnabled(enabled: Boolean) {
+    viewModelScope.launch {
+      appStateManager.setLogAutoClearEnabled(enabled)
+      _uiState.update {
+        it.copy(
+          logAutoClearPreferences = it.logAutoClearPreferences.copy(enabled = enabled)
+        )
+      }
+    }
+  }
+
+  fun updateLogAutoClearIntervalHours(hours: Int) {
+    viewModelScope.launch {
+      appStateManager.setLogAutoClearIntervalHours(hours)
+      val updatedPreferences = appStateManager.getLogAutoClearPreferences()
+      _uiState.update {
+        it.copy(logAutoClearPreferences = updatedPreferences)
+      }
+    }
+  }
+
+  fun logUiScaleChanged(
+    cardScale: Float,
+    fontScale: Float
+  ) {
+    appLogLogger.info(
+      source = "UI",
+      category = "ui_scale_change",
+      message = "更新显示大小",
+      details = "cardScale=$cardScale,fontScale=$fontScale"
+    )
   }
 
   /**

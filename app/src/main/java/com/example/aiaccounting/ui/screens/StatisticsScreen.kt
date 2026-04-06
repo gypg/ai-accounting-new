@@ -29,6 +29,7 @@ import com.example.aiaccounting.ui.components.charts.TrendChart
 import com.example.aiaccounting.ui.components.charts.BarChart
 import com.example.aiaccounting.ui.viewmodel.StatisticsViewModel
 import com.example.aiaccounting.ui.theme.LocalIsDreamyTheme
+import com.example.aiaccounting.ui.theme.LocalUiScale
 import com.example.aiaccounting.ui.components.GlassCard
 import com.example.aiaccounting.utils.NumberUtils
 
@@ -45,6 +46,9 @@ fun StatisticsScreen(
     var showDatePickerDialog by remember { mutableStateOf(false) }
 
     val isDreamyTheme = LocalIsDreamyTheme.current
+    val uiScale = LocalUiScale.current
+    val cardScale = uiScale.cardScale
+    val fontScale = uiScale.fontScale
 
     Scaffold(
         containerColor = if (isDreamyTheme) Color.Transparent else MaterialTheme.colorScheme.background,
@@ -53,7 +57,7 @@ fun StatisticsScreen(
                 title = {
                     Text(
                         text = "统计",
-                        fontSize = 20.sp,
+                        fontSize = (20 * fontScale).sp,
                         fontWeight = FontWeight.Bold
                     )
                 },
@@ -73,6 +77,7 @@ fun StatisticsScreen(
                 .fillMaxSize()
                 .padding(padding)
                 .verticalScroll(rememberScrollState())
+                .padding(horizontal = (16 * cardScale).dp)
         ) {
             // 显示当前选择的时间范围
             val timeDisplayText = getTimeDisplayText(uiState.timeFilter)
@@ -140,7 +145,7 @@ fun StatisticsScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(16.dp),
+                    .padding((16 * cardScale).dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 StatCard(
@@ -213,7 +218,7 @@ fun StatisticsScreen(
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(200.dp),
+                                    .height((200 * cardScale).dp),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
@@ -224,9 +229,11 @@ fun StatisticsScreen(
                         } else {
                             TrendChart(
                                 data = statistics.monthlyTrend,
-                                modifier = Modifier.fillMaxWidth(),
-                                showIncome = true,
-                                showExpense = true,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height((240 * cardScale).dp),
+                                showIncome = uiState.selectedTab == "income",
+                                showExpense = uiState.selectedTab == "expense",
                                 onDataPointClick = { selectedData ->
                                     // 点击数据点显示详情
                                 }
@@ -256,7 +263,7 @@ fun StatisticsScreen(
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(200.dp),
+                                    .height((200 * cardScale).dp),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
@@ -267,9 +274,11 @@ fun StatisticsScreen(
                         } else {
                             TrendChart(
                                 data = statistics.monthlyTrend,
-                                modifier = Modifier.fillMaxWidth(),
-                                showIncome = true,
-                                showExpense = true,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height((240 * cardScale).dp),
+                                showIncome = uiState.selectedTab == "income",
+                                showExpense = uiState.selectedTab == "expense",
                                 onDataPointClick = { selectedData ->
                                     // 点击数据点显示详情
                                 }
@@ -303,7 +312,7 @@ fun StatisticsScreen(
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(200.dp),
+                                    .height((200 * cardScale).dp),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
@@ -343,7 +352,7 @@ fun StatisticsScreen(
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(200.dp),
+                                    .height((200 * cardScale).dp),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(

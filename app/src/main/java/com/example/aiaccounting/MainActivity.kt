@@ -15,6 +15,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.navigation.compose.rememberNavController
 import com.example.aiaccounting.data.local.prefs.AppStateManager
+import com.example.aiaccounting.data.repository.LogCleanupCoordinator
+import com.example.aiaccounting.logging.AppLogLogger
 import com.example.aiaccounting.security.SecurityManager
 import com.example.aiaccounting.ui.navigation.AppNavigation
 import com.example.aiaccounting.ui.navigation.Screen
@@ -30,6 +32,12 @@ class MainActivity : ComponentActivity() {
 
  @Inject
  lateinit var appStateManager: AppStateManager
+
+ @Inject
+ lateinit var appLogLogger: AppLogLogger
+
+ @Inject
+ lateinit var logCleanupCoordinator: LogCleanupCoordinator
 
  private var pendingWidgetAction by mutableStateOf<String?>(null)
  private var widgetActionNonce by mutableLongStateOf(0L)
@@ -69,6 +77,8 @@ class MainActivity : ComponentActivity() {
  MainApp(
  securityManager = securityManager,
  appStateManager = appStateManager,
+ appLogLogger = appLogLogger,
+ logCleanupCoordinator = logCleanupCoordinator,
  themeKey = themeKey,
  onThemeChanged = { themeKey++ },
  uiScaleKey = uiScaleKey,
@@ -118,6 +128,8 @@ class MainActivity : ComponentActivity() {
 fun MainApp(
  securityManager: SecurityManager,
  appStateManager: AppStateManager,
+ appLogLogger: AppLogLogger,
+ logCleanupCoordinator: LogCleanupCoordinator,
  @Suppress("UNUSED_PARAMETER") themeKey: Int,
  onThemeChanged: () -> Unit,
  @Suppress("UNUSED_PARAMETER") uiScaleKey: Int,
@@ -147,6 +159,17 @@ fun MainApp(
  // 模拟异步加载完成
  LaunchedEffect(Unit) {
  kotlinx.coroutines.delay(100)
+ try {
+ logCleanupCoordinator.runIfDue()
+ } catch (throwable: Throwable) {
+ if (throwable is kotlinx.coroutines.CancellationException) throw throwable
+ appLogLogger.error(
+ source = "APP",
+ category = "log_cleanup",
+ message = "日志自动清理执行失败",
+ details = throwable.message
+ )
+ }
  isLoading = false
  }
 
@@ -208,9 +231,9 @@ fun MainApp(
  var widgetTargetRoute by remember(widgetAction, widgetActionNonce) {
  mutableStateOf(
  when (widgetAction) {
- "add_expense" -> "add_transaction/expense"
- "add_income" -> "add_transaction/income"
- "ai_chat" -> "ai_assistant"
+ "add_expense" -> Screen.AddTransaction.createRoute("widget_add_expense")
+ "add_income" -> Screen.AddTransaction.createRoute("widget_add_income")
+ "ai_chat" -> Screen.AIAssistant.route
  else -> null
  }
  )
@@ -233,6 +256,7 @@ fun MainApp(
  navController = navController,
  startDestination = startDestination,
  appStateManager = appStateManager,
+ appLogLogger = appLogLogger,
  onSetupComplete = { pin ->
  globalPin = pin
  isLoggedIn = true

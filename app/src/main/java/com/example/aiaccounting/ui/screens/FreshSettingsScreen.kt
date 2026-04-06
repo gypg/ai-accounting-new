@@ -43,6 +43,7 @@ fun FreshSettingsScreen(
     onNavigateToTemplates: () -> Unit = {},
     onNavigateToImport: () -> Unit = {},
     onNavigateToAISettings: () -> Unit = {},
+    onNavigateToLogBrowser: () -> Unit = {},
     onNavigateToBudgets: () -> Unit = {},
     onNavigateToSetupPin: () -> Unit = {},
     onLogout: () -> Unit = {},
@@ -162,6 +163,13 @@ fun FreshSettingsScreen(
                     onClick = onNavigateToAISettings,
                     primaryColor = FreshSciThemeColors.primary
                 )
+                SettingsRow(
+                    icon = Icons.Default.Article,
+                    title = "平台日志",
+                    subtitle = "查看操作与错误日志",
+                    onClick = onNavigateToLogBrowser,
+                    primaryColor = FreshSciThemeColors.primary
+                )
 
                 Spacer(modifier = Modifier.height(24.dp))
 
@@ -265,11 +273,9 @@ fun FreshSettingsScreen(
             FreshUiScaleDialog(
                 uiScale = uiScale,
                 onDismiss = { showUiScaleDialog = false },
-                onConfirm = { overviewScale, statisticsScale, transactionScale, settingsScale, fontScale ->
-                    appStateManager.setOverviewScale(overviewScale)
-                    appStateManager.setStatisticsScale(statisticsScale)
-                    appStateManager.setTransactionScale(transactionScale)
-                    appStateManager.setSettingsScale(settingsScale)
+                onConfirm = { cardScale, fontScale ->
+                    viewModel.logUiScaleChanged(cardScale, fontScale)
+                    appStateManager.setCardScale(cardScale)
                     appStateManager.setFontScale(fontScale)
                     showUiScaleDialog = false
                     onUiScaleChanged()
@@ -487,12 +493,9 @@ fun getCurrentThemeName(themeId: String): String {
 fun FreshUiScaleDialog(
     uiScale: com.example.aiaccounting.data.local.prefs.UiScalePreferences,
     onDismiss: () -> Unit,
-    onConfirm: (Float, Float, Float, Float, Float) -> Unit
+    onConfirm: (Float, Float) -> Unit
 ) {
-    var localOverviewScale by remember { mutableFloatStateOf(uiScale.overviewScale) }
-    var localStatisticsScale by remember { mutableFloatStateOf(uiScale.statisticsScale) }
-    var localTransactionScale by remember { mutableFloatStateOf(uiScale.transactionScale) }
-    var localSettingsScale by remember { mutableFloatStateOf(uiScale.settingsScale) }
+    var localCardScale by remember { mutableFloatStateOf(uiScale.cardScale) }
     var localFontScale by remember { mutableFloatStateOf(uiScale.fontScale) }
 
     AlertDialog(
@@ -508,33 +511,27 @@ fun FreshUiScaleDialog(
         text = {
             Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
                 Text(
-                    "调整各项界面的显示大小（${(localOverviewScale * 100).toInt()}%）",
+                    "调整卡片大小与全局字体（${(localCardScale * 100).toInt()}%）",
                     fontSize = 12.sp,
                     color = FreshSciThemeColors.onSurfaceVariant
                 )
                 Spacer(modifier = Modifier.height(16.dp))
 
-                FreshScaleSliderItem("总览界面", localOverviewScale) { localOverviewScale = it }
-                FreshScaleSliderItem("统计界面", localStatisticsScale) { localStatisticsScale = it }
-                FreshScaleSliderItem("交易明细", localTransactionScale) { localTransactionScale = it }
-                FreshScaleSliderItem("设置界面", localSettingsScale) { localSettingsScale = it }
+                FreshScaleSliderItem("卡片大小", localCardScale) { localCardScale = it }
                 FreshScaleSliderItem("全局字体", localFontScale) { localFontScale = it }
             }
         },
         confirmButton = {
             Row {
                 TextButton(onClick = {
-                    localOverviewScale = 1.0f
-                    localStatisticsScale = 1.0f
-                    localTransactionScale = 1.0f
-                    localSettingsScale = 1.0f
+                    localCardScale = 1.0f
                     localFontScale = 1.0f
                 }) {
                     Text("重置", color = FreshSciThemeColors.onSurfaceVariant)
                 }
                 Spacer(modifier = Modifier.width(8.dp))
                 TextButton(onClick = {
-                    onConfirm(localOverviewScale, localStatisticsScale, localTransactionScale, localSettingsScale, localFontScale)
+                    onConfirm(localCardScale, localFontScale)
                 }) {
                     Text("确定", color = FreshSciThemeColors.primary)
                 }

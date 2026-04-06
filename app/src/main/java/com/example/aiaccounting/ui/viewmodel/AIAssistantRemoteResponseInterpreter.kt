@@ -200,6 +200,8 @@ internal class AIAssistantRemoteResponseInterpreter {
                     )
                 }
 
+                val dateValue = actionJson.opt("date")
+                val hasExplicitDate = actionJson.has("date")
                 AIAssistantTypedAction.AddTransaction(
                     amount = actionJson.optDouble("amount", 0.0),
                     transactionTypeRaw = actionJson.optString(
@@ -219,7 +221,13 @@ internal class AIAssistantRemoteResponseInterpreter {
                     accountRef = normalizedAccountRef,
                     transferAccountRef = transferAccountRef,
                     note = actionJson.optString("note", ""),
-                    dateTimestamp = actionJson.optLong("date", System.currentTimeMillis())
+                    dateTimestamp = actionJson.optLong("date", System.currentTimeMillis()),
+                    rawDate = when (dateValue) {
+                        null -> null
+                        is Number -> dateValue.toString()
+                        else -> dateValue.toString()
+                    },
+                    hasExplicitDate = hasExplicitDate
                 )
             }
             "create_account" -> AIAssistantTypedAction.CreateAccount(
@@ -419,6 +427,10 @@ internal class AIAssistantRemoteResponseInterpreter {
 
     private fun requiresQueryBeforeExecution(envelope: AIAssistantActionEnvelope): Boolean {
         return envelope.actions.any { it is AIAssistantTypedAction.AddTransaction }
+    }
+
+    internal fun countAddTransactionActions(envelope: AIAssistantActionEnvelope): Int {
+        return envelope.actions.count { it is AIAssistantTypedAction.AddTransaction }
     }
 
     private fun sanitizeRemoteResponse(response: String): String {

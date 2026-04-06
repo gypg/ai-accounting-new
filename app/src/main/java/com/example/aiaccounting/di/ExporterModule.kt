@@ -2,6 +2,7 @@ package com.example.aiaccounting.di
 
 import android.content.Context
 import com.example.aiaccounting.data.exporter.ExcelExporter
+import com.example.aiaccounting.data.exporter.LogCsvExporter
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -20,5 +21,11 @@ object ExporterModule {
     @Singleton
     fun provideExcelExporter(@ApplicationContext context: Context): ExcelExporter {
         return ExcelExporter(context)
+    }
+
+    @Provides
+    @Singleton
+    fun provideLogCsvExporter(@ApplicationContext context: Context): LogCsvExporter {
+        return LogCsvExporter(context)
     }
 }

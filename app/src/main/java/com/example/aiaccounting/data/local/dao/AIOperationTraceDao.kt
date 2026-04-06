@@ -20,4 +20,7 @@ interface AIOperationTraceDao {
 
     @Query("SELECT * FROM ai_operation_traces ORDER BY timestamp DESC LIMIT :limit")
     fun getRecentTraces(limit: Int): Flow<List<AIOperationTrace>>
+
+    @Query("DELETE FROM ai_operation_traces WHERE timestamp < :beforeTimestamp")
+    suspend fun deleteTracesBefore(beforeTimestamp: Long)
 }

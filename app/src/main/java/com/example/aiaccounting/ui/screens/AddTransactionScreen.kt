@@ -15,6 +15,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.aiaccounting.data.local.entity.Account
 import com.example.aiaccounting.data.local.entity.Category
@@ -22,6 +23,7 @@ import com.example.aiaccounting.data.local.entity.Tag
 import com.example.aiaccounting.data.local.entity.TransactionType
 import com.example.aiaccounting.ui.components.FlowRow
 import com.example.aiaccounting.ui.components.TagSelector
+import com.example.aiaccounting.ui.theme.LocalUiScale
 import com.example.aiaccounting.ui.viewmodel.TransactionViewModel
 import com.example.aiaccounting.utils.DateUtils
 import com.example.aiaccounting.utils.NumberUtils
@@ -30,6 +32,7 @@ import java.util.*
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddTransactionScreen(
+    entrySource: String = "direct_add",
     onBack: () -> Unit,
     onSave: () -> Unit,
     viewModel: TransactionViewModel = hiltViewModel()
@@ -38,6 +41,20 @@ fun AddTransactionScreen(
     val accounts by viewModel.accounts.collectAsState()
     val categories by viewModel.categories.collectAsState()
     val tags by viewModel.tags.collectAsState()
+    val uiScale = LocalUiScale.current
+    val cardScale = uiScale.cardScale
+    val fontScale = uiScale.fontScale
+
+    val hasLoadedEntryContext = accounts.isNotEmpty() || categories.isNotEmpty()
+    LaunchedEffect(entrySource, hasLoadedEntryContext) {
+        if (hasLoadedEntryContext) {
+            viewModel.logAddTransactionScreenEnter(
+                entrySource = entrySource,
+                accountCount = accounts.size,
+                categoryCount = categories.size
+            )
+        }
+    }
 
     var amount by remember { mutableStateOf("") }
     var selectedType by remember { mutableStateOf(TransactionType.EXPENSE) }
@@ -54,7 +71,7 @@ fun AddTransactionScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(text = "记一笔") },
+                title = { Text(text = "记一笔", fontSize = (20 * fontScale).sp) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
@@ -73,6 +90,7 @@ fun AddTransactionScreen(
                 .fillMaxSize()
                 .padding(padding)
                 .verticalScroll(rememberScrollState())
+                .padding(horizontal = (8 * cardScale).dp)
         ) {
             // 类型选择
             TypeSelector(
@@ -142,14 +160,15 @@ fun AddTransactionScreen(
                             categoryId = category.id,
                             date = date,
                             note = note,
-                            selectedTags = selectedTags
+                            selectedTags = selectedTags,
+                            entrySource = entrySource
                         )
                         onSave()
                     }
                 },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp),
+                    .padding(horizontal = (16 * cardScale).dp),
                 enabled = canSave
             ) {
                 Text("保存")

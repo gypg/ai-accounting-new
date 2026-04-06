@@ -11,11 +11,14 @@ import javax.inject.Singleton
  * UI 缩放偏好数据类
  */
 data class UiScalePreferences(
-    val overviewScale: Float = 1.0f,
-    val statisticsScale: Float = 1.0f,
-    val transactionScale: Float = 1.0f,
-    val settingsScale: Float = 1.0f,
+    val cardScale: Float = 1.0f,
     val fontScale: Float = 1.0f
+)
+
+data class LogAutoClearPreferences(
+    val enabled: Boolean = AppStateManager.DEFAULT_LOG_AUTO_CLEAR_ENABLED,
+    val intervalHours: Int = AppStateManager.DEFAULT_LOG_AUTO_CLEAR_INTERVAL_HOURS,
+    val lastRunTimestamp: Long = 0L
 )
 
 /**
@@ -42,11 +45,17 @@ class AppStateManager @Inject constructor(
         private const val KEY_IS_LOGGED_IN = "is_logged_in"
 
         // UI 缩放偏好
+        private const val KEY_UI_SCALE_CARD = "ui_scale_card"
+        private const val KEY_UI_SCALE_FONT = "ui_scale_font"
         private const val KEY_UI_SCALE_OVERVIEW = "ui_scale_overview"
         private const val KEY_UI_SCALE_STATISTICS = "ui_scale_statistics"
         private const val KEY_UI_SCALE_TRANSACTION = "ui_scale_transaction"
         private const val KEY_UI_SCALE_SETTINGS = "ui_scale_settings"
-        private const val KEY_UI_SCALE_FONT = "ui_scale_font"
+
+        // 日志自动清理
+        private const val KEY_LOG_AUTO_CLEAR_ENABLED = "log_auto_clear_enabled"
+        private const val KEY_LOG_AUTO_CLEAR_INTERVAL_HOURS = "log_auto_clear_interval_hours"
+        private const val KEY_LOG_AUTO_CLEAR_LAST_RUN = "log_auto_clear_last_run"
 
         // AI 模型类型
         const val AI_MODEL_DEFAULT = "default"
@@ -56,6 +65,11 @@ class AppStateManager @Inject constructor(
         const val DEFAULT_UI_SCALE = 1.0f
         const val MIN_UI_SCALE = 0.7f
         const val MAX_UI_SCALE = 1.4f
+
+        // 日志自动清理默认值
+        const val DEFAULT_LOG_AUTO_CLEAR_ENABLED = true
+        const val DEFAULT_LOG_AUTO_CLEAR_INTERVAL_HOURS = 1
+        val VALID_LOG_AUTO_CLEAR_INTERVAL_HOURS = setOf(1, 6, 24, 168)
     }
     private val prefs: SharedPreferences by lazy {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -197,33 +211,49 @@ class AppStateManager @Inject constructor(
      * 获取 UI 缩放偏好数据类
      */
     fun getUiScalePreferences(): UiScalePreferences {
+        val legacyOverview = prefs.getFloat(KEY_UI_SCALE_OVERVIEW, DEFAULT_UI_SCALE)
+        val legacyStatistics = prefs.getFloat(KEY_UI_SCALE_STATISTICS, DEFAULT_UI_SCALE)
+        val legacyTransaction = prefs.getFloat(KEY_UI_SCALE_TRANSACTION, DEFAULT_UI_SCALE)
+        val legacySettings = prefs.getFloat(KEY_UI_SCALE_SETTINGS, DEFAULT_UI_SCALE)
+        val fallbackCardScale = maxOf(legacyOverview, legacyStatistics, legacyTransaction, legacySettings)
+
         return UiScalePreferences(
-            overviewScale = prefs.getFloat(KEY_UI_SCALE_OVERVIEW, DEFAULT_UI_SCALE),
-            statisticsScale = prefs.getFloat(KEY_UI_SCALE_STATISTICS, DEFAULT_UI_SCALE),
-            transactionScale = prefs.getFloat(KEY_UI_SCALE_TRANSACTION, DEFAULT_UI_SCALE),
-            settingsScale = prefs.getFloat(KEY_UI_SCALE_SETTINGS, DEFAULT_UI_SCALE),
+            cardScale = prefs.getFloat(KEY_UI_SCALE_CARD, fallbackCardScale),
             fontScale = prefs.getFloat(KEY_UI_SCALE_FONT, DEFAULT_UI_SCALE)
         )
     }
 
-    fun setOverviewScale(scale: Float) {
-        prefs.edit().putFloat(KEY_UI_SCALE_OVERVIEW, scale.coerceIn(MIN_UI_SCALE, MAX_UI_SCALE)).apply()
-    }
-
-    fun setStatisticsScale(scale: Float) {
-        prefs.edit().putFloat(KEY_UI_SCALE_STATISTICS, scale.coerceIn(MIN_UI_SCALE, MAX_UI_SCALE)).apply()
-    }
-
-    fun setTransactionScale(scale: Float) {
-        prefs.edit().putFloat(KEY_UI_SCALE_TRANSACTION, scale.coerceIn(MIN_UI_SCALE, MAX_UI_SCALE)).apply()
-    }
-
-    fun setSettingsScale(scale: Float) {
-        prefs.edit().putFloat(KEY_UI_SCALE_SETTINGS, scale.coerceIn(MIN_UI_SCALE, MAX_UI_SCALE)).apply()
+    fun setCardScale(scale: Float) {
+        prefs.edit().putFloat(KEY_UI_SCALE_CARD, scale.coerceIn(MIN_UI_SCALE, MAX_UI_SCALE)).apply()
     }
 
     fun setFontScale(scale: Float) {
         prefs.edit().putFloat(KEY_UI_SCALE_FONT, scale.coerceIn(MIN_UI_SCALE, MAX_UI_SCALE)).apply()
+    }
+
+    fun getLogAutoClearPreferences(): LogAutoClearPreferences {
+        val storedInterval = prefs.getInt(KEY_LOG_AUTO_CLEAR_INTERVAL_HOURS, DEFAULT_LOG_AUTO_CLEAR_INTERVAL_HOURS)
+        val intervalHours = storedInterval.takeIf { it in VALID_LOG_AUTO_CLEAR_INTERVAL_HOURS }
+            ?: DEFAULT_LOG_AUTO_CLEAR_INTERVAL_HOURS
+        return LogAutoClearPreferences(
+            enabled = prefs.getBoolean(KEY_LOG_AUTO_CLEAR_ENABLED, DEFAULT_LOG_AUTO_CLEAR_ENABLED),
+            intervalHours = intervalHours,
+            lastRunTimestamp = prefs.getLong(KEY_LOG_AUTO_CLEAR_LAST_RUN, 0L)
+        )
+    }
+
+    fun setLogAutoClearEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_LOG_AUTO_CLEAR_ENABLED, enabled).apply()
+    }
+
+    fun setLogAutoClearIntervalHours(hours: Int) {
+        val safeHours = hours.takeIf { it in VALID_LOG_AUTO_CLEAR_INTERVAL_HOURS }
+            ?: DEFAULT_LOG_AUTO_CLEAR_INTERVAL_HOURS
+        prefs.edit().putInt(KEY_LOG_AUTO_CLEAR_INTERVAL_HOURS, safeHours).apply()
+    }
+
+    fun setLogAutoClearLastRun(timestamp: Long) {
+        prefs.edit().putLong(KEY_LOG_AUTO_CLEAR_LAST_RUN, timestamp).apply()
     }
 
     fun resetUiScalesToDefault() {

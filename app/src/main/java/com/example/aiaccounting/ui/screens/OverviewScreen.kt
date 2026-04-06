@@ -12,6 +12,10 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.platform.testTag
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
@@ -20,6 +24,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.example.aiaccounting.data.local.entity.BudgetProgress
 import com.example.aiaccounting.ui.components.AddTransactionMenu
 import com.example.aiaccounting.ui.viewmodel.OverviewViewModel
 import com.example.aiaccounting.utils.NumberUtils
@@ -34,17 +39,50 @@ fun OverviewScreen(
     onNavigateToAddTransaction: () -> Unit,
     onNavigateToAI: () -> Unit,
     onNavigateToButlerMarket: () -> Unit = {},
+    onNavigateToBudgets: () -> Unit = {},
+    onNavigateToTransactions: (Int, Int, Int?) -> Unit = { _, _, _ -> },
+    onNavigateToAccounts: () -> Unit = {},
+    onNavigateToCalendar: (Int, Int) -> Unit = { _, _ -> },
+    onNavigateToYearlyWealth: (Int) -> Unit = {},
     viewModel: OverviewViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val selectedYear by viewModel.selectedYear.collectAsState()
     val transactions by viewModel.recentTransactions.collectAsState()
     val accounts by viewModel.accounts.collectAsState()
+    val categories by viewModel.categories.collectAsState()
     val monthlyStats by viewModel.monthlyStats.collectAsState()
     val yearlyTrendData by viewModel.yearlyTrendData.collectAsState()
     val todayStats by viewModel.todayStats.collectAsState()
     val weekStats by viewModel.weekStats.collectAsState()
+    val yearlyBudgetProgress by viewModel.yearlyBudgetProgress.collectAsState()
+    val totalBudgetProgress by viewModel.totalBudgetProgress.collectAsState()
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    LaunchedEffect(Unit) {
+        viewModel.logOverviewScreenEnter(
+            theme = "default",
+            selectedYear = selectedYear,
+            accountCount = accounts.size,
+            categoryCount = categories.size,
+            recentTransactionCount = transactions.size
+        )
+    }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                viewModel.refreshCurrentYearMonth()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
 
     val totalAssets by remember(accounts) { derivedStateOf { accounts.sumOf { it.balance } } }
+    val currentMonth = Calendar.getInstance().get(Calendar.MONTH) + 1
+    val currentDay = Calendar.getInstance().get(Calendar.DAY_OF_MONTH)
 
     // 底部菜单状态
     var showAddMenu by remember { mutableStateOf(false) }
@@ -53,15 +91,24 @@ fun OverviewScreen(
     AddTransactionMenu(
         isVisible = showAddMenu,
         onDismiss = { showAddMenu = false },
-        onAIAccounting = onNavigateToAI,
-        onManualAccounting = onNavigateToAddTransaction
+        onAIAccounting = {
+            viewModel.logOverviewEntrySelected(theme = "default", entry = "ai_accounting")
+            onNavigateToAI()
+        },
+        onManualAccounting = {
+            viewModel.logOverviewEntrySelected(theme = "default", entry = "manual_accounting")
+            onNavigateToAddTransaction()
+        }
     )
 
     Scaffold(
         floatingActionButton = {
             // AI+ 按钮 - 整合机器人和记账功能
             FloatingActionButton(
-                onClick = { showAddMenu = true },
+                onClick = {
+                    viewModel.logOverviewAddMenuOpened(theme = "default")
+                    showAddMenu = true
+                },
                 containerColor = MaterialTheme.colorScheme.primary,
                 shape = CircleShape,
                 modifier = Modifier.size(64.dp)
@@ -150,33 +197,64 @@ fun OverviewScreen(
 
             // 年度统计
             YearlyStatsCard(
-                year = Calendar.getInstance().get(Calendar.YEAR),
+                year = selectedYear,
                 income = monthlyStats.totalIncome,
                 expense = monthlyStats.totalExpense,
-                balance = monthlyStats.totalIncome - monthlyStats.totalExpense
+                balance = monthlyStats.totalIncome - monthlyStats.totalExpense,
+                onPreviousYear = { viewModel.setSelectedYear(selectedYear - 1) },
+                onNextYear = { viewModel.setSelectedYear(selectedYear + 1) }
             )
 
             Spacer(modifier = Modifier.height(16.dp))
+
+            // 月历入口
+            CalendarOverviewCard(
+                year = selectedYear,
+                month = currentMonth,
+                day = currentDay,
+                onClick = { onNavigateToCalendar(selectedYear, currentMonth) }
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
 
             // 月度概览和账户明细
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // 月度概览
                 MonthlyOverviewCard(
-                    month = Calendar.getInstance().get(Calendar.MONTH) + 1,
+                    year = selectedYear,
+                    month = currentMonth,
                     income = monthlyStats.monthlyIncome,
                     expense = monthlyStats.monthlyExpense,
+                    onClick = {
+                        onNavigateToTransactions(selectedYear, currentMonth, null)
+                    },
                     modifier = Modifier.weight(1f)
                 )
 
-                // 账户明细
                 AccountsOverviewCard(
                     accounts = accounts.take(4),
+                    onClick = onNavigateToAccounts,
                     modifier = Modifier.weight(1f)
                 )
             }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            BudgetOverviewCard(
+                title = "${selectedYear}年度预算",
+                budgetProgress = yearlyBudgetProgress,
+                onClick = onNavigateToBudgets
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            BudgetOverviewCard(
+                title = "${selectedYear}年${currentMonth}月预算",
+                budgetProgress = totalBudgetProgress,
+                onClick = onNavigateToBudgets
+            )
 
             Spacer(modifier = Modifier.height(16.dp))
 
@@ -191,7 +269,14 @@ fun OverviewScreen(
             Spacer(modifier = Modifier.height(16.dp))
 
             // 年度趋势图
-            YearlyTrendCard(monthlyData = yearlyTrendData)
+            YearlyTrendCard(
+                year = selectedYear,
+                monthlyData = yearlyTrendData,
+                onClick = { onNavigateToYearlyWealth(selectedYear) },
+                onMonthClick = { month ->
+                    onNavigateToTransactions(selectedYear, month, null)
+                }
+            )
 
             Spacer(modifier = Modifier.height(16.dp))
         }
@@ -253,7 +338,9 @@ fun YearlyStatsCard(
     year: Int,
     income: Double,
     expense: Double,
-    balance: Double
+    balance: Double,
+    onPreviousYear: () -> Unit,
+    onNextYear: () -> Unit
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -269,7 +356,7 @@ fun YearlyStatsCard(
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(onClick = { /* 上一年 */ }) {
+                IconButton(onClick = onPreviousYear) {
                     Icon(Icons.Default.ChevronLeft, contentDescription = "上一年")
                 }
                 Text(
@@ -277,7 +364,7 @@ fun YearlyStatsCard(
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Medium
                 )
-                IconButton(onClick = { /* 下一年 */ }) {
+                IconButton(onClick = onNextYear) {
                     Icon(Icons.Default.ChevronRight, contentDescription = "下一年")
                 }
             }
@@ -318,14 +405,66 @@ fun StatColumn(label: String, amount: Double, color: Color) {
 }
 
 @Composable
-fun MonthlyOverviewCard(
+fun CalendarOverviewCard(
+    year: Int,
     month: Int,
-    income: Double,
-    expense: Double,
+    day: Int,
+    onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Card(
-        modifier = modifier,
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column {
+                Text(
+                    text = "月历",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = "${year}年${month}月 · 今天${day}日",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "点击查看真正月历页",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Icon(
+                imageVector = Icons.Default.CalendarMonth,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary
+            )
+        }
+    }
+}
+
+@Composable
+fun MonthlyOverviewCard(
+    year: Int,
+    month: Int,
+    income: Double,
+    expense: Double,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier.clickable(onClick = onClick),
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
@@ -341,7 +480,7 @@ fun MonthlyOverviewCard(
             Spacer(modifier = Modifier.height(12.dp))
 
             Text(
-                text = "${month}月",
+                text = "${year}年${month}月",
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Bold
             )
@@ -382,10 +521,11 @@ fun MonthlyOverviewCard(
 @Composable
 fun AccountsOverviewCard(
     accounts: List<com.example.aiaccounting.data.local.entity.Account>,
+    onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Card(
-        modifier = modifier,
+        modifier = modifier.clickable(onClick = onClick),
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
@@ -400,41 +540,209 @@ fun AccountsOverviewCard(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            accounts.forEach { account ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 4.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+            if (accounts.isEmpty()) {
+                Text(
+                    text = "暂无账户，点击查看账户列表",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                accounts.forEach { account ->
                     Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // 账户类型图标
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .background(
-                                    Color(android.graphics.Color.parseColor(account.color)),
-                                    RoundedCornerShape(4.dp)
-                                )
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .background(
+                                        Color(android.graphics.Color.parseColor(account.color)),
+                                        RoundedCornerShape(4.dp)
+                                    )
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = account.name,
+                                fontSize = 12.sp,
+                                maxLines = 1
+                            )
+                        }
                         Text(
-                            text = account.name,
+                            text = NumberUtils.formatMoney(account.balance),
                             fontSize = 12.sp,
-                            maxLines = 1
+                            fontWeight = FontWeight.Medium
                         )
                     }
-                    Text(
-                        text = NumberUtils.formatMoney(account.balance),
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium
-                    )
                 }
             }
         }
+    }
+}
+
+@Composable
+fun BudgetOverviewCard(
+    title: String,
+    budgetProgress: BudgetProgress?,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        if (budgetProgress == null) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = title,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "该年度当前月份未设置预算",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "点击进入预算管理后即可查看该年份当月剩余额度",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Icon(
+                    imageVector = Icons.Default.ChevronRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            return@Card
+        }
+
+        val percentage = (budgetProgress.percentage * 100).toInt()
+        val progressColor = when {
+            budgetProgress.isOverBudget -> Color(0xFFF44336)
+            percentage >= 80 -> Color(0xFFFF9800)
+            else -> Color(0xFF4CAF50)
+        }
+
+        Column(
+            modifier = Modifier.padding(16.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = title,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = NumberUtils.formatMoney(budgetProgress.budget.amount),
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                Icon(
+                    imageVector = Icons.Default.ChevronRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                BudgetValuePill(
+                    label = "已用",
+                    value = NumberUtils.formatMoney(budgetProgress.spent),
+                    containerColor = Color(0xFFFFEBEE),
+                    contentColor = Color(0xFFF44336),
+                    modifier = Modifier.weight(1f)
+                )
+                BudgetValuePill(
+                    label = if (budgetProgress.isOverBudget) "超支" else "剩余",
+                    value = NumberUtils.formatMoney(kotlin.math.abs(budgetProgress.remaining)),
+                    containerColor = if (budgetProgress.isOverBudget) Color(0xFFFFF3E0) else Color(0xFFE8F5E9),
+                    contentColor = if (budgetProgress.isOverBudget) Color(0xFFFF9800) else Color(0xFF4CAF50),
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            LinearProgressIndicator(
+                progress = { budgetProgress.percentage },
+                modifier = Modifier.fillMaxWidth(),
+                color = progressColor,
+                trackColor = MaterialTheme.colorScheme.surfaceVariant
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = if (budgetProgress.isOverBudget) {
+                    "本月已超支 ${NumberUtils.formatMoney(kotlin.math.abs(budgetProgress.remaining))} · 已使用 $percentage%"
+                } else {
+                    "本月已使用 $percentage%"
+                },
+                fontSize = 12.sp,
+                color = progressColor,
+                fontWeight = FontWeight.Medium
+            )
+        }
+    }
+}
+
+@Composable
+private fun BudgetValuePill(
+    label: String,
+    value: String,
+    containerColor: Color,
+    contentColor: Color,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(containerColor)
+            .padding(horizontal = 12.dp, vertical = 10.dp)
+    ) {
+        Text(
+            text = label,
+            fontSize = 12.sp,
+            color = Color.Gray
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = value,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold,
+            color = contentColor
+        )
     }
 }
 
@@ -528,10 +836,16 @@ fun TodayWeekStatsCard(
 
 @Composable
 fun YearlyTrendCard(
-    monthlyData: List<com.example.aiaccounting.ui.components.charts.MonthlyData> = emptyList()
+    year: Int,
+    monthlyData: List<com.example.aiaccounting.ui.components.charts.MonthlyData> = emptyList(),
+    onClick: () -> Unit = {},
+    onMonthClick: (Int) -> Unit = {}
 ) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("yearly_trend_card")
+            .clickable(onClick = onClick),
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
@@ -539,7 +853,7 @@ fun YearlyTrendCard(
             modifier = Modifier.padding(16.dp)
         ) {
             Text(
-                text = "${Calendar.getInstance().get(Calendar.YEAR)}年度趋势",
+                text = "${year}年度趋势",
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Medium
             )
@@ -556,7 +870,7 @@ fun YearlyTrendCard(
                     showIncome = true,
                     showExpense = true,
                     onDataPointClick = { selectedData ->
-                        // 点击数据点显示详情
+                        parseTrendMonth(selectedData.month)?.let(onMonthClick)
                     }
                 )
             } else {
@@ -590,6 +904,11 @@ fun YearlyTrendCard(
             }
         }
     }
+}
+
+internal fun parseTrendMonth(label: String): Int? {
+    val month = label.trim().removeSuffix("月").toIntOrNull() ?: return null
+    return month.takeIf { it in 1..12 }
 }
 
 @Composable

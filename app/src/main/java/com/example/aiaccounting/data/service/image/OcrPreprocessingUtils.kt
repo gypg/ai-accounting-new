@@ -55,6 +55,15 @@ internal object OcrPreprocessingUtils {
                             )
                         )
                     }
+                    if (shouldAddScreenshotProfile(baseMetrics)) {
+                        add(
+                            OcrPreprocessedVariant(
+                                profile = OcrPreprocessingProfile.SCREENSHOT,
+                                bitmap = enhanceScreenshotText(normalized),
+                                imageQualityMetrics = baseMetrics
+                            )
+                        )
+                    }
                 }
             }
             variants ?: emptyList()
@@ -123,6 +132,14 @@ internal object OcrPreprocessingUtils {
 
     private fun shouldAddDocumentProfile(metrics: ImageQualityMetrics): Boolean {
         return metrics.contrastRange < 80 || metrics.nearWhiteRatio >= 55 || metrics.averageBrightness >= 150
+    }
+
+    private fun shouldAddScreenshotProfile(metrics: ImageQualityMetrics): Boolean {
+        return metrics.nearWhiteRatio >= 35 && metrics.contrastRange >= 60
+    }
+
+    private fun enhanceScreenshotText(bitmap: Bitmap): Bitmap {
+        return enhanceContrastAndGrayscale(bitmap, 1.45f)
     }
 
     private fun calculateImageQualityMetrics(bitmap: Bitmap): ImageQualityMetrics {

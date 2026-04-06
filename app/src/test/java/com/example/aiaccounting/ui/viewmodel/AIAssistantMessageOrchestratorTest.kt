@@ -268,6 +268,31 @@ class AIAssistantMessageOrchestratorTest {
     }
 
     @Test
+    fun route_prefersRemoteBookkeeping_whenClarificationExists_butMessageLooksLikeCustomAccountBookkeeping() {
+        val route = orchestrator.route(
+            AIAssistantMessageAnalysis(
+                reasoningResult = reasoningResult(
+                    intent = AIReasoningEngine.UserIntent.RECORD_TRANSACTION,
+                    actions = listOf(
+                        AIReasoningEngine.AIAction.RequestClarification("这笔记到哪个账户呢？")
+                    )
+                ),
+                topLevelIntent = AIAssistantTopLevelIntent.BOOKKEEPING,
+                userMessage = "记一笔收入100到私房钱",
+                butlerId = "xiaocainiang",
+                pendingInteractionState = null,
+                engineMode = AIAssistantEngineMode.Remote,
+                hasClarificationAction = true
+            )
+        )
+
+        assertTrue(route is AIAssistantMessageRoute.RemoteRequest)
+        route as AIAssistantMessageRoute.RemoteRequest
+        assertEquals(AIAssistantRemotePromptScenario.Bookkeeping, route.request.promptScenario)
+        assertEquals(AIAssistantRemoteResponseRequirement.ActionEnvelopeRequired, route.request.responseRequirement)
+    }
+
+    @Test
     fun route_returnsRemoteFallback_whenIntentNeedsRemoteAndRemoteAvailable() {
         val route = orchestrator.route(
             reasoningResult = reasoningResult(AIReasoningEngine.UserIntent.RECORD_TRANSACTION),

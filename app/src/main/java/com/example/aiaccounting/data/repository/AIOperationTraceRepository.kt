@@ -25,4 +25,8 @@ class AIOperationTraceRepository @Inject constructor(
     fun getRecentTraces(limit: Int): Flow<List<AIOperationTrace>> {
         return traceDao.getRecentTraces(limit)
     }
+
+    suspend fun clearOldTraces(beforeTimestamp: Long) {
+        traceDao.deleteTracesBefore(beforeTimestamp)
+    }
 }

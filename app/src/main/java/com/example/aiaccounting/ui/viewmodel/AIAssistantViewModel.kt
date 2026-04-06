@@ -20,6 +20,7 @@ import com.example.aiaccounting.data.repository.CategoryRepository
 import com.example.aiaccounting.data.repository.ChatSessionRepository
 import com.example.aiaccounting.data.service.AIService
 import com.example.aiaccounting.data.service.ImageProcessingService
+import com.example.aiaccounting.logging.AppLogLogger
 import com.example.aiaccounting.utils.NetworkUtils
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
@@ -47,7 +48,8 @@ class AIAssistantViewModel @Inject constructor(
     private val butlerRepository: ButlerRepository,
     private val aiReasoningEngine: AIReasoningEngine,
     private val transactionModificationHandler: TransactionModificationHandler,
-    private val actionExecutor: AIAssistantActionExecutor
+    private val actionExecutor: AIAssistantActionExecutor,
+    private val appLogLogger: AppLogLogger
 ) : ViewModel() {
 
     private companion object {
@@ -78,7 +80,8 @@ class AIAssistantViewModel @Inject constructor(
     private val imageMessageHandler = AIAssistantImageMessageHandler(
         aiService = aiService,
         imageProcessingService = imageProcessingService,
-        aiUsageRepository = aiUsageRepository
+        aiUsageRepository = aiUsageRepository,
+        appLogLogger = appLogLogger
     )
     private val remoteResponseInterpreter = AIAssistantRemoteResponseInterpreter()
     private val remoteResponseIntegrityChecker = AIAssistantRemoteResponseIntegrityChecker()
@@ -126,6 +129,11 @@ class AIAssistantViewModel @Inject constructor(
     private var currentAIConfig: AIConfig = AIConfig()
 
     init {
+        appLogLogger.info(
+            source = "AI",
+            category = "screen_enter",
+            message = "进入 AI 助手页"
+        )
         viewModelScope.launch {
             aiConfigRepository.migrateLegacyApiKeyIfNeeded()
         }
@@ -215,6 +223,12 @@ class AIAssistantViewModel @Inject constructor(
                 sessionId = getOrCreateCurrentSession()
 
                 // Save user message to both repositories
+                appLogLogger.info(
+                    source = "AI",
+                    category = "ai_chat",
+                    message = "发送文本消息",
+                    details = "length=${message.length},sessionId=$sessionId"
+                )
                 conversationRepository.addUserMessage(message)
                 chatSessionRepository.addMessage(sessionId, com.example.aiaccounting.data.local.entity.MessageRole.USER, message)
 
@@ -354,9 +368,21 @@ class AIAssistantViewModel @Inject constructor(
             AIAssistantRemoteExecutionResult.IncompleteResponseAfterRetry ->
                 "模型返回了不完整结果，已自动重试一次仍失败。建议：切换模型后重试。$diagnostics"
             is AIAssistantRemoteExecutionResult.QueryBeforeExecutionRequested -> {
+                appLogLogger.info(
+                    source = "AI",
+                    category = "remote_execution_branch",
+                    message = "远端记账进入查询前执行分支",
+                    details = "route=QueryBeforeExecutionRequested,actions=${result.envelope.actions.size},addTransactionActions=${remoteResponseInterpreter.countAddTransactionActions(result.envelope)}"
+                )
                 actionExecutor.executeQueryBeforeExecution(result.envelope)
             }
             is AIAssistantRemoteExecutionResult.ActionExecutionRequested -> {
+                appLogLogger.info(
+                    source = "AI",
+                    category = "remote_execution_branch",
+                    message = "远端记账进入直接执行分支",
+                    details = "route=ActionExecutionRequested,actions=${result.envelope.actions.size},addTransactionActions=${remoteResponseInterpreter.countAddTransactionActions(result.envelope)}"
+                )
                 actionExecutor.executeAIActions(result.envelope)
             }
             is AIAssistantRemoteExecutionResult.TransactionActionMissing -> {
@@ -533,12 +559,40 @@ class AIAssistantViewModel @Inject constructor(
                 )
 
                 val assistantMessage = when (processingResult) {
-                    is ImageMessageProcessingResult.Error -> processingResult.message
-                    is ImageMessageProcessingResult.TextReply -> processingResult.message
+                    is ImageMessageProcessingResult.Error -> {
+                        appLogLogger.info(
+                            source = "AI",
+                            category = "image_flow_branch",
+                            message = "图片消息处理分支",
+                            details = "branch=error,messageLength=${processingResult.message.length}"
+                        )
+                        processingResult.message
+                    }
+                    is ImageMessageProcessingResult.TextReply -> {
+                        appLogLogger.info(
+                            source = "AI",
+                            category = "image_flow_branch",
+                            message = "图片消息处理分支",
+                            details = "branch=text_reply,messageLength=${processingResult.message.length}"
+                        )
+                        processingResult.message
+                    }
                     is ImageMessageProcessingResult.ExecuteEnvelope -> {
+                        appLogLogger.info(
+                            source = "AI",
+                            category = "image_flow_branch",
+                            message = "图片消息处理分支",
+                            details = "branch=execute_envelope,actions=${processingResult.envelope.actions.size},replyLength=${processingResult.envelope.reply.length}"
+                        )
                         actionExecutor.executeQueryBeforeExecution(processingResult.envelope)
                     }
                     is ImageMessageProcessingResult.RemoteBookkeepingPrompt -> {
+                        appLogLogger.info(
+                            source = "AI",
+                            category = "image_flow_branch",
+                            message = "图片消息处理分支",
+                            details = "branch=remote_bookkeeping_prompt,promptLength=${processingResult.prompt.length}"
+                        )
                         processRemoteExecutionRequest(
                             RemoteExecutionRequest(
                                 userMessage = processingResult.prompt,

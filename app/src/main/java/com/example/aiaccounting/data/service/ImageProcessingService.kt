@@ -10,6 +10,7 @@ import com.example.aiaccounting.data.service.image.OcrPreprocessingProfile
 import com.example.aiaccounting.data.service.image.OcrPreprocessingUtils
 import com.example.aiaccounting.data.service.image.OcrResultSelector
 import com.example.aiaccounting.data.service.image.ReceiptTextHeuristics
+import com.example.aiaccounting.logging.AppLogLogger
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.label.ImageLabeling
 import com.google.mlkit.vision.label.defaults.ImageLabelerOptions
@@ -33,7 +34,9 @@ import javax.inject.Singleton
  * 优化版本：并行处理、精简数据、快速响应
  */
 @Singleton
-class ImageProcessingService @Inject constructor() {
+class ImageProcessingService @Inject constructor(
+    private val appLogLogger: AppLogLogger
+) {
 
     enum class OcrConfidence {
         NONE,
@@ -81,21 +84,32 @@ class ImageProcessingService @Inject constructor() {
                 val labels = labelsDeferred.await().take(5)
                 val passSelection = passDeferred.await()
                 if (passSelection == null) {
+                    val fallbackText = runCatching { extractTextFromFile(uri, context) }.getOrDefault("").trim()
+                    val fallbackKeyLines = ReceiptTextHeuristics.extractKeyLines(fallbackText)
+                    val fallbackSignals = ReceiptTextHeuristics.extractReceiptSignals(fallbackText)
+                    val fallbackHasText = fallbackText.isNotBlank() || fallbackKeyLines.isNotEmpty() || fallbackSignals.hasStrongReceiptSignals
+                    appLogLogger.info(
+                        source = "AI",
+                        category = "image_ocr",
+                        message = "图片OCR未选出候选结果",
+                        details = "labels=${labels.size},fallbackTextLength=${fallbackText.length},fallbackKeyLineCount=${fallbackKeyLines.size},fallbackAmountCandidates=${fallbackSignals.amounts.size},fallbackHasText=$fallbackHasText"
+                    )
                     val hasLabelContent = labels.isNotEmpty()
-                    return@withTimeout if (hasLabelContent) {
+                    return@withTimeout if (fallbackHasText || hasLabelContent) {
+                        val promptText = buildPromptText(fallbackKeyLines, fallbackText)
                         ImageAnalysisResult(
-                            rawText = "",
-                            text = "",
-                            keyLines = emptyList(),
+                            rawText = fallbackText,
+                            text = promptText,
+                            keyLines = fallbackKeyLines,
                             labels = labels,
-                            receiptSignals = ReceiptSignals(),
+                            receiptSignals = fallbackSignals,
                             qualityScore = ReceiptTextHeuristics.calculateQualityScore(
-                                rawText = "",
-                                keyLines = emptyList(),
+                                rawText = fallbackText,
+                                keyLines = fallbackKeyLines,
                                 labels = labels,
-                                signals = ReceiptSignals()
+                                signals = fallbackSignals
                             ),
-                            confidence = if (labels.isNotEmpty()) OcrConfidence.LOW else OcrConfidence.NONE,
+                            confidence = if (fallbackHasText) OcrConfidence.LOW else OcrConfidence.NONE,
                             hasContent = true
                         )
                     } else {
@@ -104,6 +118,7 @@ class ImageProcessingService @Inject constructor() {
                 }
 
                 val best = passSelection.best
+                val promptText = buildPromptText(best.keyLines, best.rawText)
                 val finalScore = ReceiptTextHeuristics.calculateQualityScore(
                     rawText = best.rawText,
                     keyLines = best.keyLines,
@@ -113,11 +128,18 @@ class ImageProcessingService @Inject constructor() {
                     agreementLevel = passSelection.agreementLevel
                 )
                 val finalConfidence = ReceiptTextHeuristics.toConfidence(finalScore)
-                val hasContent = best.rawText.isNotBlank() || labels.isNotEmpty()
+                val hasContent = best.rawText.isNotBlank() || best.keyLines.isNotEmpty() || best.receiptSignals.hasStrongReceiptSignals || labels.isNotEmpty()
+
+                appLogLogger.info(
+                    source = "AI",
+                    category = "image_ocr",
+                    message = "图片OCR分析完成",
+                    details = "rawLineCount=${best.rawText.lines().count { it.isNotBlank() }},keyLineCount=${best.keyLines.size},promptLineCount=${promptText.lines().count { it.isNotBlank() }},promptLength=${promptText.length},amountCandidates=${best.receiptSignals.amounts.size},dateCandidates=${best.receiptSignals.dates.size},merchantCandidates=${best.receiptSignals.merchants.size},qualityScore=$finalScore,confidence=${finalConfidence.name}"
+                )
 
                 ImageAnalysisResult(
                     rawText = best.rawText,
-                    text = trimTextForPrompt(best.keyLines, best.rawText),
+                    text = promptText,
                     keyLines = best.keyLines,
                     labels = labels,
                     receiptSignals = best.receiptSignals,
@@ -357,10 +379,11 @@ class ImageProcessingService @Inject constructor() {
                     appendLine("时间候选：${result.receiptSignals.dates.joinToString(", ")}")
                 }
 
-                if (result.keyLines.isNotEmpty()) {
+                if (result.text.isNotBlank()) {
+                    appendLine("识别文字：")
+                    appendLine(result.text)
+                } else if (result.keyLines.isNotEmpty()) {
                     appendLine("关键文字：${result.keyLines.joinToString(" | ")}")
-                } else if (result.text.isNotBlank()) {
-                    appendLine("文字：${result.text}")
                 }
 
                 if (!result.hasContent) {
@@ -376,19 +399,44 @@ class ImageProcessingService @Inject constructor() {
                 appendLine()
             }
 
+            appendLine("如果图片是多笔账单或流水，请尽量逐条提取每一笔交易，不要只总结前几笔。")
             appendLine("请优先依据高置信度图片内容进行分析；如果字段不完整，请明确说明不确定项。如果是账单，请提取金额、类型、类别、备注。")
         }
     }
 
     private fun trimTextForPrompt(keyLines: List<String>, rawText: String): String {
-        val preferredText = keyLines.joinToString("\n").trim()
-        val baseText = if (preferredText.isNotBlank()) preferredText else rawText.trim()
-        if (baseText.isBlank()) return ""
-        return if (baseText.length > 500) {
-            baseText.take(500) + "..."
+        return buildPromptText(keyLines, rawText)
+    }
+
+    private fun buildPromptText(keyLines: List<String>, rawText: String): String {
+        val sanitizedKeyLines = keyLines.map { it.trim() }.filter { it.isNotBlank() }
+        val sanitizedRawLines = rawText.lines().map { it.trim() }.filter { it.isNotBlank() }
+        if (sanitizedKeyLines.isEmpty() && sanitizedRawLines.isEmpty()) return ""
+
+        val chosenLines = if (sanitizedKeyLines.size >= sanitizedRawLines.size / 2 && sanitizedKeyLines.isNotEmpty()) {
+            mergeReceiptCoverageLines(sanitizedKeyLines)
         } else {
-            baseText
+            mergeReceiptCoverageLines(sanitizedRawLines)
         }
+
+        val joined = chosenLines.joinToString("\n").trim()
+        return if (joined.length > 1800) {
+            joined.take(1800) + "..."
+        } else {
+            joined
+        }
+    }
+
+    private fun mergeReceiptCoverageLines(lines: List<String>): List<String> {
+        if (lines.isEmpty()) return emptyList()
+        if (lines.size <= 18) return lines.distinct()
+
+        val header = lines.take(4)
+        val tail = lines.takeLast(4)
+        val middle = lines.drop(4).dropLast(4)
+        val sampledMiddle = middle.filterIndexed { index, _ -> index % 2 == 0 }.take(12)
+
+        return (header + sampledMiddle + tail).distinct()
     }
 
     private fun describeConfidence(confidence: OcrConfidence): String {
@@ -413,6 +461,7 @@ class ImageProcessingService @Inject constructor() {
             OcrPreprocessingProfile.BASE -> "基础增强"
             OcrPreprocessingProfile.DETAIL -> "细节增强"
             OcrPreprocessingProfile.DOCUMENT -> "文档增强"
+            OcrPreprocessingProfile.SCREENSHOT -> "截图增强"
         }
     }
 

@@ -38,6 +38,8 @@ private val ExpenseLineColor = Color(0xFF40C4FF) // 支出线
 fun MonthlyTrendChartEnhanced(
     monthlyData: List<MonthlyChartData>,
     chartType: Int, // 0: 线图, 1: 柱状图
+    showIncome: Boolean = true,
+    showExpense: Boolean = true,
     onDataPointClick: (String, Double, Double) -> Unit = { _, _, _ -> }
 ) {
     // 确保有12个月的数据（支持 "1月" 或 "01月" 格式）
@@ -55,7 +57,12 @@ fun MonthlyTrendChartEnhanced(
     }
 
     // 计算Y轴最大值（向上取整到合适的刻度）
-    val maxDataValue = completeData.maxOf { maxOf(it.income, it.expense) }
+    val maxDataValue = completeData.maxOf {
+        maxOf(
+            if (showIncome) it.income else 0.0,
+            if (showExpense) it.expense else 0.0
+        )
+    }
     val maxValue = calculateNiceMaxValue(maxDataValue)
 
     var selectedIndex by remember { mutableStateOf<Int?>(null) }
@@ -67,7 +74,11 @@ fun MonthlyTrendChartEnhanced(
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
-                text = "月度收支趋势（12个月）",
+                text = when {
+                    showIncome && showExpense -> "月度收支趋势（12个月）"
+                    showIncome -> "月度收入趋势（12个月）"
+                    else -> "月度支出趋势（12个月）"
+                },
                 color = HorseTheme2026Colors.TextPrimary,
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Bold
@@ -83,7 +94,13 @@ fun MonthlyTrendChartEnhanced(
                 // 图表
                 Box(modifier = Modifier.weight(1f)) {
                     if (chartType == 0) {
-                        MonthlyLineChartWithYAxis(completeData, maxValue, selectedIndex) { index ->
+                        MonthlyLineChartWithYAxis(
+                            data = completeData,
+                            maxValue = maxValue,
+                            selectedIndex = selectedIndex,
+                            showIncome = showIncome,
+                            showExpense = showExpense
+                        ) { index ->
                             if (index < 0) {
                                 selectedIndex = null
                             } else {
@@ -93,7 +110,13 @@ fun MonthlyTrendChartEnhanced(
                             }
                         }
                     } else {
-                        MonthlyBarChartWithYAxis(completeData, maxValue, selectedIndex) { index ->
+                        MonthlyBarChartWithYAxis(
+                            data = completeData,
+                            maxValue = maxValue,
+                            selectedIndex = selectedIndex,
+                            showIncome = showIncome,
+                            showExpense = showExpense
+                        ) { index ->
                             if (index < 0) {
                                 selectedIndex = null
                             } else {
@@ -109,7 +132,7 @@ fun MonthlyTrendChartEnhanced(
             Spacer(modifier = Modifier.height(12.dp))
 
             // 图例
-            ChartLegend()
+            ChartLegend(showIncome = showIncome, showExpense = showExpense)
             
             // 显示选中的数值
             if (selectedIndex != null) {
@@ -181,6 +204,8 @@ private fun MonthlyLineChartWithYAxis(
     data: List<MonthlyChartData>,
     maxValue: Double,
     selectedIndex: Int?,
+    showIncome: Boolean,
+    showExpense: Boolean,
     onPointClick: (Int) -> Unit
 ) {
     Box(
@@ -223,32 +248,40 @@ private fun MonthlyLineChartWithYAxis(
                     }
 
                     // 绘制收入线
-                    val incomePath = Path().apply {
-                        points.forEachIndexed { i, triple ->
-                            val offset = triple.second
-                            if (i == 0) moveTo(offset.x, offset.y) else lineTo(offset.x, offset.y)
+                    if (showIncome) {
+                        val incomePath = Path().apply {
+                            points.forEachIndexed { i, triple ->
+                                val offset = triple.second
+                                if (i == 0) moveTo(offset.x, offset.y) else lineTo(offset.x, offset.y)
+                            }
                         }
+                        drawPath(path = incomePath, color = IncomeLineColor, style = Stroke(width = 3f))
                     }
-                    drawPath(path = incomePath, color = IncomeLineColor, style = Stroke(width = 3f))
 
                     // 绘制支出线
-                    val expensePath = Path().apply {
-                        points.forEachIndexed { i, triple ->
-                            val offset = triple.third
-                            if (i == 0) moveTo(offset.x, offset.y) else lineTo(offset.x, offset.y)
+                    if (showExpense) {
+                        val expensePath = Path().apply {
+                            points.forEachIndexed { i, triple ->
+                                val offset = triple.third
+                                if (i == 0) moveTo(offset.x, offset.y) else lineTo(offset.x, offset.y)
+                            }
                         }
+                        drawPath(path = expensePath, color = ExpenseLineColor, style = Stroke(width = 3f))
                     }
-                    drawPath(path = expensePath, color = ExpenseLineColor, style = Stroke(width = 3f))
 
                     // 绘制数据点
                     points.forEach { (index, incomeOffset, expenseOffset) ->
                         val isSelected = selectedIndex == index
                         val radius = if (isSelected) 8f else 5f
 
-                        drawCircle(color = Color.White, radius = radius + 2, center = incomeOffset)
-                        drawCircle(color = IncomeColor, radius = radius, center = incomeOffset)
-                        drawCircle(color = Color.White, radius = radius + 2, center = expenseOffset)
-                        drawCircle(color = ExpenseColor, radius = radius, center = expenseOffset)
+                        if (showIncome) {
+                            drawCircle(color = Color.White, radius = radius + 2, center = incomeOffset)
+                            drawCircle(color = IncomeColor, radius = radius, center = incomeOffset)
+                        }
+                        if (showExpense) {
+                            drawCircle(color = Color.White, radius = radius + 2, center = expenseOffset)
+                            drawCircle(color = ExpenseColor, radius = radius, center = expenseOffset)
+                        }
                     }
                 }
                 
@@ -297,6 +330,8 @@ private fun MonthlyBarChartWithYAxis(
     data: List<MonthlyChartData>,
     maxValue: Double,
     selectedIndex: Int?,
+    showIncome: Boolean,
+    showExpense: Boolean,
     onBarClick: (Int) -> Unit
 ) {
     Column {
@@ -319,39 +354,43 @@ private fun MonthlyBarChartWithYAxis(
                         .width(28.dp)
                         .clickable { onBarClick(index) }
                 ) {
-                    // 收入柱（绿色，在上方）
-                    Box(
-                        modifier = Modifier
-                            .width(12.dp)
-                            .height(incomeHeight)
-                            .background(
-                                if (isSelected) IncomeColor else IncomeColor.copy(alpha = 0.8f),
-                                RoundedCornerShape(2.dp)
-                            )
-                            .border(
-                                width = if (isSelected) 2.dp else 0.dp,
-                                color = Color.White,
-                                shape = RoundedCornerShape(2.dp)
-                            )
-                    )
+                    if (showIncome) {
+                        Box(
+                            modifier = Modifier
+                                .width(12.dp)
+                                .height(incomeHeight)
+                                .background(
+                                    if (isSelected) IncomeColor else IncomeColor.copy(alpha = 0.8f),
+                                    RoundedCornerShape(2.dp)
+                                )
+                                .border(
+                                    width = if (isSelected) 2.dp else 0.dp,
+                                    color = Color.White,
+                                    shape = RoundedCornerShape(2.dp)
+                                )
+                        )
+                    }
 
-                    Spacer(modifier = Modifier.height(2.dp))
+                    if (showIncome && showExpense) {
+                        Spacer(modifier = Modifier.height(2.dp))
+                    }
 
-                    // 支出柱（蓝色，在下方）
-                    Box(
-                        modifier = Modifier
-                            .width(12.dp)
-                            .height(expenseHeight)
-                            .background(
-                                if (isSelected) ExpenseColor else ExpenseColor.copy(alpha = 0.8f),
-                                RoundedCornerShape(2.dp)
-                            )
-                            .border(
-                                width = if (isSelected) 2.dp else 0.dp,
-                                color = Color.White,
-                                shape = RoundedCornerShape(2.dp)
-                            )
-                    )
+                    if (showExpense) {
+                        Box(
+                            modifier = Modifier
+                                .width(12.dp)
+                                .height(expenseHeight)
+                                .background(
+                                    if (isSelected) ExpenseColor else ExpenseColor.copy(alpha = 0.8f),
+                                    RoundedCornerShape(2.dp)
+                                )
+                                .border(
+                                    width = if (isSelected) 2.dp else 0.dp,
+                                    color = Color.White,
+                                    shape = RoundedCornerShape(2.dp)
+                                )
+                        )
+                    }
                 }
             }
         }
@@ -831,21 +870,30 @@ private fun SelectedDataDisplay(label: String, income: Double, expense: Double) 
  * 图例
  */
 @Composable
-private fun ChartLegend() {
+private fun ChartLegend(
+    showIncome: Boolean = true,
+    showExpense: Boolean = true
+) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.Center
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(modifier = Modifier.size(12.dp).background(IncomeColor, CircleShape))
-            Spacer(modifier = Modifier.width(4.dp))
-            Text("收入", color = HorseTheme2026Colors.TextPrimary, fontSize = 12.sp)
+        if (showIncome) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(modifier = Modifier.size(12.dp).background(IncomeColor, CircleShape))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("收入", color = HorseTheme2026Colors.TextPrimary, fontSize = 12.sp)
+            }
         }
-        Spacer(modifier = Modifier.width(24.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(modifier = Modifier.size(12.dp).background(ExpenseColor, CircleShape))
-            Spacer(modifier = Modifier.width(4.dp))
-            Text("支出", color = HorseTheme2026Colors.TextPrimary, fontSize = 12.sp)
+        if (showIncome && showExpense) {
+            Spacer(modifier = Modifier.width(24.dp))
+        }
+        if (showExpense) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(modifier = Modifier.size(12.dp).background(ExpenseColor, CircleShape))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("支出", color = HorseTheme2026Colors.TextPrimary, fontSize = 12.sp)
+            }
         }
     }
 }

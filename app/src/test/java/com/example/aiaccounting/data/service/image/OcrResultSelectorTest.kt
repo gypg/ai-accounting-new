@@ -72,4 +72,35 @@ class OcrResultSelectorTest {
         assertEquals(OcrAgreementLevel.STRONG, selection.agreementLevel)
         assertEquals(OcrPreprocessingProfile.DETAIL, selection.best.profile)
     }
+
+    @Test
+    fun selectBestCandidate_canPreferScreenshotProfileForReceiptScreenshot() {
+        val documentCandidate = OcrPassAnalysis(
+            profile = OcrPreprocessingProfile.DOCUMENT,
+            rawText = "2026年4月1日\n-6.00 餐饮\n-38.00 餐饮",
+            keyLines = listOf("2026年4月1日", "-6.00 餐饮", "-38.00 餐饮"),
+            receiptSignals = ImageProcessingService.ReceiptSignals(amounts = listOf("6.00", "38.00")),
+            qualityScore = 82,
+            confidence = ImageProcessingService.OcrConfidence.HIGH,
+            imageQualityMetrics = ImageQualityMetrics(width = 1280, height = 720)
+        )
+        val screenshotCandidate = OcrPassAnalysis(
+            profile = OcrPreprocessingProfile.SCREENSHOT,
+            rawText = "2026年4月1日\n-6.00 餐饮（早餐：煎饼果子）——现金\n-38.00 餐饮（午餐：日式定食）——微信\n-9.90 购物（淘宝：愚人节整蛊玩具）——支付宝",
+            keyLines = listOf(
+                "2026年4月1日",
+                "-6.00 餐饮（早餐：煎饼果子）——现金",
+                "-38.00 餐饮（午餐：日式定食）——微信",
+                "-9.90 购物（淘宝：愚人节整蛊玩具）——支付宝"
+            ),
+            receiptSignals = ImageProcessingService.ReceiptSignals(amounts = listOf("6.00", "38.00", "9.90")),
+            qualityScore = 92,
+            confidence = ImageProcessingService.OcrConfidence.HIGH,
+            imageQualityMetrics = ImageQualityMetrics(width = 1280, height = 720)
+        )
+
+        val selection = OcrResultSelector.selectBestCandidate(listOf(documentCandidate, screenshotCandidate))
+
+        assertEquals(OcrPreprocessingProfile.SCREENSHOT, selection.best.profile)
+    }
 }

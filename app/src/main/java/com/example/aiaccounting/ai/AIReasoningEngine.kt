@@ -576,37 +576,39 @@ class AIReasoningEngine @Inject constructor(
             )
         }
 
+        val type = when {
+            message.contains("收入") || message.contains("收到") || message.contains("工资") ||
+            message.contains("奖金") || message.contains("赚") -> TransactionType.INCOME
+            message.contains("转账") -> TransactionType.TRANSFER
+            else -> TransactionType.EXPENSE
+        }
+
+        val accountHint = inferAccount(message)
+        val canDeferDateResolutionToRemote = type != TransactionType.TRANSFER
+        val canDeferAccountResolutionToRemote = type != TransactionType.TRANSFER && accountHint != null
+
         if (requiresTransactionCategoryClarification(message)) {
             return listOf(
                 AIAction.RequestClarification("这笔记到哪个分类呢？比如餐饮、交通或购物。")
             )
         }
 
-        if (requiresTransactionDateClarification(message)) {
+        if (requiresTransactionDateClarification(message) && !canDeferDateResolutionToRemote) {
             return listOf(
                 AIAction.RequestClarification("这笔是哪天发生的呢？比如今天、昨天或 3 月 15 日。")
             )
         }
 
-        if (requiresTransactionAccountClarification(message)) {
+        if (requiresTransactionAccountClarification(message) && !canDeferAccountResolutionToRemote) {
             return listOf(
                 AIAction.RequestClarification("这笔记到哪个账户呢？比如现金、微信、支付宝或银行卡。")
             )
         }
 
-        // 判断交易类型
-        val type = when {
-            message.contains("收入") || message.contains("收到") || message.contains("工资") || 
-            message.contains("奖金") || message.contains("赚") -> TransactionType.INCOME
-            message.contains("转账") -> TransactionType.TRANSFER
-            else -> TransactionType.EXPENSE
-        }
-        
         // 智能推断分类
         val categoryHint = categoryInferrer.inferCategory(message, type)
-        
+
         // 智能推断账户
-        val accountHint = inferAccount(message)
 
         // 如果是转账，推断目标账户
         val targetAccountHint: String? = if (type == TransactionType.TRANSFER) {

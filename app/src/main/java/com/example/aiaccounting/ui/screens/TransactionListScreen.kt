@@ -13,6 +13,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -26,6 +27,7 @@ import com.example.aiaccounting.data.local.entity.Transaction
 import com.example.aiaccounting.data.local.entity.TransactionType
 import com.example.aiaccounting.ui.viewmodel.TransactionListViewModel
 import com.example.aiaccounting.ui.theme.LocalIsDreamyTheme
+import com.example.aiaccounting.ui.theme.LocalUiScale
 import com.example.aiaccounting.ui.components.GlassCard
 import com.example.aiaccounting.utils.DateUtils
 import com.example.aiaccounting.utils.NumberUtils
@@ -40,6 +42,9 @@ fun TransactionListScreen(
     onNavigateToAddTransaction: () -> Unit,
     onNavigateToExport: () -> Unit,
     onNavigateToEditTransaction: (Long) -> Unit = {},
+    initialYear: Int? = null,
+    initialMonth: Int? = null,
+    initialDay: Int? = null,
     viewModel: TransactionListViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -48,6 +53,28 @@ fun TransactionListScreen(
     var showFilterPanel by remember { mutableStateOf(false) }
 
     val isDreamyTheme = LocalIsDreamyTheme.current
+    val uiScale = LocalUiScale.current
+    val cardScale = uiScale.cardScale
+    val fontScale = uiScale.fontScale
+
+    LaunchedEffect(initialYear, initialMonth) {
+        if (initialYear != null && initialMonth != null) {
+            viewModel.setYearMonth(initialYear, initialMonth)
+        }
+    }
+
+    LaunchedEffect(initialYear, initialMonth, initialDay) {
+        if (initialYear != null && initialMonth != null) {
+            viewModel.selectDate(initialDay)
+        }
+    }
+
+    LaunchedEffect(isDreamyTheme) {
+        viewModel.logTransactionScreenEnter(
+            theme = if (isDreamyTheme) "dreamy" else "default",
+            selectedView = "list"
+        )
+    }
 
 
     Scaffold(
@@ -60,7 +87,7 @@ fun TransactionListScreen(
                     ) {
                         Text(
                             text = "明细",
-                            fontSize = 20.sp,
+                            fontSize = (20 * fontScale).sp,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.primary
                         )
@@ -89,6 +116,7 @@ fun TransactionListScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .padding(horizontal = (12 * cardScale).dp)
         ) {
             // 月份选择器和统计
             MonthSelectorCard(
@@ -97,7 +125,9 @@ fun TransactionListScreen(
                 income = monthlyStats.income,
                 expense = monthlyStats.expense,
                 onPrevMonth = { viewModel.prevMonth() },
-                onNextMonth = { viewModel.nextMonth() }
+                onNextMonth = { viewModel.nextMonth() },
+                cardScale = cardScale,
+                fontScale = fontScale
             )
 
             // 筛选面板
@@ -109,7 +139,8 @@ fun TransactionListScreen(
                     onSourceFilterChanged = { viewModel.setSourceFilter(it) },
                     sortBy = uiState.sortBy,
                     onSortByChanged = { viewModel.setSortBy(it) },
-                    onExportClick = onNavigateToExport
+                    onExportClick = onNavigateToExport,
+                    cardScale = cardScale
                 )
             }
 
@@ -143,7 +174,8 @@ fun TransactionListScreen(
                         TransactionItem(
                             transaction = transaction,
                             categoryName = viewModel.getCategoryName(transaction.categoryId),
-                            onClick = { onNavigateToEditTransaction(transaction.id) }
+                            onClick = { onNavigateToEditTransaction(transaction.id) },
+                            cardScale = cardScale
                         )
                     }
                 }
@@ -159,7 +191,9 @@ fun MonthSelectorCard(
     income: Double,
     expense: Double,
     onPrevMonth: () -> Unit,
-    onNextMonth: () -> Unit
+    onNextMonth: () -> Unit,
+    cardScale: Float = 1f,
+    fontScale: Float = 1f
 ) {
     val isDreamyTheme = LocalIsDreamyTheme.current
 
@@ -168,10 +202,10 @@ fun MonthSelectorCard(
         GlassCard(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp)
+                .padding((16 * cardScale).dp)
         ) {
             Column(
-                modifier = Modifier.padding(16.dp)
+                modifier = Modifier.padding((16 * cardScale).dp)
             ) {
                 // 月份选择
                 Row(
@@ -188,7 +222,7 @@ fun MonthSelectorCard(
                     }
                     Text(
                         text = "${year}年${month}月",
-                        fontSize = 18.sp,
+                        fontSize = (18 * fontScale).sp,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface
                     )
@@ -256,12 +290,12 @@ fun MonthSelectorCard(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(16.dp),
+            .padding((16 * cardScale).dp),
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary)
     ) {
         Column(
-            modifier = Modifier.padding(16.dp)
+            modifier = Modifier.padding((16 * cardScale).dp)
         ) {
             // 月份选择
             Row(
@@ -278,7 +312,7 @@ fun MonthSelectorCard(
                 }
                 Text(
                     text = "${year}年${month}月",
-                    fontSize = 18.sp,
+                    fontSize = (18 * fontScale).sp,
                     fontWeight = FontWeight.Bold,
                     color = Color.White
                 )
@@ -350,7 +384,8 @@ fun FilterPanel(
     onSourceFilterChanged: (String) -> Unit,
     sortBy: String,
     onSortByChanged: (String) -> Unit,
-    onExportClick: () -> Unit
+    onExportClick: () -> Unit,
+    cardScale: Float = 1f
 ) {
     val isDreamyTheme = LocalIsDreamyTheme.current
 
@@ -361,7 +396,7 @@ fun FilterPanel(
 
     val content: @Composable ColumnScope.() -> Unit = {
         Column(
-            modifier = Modifier.padding(16.dp)
+            modifier = Modifier.padding((16 * cardScale).dp)
         ) {
             // 类型筛选
             Text(
@@ -472,7 +507,8 @@ fun FilterPanel(
 fun TransactionItem(
     transaction: Transaction,
     categoryName: String,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    cardScale: Float = 1f
 ) {
     Card(
         modifier = Modifier
@@ -484,7 +520,7 @@ fun TransactionItem(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
+                .padding((16 * cardScale).dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -554,22 +590,33 @@ fun TransactionItem(
 
 @Composable
 fun TransactionSourceBadge(sourceType: String) {
-    val (label, color) = when (sourceType) {
-        "AI_REMOTE" -> "AI云端" to MaterialTheme.colorScheme.primary
-        "AI_LOCAL" -> "AI本地" to Color(0xFF7B61FF)
-        else -> return
-    }
+    val badgeLabel = transactionSourceBadgeLabel(sourceType)
 
-    Surface(
-        shape = RoundedCornerShape(999.dp),
-        color = color.copy(alpha = 0.12f)
-    ) {
-        Text(
-            text = label,
-            fontSize = 10.sp,
-            color = color,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-        )
+    if (badgeLabel != null) {
+        val color = when (sourceType) {
+            "AI_REMOTE" -> MaterialTheme.colorScheme.primary
+            "AI_LOCAL" -> Color(0xFF7B61FF)
+            else -> Color.Transparent
+        }
+        Surface(
+            shape = RoundedCornerShape(999.dp),
+            color = color.copy(alpha = 0.12f)
+        ) {
+            Text(
+                text = badgeLabel,
+                fontSize = 10.sp,
+                color = color,
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+            )
+        }
+    }
+}
+
+internal fun transactionSourceBadgeLabel(sourceType: String): String? {
+    return when (sourceType) {
+        "AI_REMOTE" -> "AI云端"
+        "AI_LOCAL" -> "AI本地"
+        else -> null
     }
 }
 

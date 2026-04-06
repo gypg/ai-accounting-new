@@ -6,6 +6,7 @@ import com.example.aiaccounting.data.local.entity.Budget
 import com.example.aiaccounting.data.local.entity.BudgetProgress
 import com.example.aiaccounting.data.repository.BudgetRepository
 import com.example.aiaccounting.data.repository.CategoryRepository
+import com.example.aiaccounting.logging.AppLogLogger
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
@@ -20,7 +21,8 @@ import javax.inject.Inject
 @HiltViewModel
 class BudgetViewModel @Inject constructor(
   private val budgetRepository: BudgetRepository,
-  private val categoryRepository: CategoryRepository
+  private val categoryRepository: CategoryRepository,
+  private val appLogLogger: AppLogLogger
 ) : ViewModel() {
 
   private val calendar = Calendar.getInstance()
@@ -29,6 +31,9 @@ class BudgetViewModel @Inject constructor(
 
   val currentYear: StateFlow<Int> = _currentYear.asStateFlow()
   val currentMonth: StateFlow<Int> = _currentMonth.asStateFlow()
+
+  val availableBudgetMonths: StateFlow<List<Pair<Int, Int>>> = budgetRepository.getAvailableBudgetMonths()
+    .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
   // 预算列表
   val budgets: StateFlow<List<BudgetProgress>> = combine(
@@ -39,7 +44,14 @@ class BudgetViewModel @Inject constructor(
   }.flatMapLatest { it }
     .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-  // 总预算进度
+  // 年度总预算进度
+  val yearlyTotalBudget: StateFlow<BudgetProgress?> = _currentYear
+    .flatMapLatest { year ->
+      budgetRepository.getYearlyTotalBudgetProgress(year)
+    }
+    .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+  // 月度总预算进度
   val totalBudget: StateFlow<BudgetProgress?> = combine(
     _currentYear,
     _currentMonth
@@ -71,10 +83,45 @@ class BudgetViewModel @Inject constructor(
   fun setYearMonth(year: Int, month: Int) {
     _currentYear.value = year
     _currentMonth.value = month
+    appLogLogger.info(
+      source = "UI",
+      category = "budget_month_change",
+      message = "切换预算月份",
+      details = "year=$year,month=$month"
+    )
   }
 
   /**
-   * 创建总预算
+   * 创建年度总预算
+   */
+  fun createYearlyTotalBudget(amount: Double, alertThreshold: Double = 0.8) {
+    viewModelScope.launch {
+      try {
+        val budget = Budget(
+          name = "${_currentYear.value}年总预算",
+          amount = amount,
+          categoryId = null,
+          period = com.example.aiaccounting.data.local.entity.BudgetPeriod.YEARLY,
+          year = _currentYear.value,
+          month = null,
+          alertThreshold = alertThreshold
+        )
+        budgetRepository.insertBudget(budget)
+        _uiState.update { it.copy(
+          message = "年度总预算创建成功",
+          isSuccess = true
+        ) }
+      } catch (e: Exception) {
+        _uiState.update { it.copy(
+          message = "创建失败: ${e.message}",
+          isSuccess = false
+        ) }
+      }
+    }
+  }
+
+  /**
+   * 创建月度总预算
    */
   fun createTotalBudget(amount: Double, alertThreshold: Double = 0.8) {
     viewModelScope.launch {
@@ -181,6 +228,51 @@ class BudgetViewModel @Inject constructor(
    */
   fun clearMessage() {
     _uiState.update { it.copy(message = null) }
+  }
+
+  fun logBudgetScreenEnter(year: Int, month: Int, budgetCount: Int, hasTotalBudget: Boolean) {
+    appLogLogger.info(
+      source = "UI",
+      category = "screen_enter",
+      message = "进入预算管理页",
+      details = "screen=Budgets,year=$year,month=$month,budgets=$budgetCount,hasTotalBudget=$hasTotalBudget"
+    )
+  }
+
+  fun logBudgetEditRequested(year: Int, month: Int, currentAmount: Double) {
+    appLogLogger.info(
+      source = "UI",
+      category = "budget_edit_request",
+      message = "打开预算修改弹窗",
+      details = "year=$year,month=$month,currentAmount=$currentAmount"
+    )
+  }
+
+  fun logBudgetDeleteRequested(year: Int, month: Int, currentAmount: Double) {
+    appLogLogger.info(
+      source = "UI",
+      category = "budget_delete_request",
+      message = "打开预算删除确认",
+      details = "year=$year,month=$month,currentAmount=$currentAmount"
+    )
+  }
+
+  fun logYearlyBudgetLoaded(year: Int, hasBudget: Boolean, amount: Double?) {
+    appLogLogger.debug(
+      source = "UI",
+      category = "budget_yearly_load",
+      message = "年度预算数据刷新",
+      details = "year=$year,hasBudget=$hasBudget,amount=$amount"
+    )
+  }
+
+  fun logMonthlyBudgetLoaded(year: Int, month: Int, hasBudget: Boolean, amount: Double?) {
+    appLogLogger.debug(
+      source = "UI",
+      category = "budget_monthly_load",
+      message = "月度预算数据刷新",
+      details = "year=$year,month=$month,hasBudget=$hasBudget,amount=$amount"
+    )
   }
 }
 

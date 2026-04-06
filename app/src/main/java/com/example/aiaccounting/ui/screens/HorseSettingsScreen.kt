@@ -39,6 +39,7 @@ fun HorseSettingsScreen(
     onNavigateToTemplates: () -> Unit = {},
     onNavigateToImport: () -> Unit = {},
     onNavigateToAISettings: () -> Unit = {},
+    onNavigateToLogBrowser: () -> Unit = {},
     onNavigateToBudgets: () -> Unit = {},
     onNavigateToSetupPin: () -> Unit = {},
     onLogout: () -> Unit = {},
@@ -100,9 +101,10 @@ fun HorseSettingsScreen(
                         Triple("记账模板", Icons.Default.Bookmark, onNavigateToTemplates),
                         Triple("账单导入", Icons.Default.FileUpload, onNavigateToImport),
                         Triple("AI助手设置", Icons.Default.SmartToy, onNavigateToAISettings),
+                        Triple("平台日志", Icons.Default.Article, onNavigateToLogBrowser),
                         Triple("预算管理", Icons.Default.AccountBalanceWallet, onNavigateToBudgets),
                         Triple("生物识别解锁", Icons.Default.Fingerprint) {
-                            // Toggle biometric
+                            viewModel.toggleBiometric(!uiState.isBiometricEnabled)
                         },
                         Triple("主题", Icons.Default.Palette) {
                             showThemeDialog = true
@@ -113,69 +115,26 @@ fun HorseSettingsScreen(
                         Triple("AI管家", Icons.Default.Settings, onNavigateToButlerSettings)
                     )
 
-                    // 第一行
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        settingsItems.take(3).forEach { (title, icon, onClick) ->
-                            SettingsGridButton(
-                                icon = icon,
-                                title = title,
-                                onClick = onClick,
-                                modifier = Modifier.weight(1f)
-                            )
+                    settingsItems.chunked(3).forEachIndexed { index, rowItems ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            rowItems.forEach { (title, icon, onClick) ->
+                                SettingsGridButton(
+                                    icon = icon,
+                                    title = title,
+                                    onClick = onClick,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                            repeat(3 - rowItems.size) {
+                                Spacer(modifier = Modifier.weight(1f))
+                            }
                         }
-                    }
 
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    // 第二行
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        settingsItems.drop(3).take(3).forEach { (title, icon, onClick) ->
-                            SettingsGridButton(
-                                icon = icon,
-                                title = title,
-                                onClick = onClick,
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    // 第三行
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        settingsItems.drop(6).take(3).forEach { (title, icon, onClick) ->
-                            SettingsGridButton(
-                                icon = icon,
-                                title = title,
-                                onClick = onClick,
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    // 第四行
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        settingsItems.drop(9).take(3).forEach { (title, icon, onClick) ->
-                            SettingsGridButton(
-                                icon = icon,
-                                title = title,
-                                onClick = onClick,
-                                modifier = Modifier.weight(1f)
-                            )
+                        if (index != settingsItems.chunked(3).lastIndex) {
+                            Spacer(modifier = Modifier.height(12.dp))
                         }
                     }
 
@@ -205,11 +164,9 @@ fun HorseSettingsScreen(
                     HorseUiScaleDialog(
                         uiScale = uiScale,
                         onDismiss = { showUiScaleDialog = false },
-                        onConfirm = { overviewScale, statisticsScale, transactionScale, settingsScale, fontScale ->
-                            appStateManager.setOverviewScale(overviewScale)
-                            appStateManager.setStatisticsScale(statisticsScale)
-                            appStateManager.setTransactionScale(transactionScale)
-                            appStateManager.setSettingsScale(settingsScale)
+                        onConfirm = { cardScale, fontScale ->
+                            viewModel.logUiScaleChanged(cardScale, fontScale)
+                            appStateManager.setCardScale(cardScale)
                             appStateManager.setFontScale(fontScale)
                             showUiScaleDialog = false
                             onUiScaleChanged()
@@ -340,12 +297,9 @@ fun HorseThemeSelectionDialog(
 fun HorseUiScaleDialog(
     uiScale: com.example.aiaccounting.data.local.prefs.UiScalePreferences,
     onDismiss: () -> Unit,
-    onConfirm: (Float, Float, Float, Float, Float) -> Unit
+    onConfirm: (Float, Float) -> Unit
 ) {
-    var localOverviewScale by remember { mutableFloatStateOf(uiScale.overviewScale) }
-    var localStatisticsScale by remember { mutableFloatStateOf(uiScale.statisticsScale) }
-    var localTransactionScale by remember { mutableFloatStateOf(uiScale.transactionScale) }
-    var localSettingsScale by remember { mutableFloatStateOf(uiScale.settingsScale) }
+    var localCardScale by remember { mutableFloatStateOf(uiScale.cardScale) }
     var localFontScale by remember { mutableFloatStateOf(uiScale.fontScale) }
 
     AlertDialog(
@@ -361,33 +315,27 @@ fun HorseUiScaleDialog(
         text = {
             Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
                 Text(
-                    "调整各项界面的显示大小（${(localOverviewScale * 100).toInt()}%）",
+                    "调整卡片大小与全局字体（${(localCardScale * 100).toInt()}%）",
                     fontSize = 12.sp,
                     color = HorseTheme2026Colors.TextSecondary
                 )
                 Spacer(modifier = Modifier.height(16.dp))
 
-                HorseScaleSliderItem("总览界面", localOverviewScale) { localOverviewScale = it }
-                HorseScaleSliderItem("统计界面", localStatisticsScale) { localStatisticsScale = it }
-                HorseScaleSliderItem("交易明细", localTransactionScale) { localTransactionScale = it }
-                HorseScaleSliderItem("设置界面", localSettingsScale) { localSettingsScale = it }
+                HorseScaleSliderItem("卡片大小", localCardScale) { localCardScale = it }
                 HorseScaleSliderItem("全局字体", localFontScale) { localFontScale = it }
             }
         },
         confirmButton = {
             Row {
                 TextButton(onClick = {
-                    localOverviewScale = 1.0f
-                    localStatisticsScale = 1.0f
-                    localTransactionScale = 1.0f
-                    localSettingsScale = 1.0f
+                    localCardScale = 1.0f
                     localFontScale = 1.0f
                 }) {
                     Text("重置", color = HorseTheme2026Colors.TextSecondary)
                 }
                 Spacer(modifier = Modifier.width(8.dp))
                 TextButton(onClick = {
-                    onConfirm(localOverviewScale, localStatisticsScale, localTransactionScale, localSettingsScale, localFontScale)
+                    onConfirm(localCardScale, localFontScale)
                 }) {
                     Text("确定", color = HorseTheme2026Colors.Gold)
                 }

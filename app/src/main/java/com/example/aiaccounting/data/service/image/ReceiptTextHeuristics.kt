@@ -32,13 +32,13 @@ internal object ReceiptTextHeuristics {
                 value.isNotBlank() && value != "0" && value != "0.0" && value != "0.00"
             }
             .distinct()
-            .take(5)
+            .take(12)
             .toList()
 
         val dates = dateRegex.findAll(normalized)
             .map { it.value.trim() }
             .distinct()
-            .take(3)
+            .take(6)
             .toList()
 
         val paymentMethods = paymentMethodKeywords.filter { normalized.contains(it, ignoreCase = true) }
@@ -48,7 +48,7 @@ internal object ReceiptTextHeuristics {
                 line.length >= 3 && merchantKeywords.any { keyword -> line.contains(keyword, ignoreCase = true) }
             }
             .distinct()
-            .take(3)
+            .take(6)
 
         return ImageProcessingService.ReceiptSignals(
             amounts = amounts,
@@ -74,7 +74,7 @@ internal object ReceiptTextHeuristics {
                     line.length >= 4
             }
             .distinct()
-            .take(10)
+            .take(24)
     }
 
     fun calculateQualityScore(

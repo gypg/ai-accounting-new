@@ -11,7 +11,11 @@ import com.example.aiaccounting.data.local.entity.AccountType
 import com.example.aiaccounting.data.local.entity.TransactionType
 import com.example.aiaccounting.data.repository.AccountRepository
 import com.example.aiaccounting.data.repository.CategoryRepository
+import com.example.aiaccounting.logging.AppLogLogger
 import kotlinx.coroutines.CancellationException
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlin.math.abs
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -25,7 +29,8 @@ class AIAssistantActionExecutor @Inject constructor(
   private val aiOperationExecutor: AIOperationExecutor,
   private val accountRepository: AccountRepository,
   private val categoryRepository: CategoryRepository,
-  private val aiLocalProcessor: AILocalProcessor
+  private val aiLocalProcessor: AILocalProcessor,
+  private val appLogLogger: AppLogLogger
 ) {
 
   private companion object {
@@ -43,10 +48,22 @@ class AIAssistantActionExecutor @Inject constructor(
   suspend fun executeAIActions(response: String): String {
     return try {
       val envelope = responseInterpreter.parseActionEnvelopeFromResponse(response)
+      appLogLogger.info(
+        source = "AI",
+        category = "ai_bookkeeping",
+        message = "AI 动作解析成功",
+        details = "actions=${envelope.actions.size}"
+      )
       executeAIActions(envelope)
     } catch (e: CancellationException) {
       throw e
     } catch (e: Exception) {
+      appLogLogger.error(
+        source = "AI",
+        category = "ai_bookkeeping",
+        message = "AI 动作执行失败",
+        details = e.message
+      )
       logError("执行AI操作失败", e)
       USER_SAFE_EXECUTION_ERROR
     }
@@ -57,6 +74,12 @@ class AIAssistantActionExecutor @Inject constructor(
       val results = envelope.actions.mapIndexed { index, action ->
         formatIndexedResult(index + 1, executeActionSafely(action, ::executeSingleAction))
       }
+      appLogLogger.info(
+        source = "AI",
+        category = "image_action_execute",
+        message = "AI 图片动作执行完成",
+        details = "actions=${envelope.actions.size},results=${results.size}"
+      )
 
       val aiReply = envelope.reply.trim().removeDirtyNullWrappers()
       val compactSummary = maybeBuildCompactBatchSummary(results)
@@ -82,6 +105,12 @@ class AIAssistantActionExecutor @Inject constructor(
     } catch (e: CancellationException) {
       throw e
     } catch (e: Exception) {
+      appLogLogger.error(
+        source = "AI",
+        category = "ai_bookkeeping",
+        message = "AI 动作执行失败",
+        details = e.message
+      )
       logError("执行AI操作失败", e)
       USER_SAFE_EXECUTION_ERROR
     }
@@ -174,7 +203,20 @@ class AIAssistantActionExecutor @Inject constructor(
   }
 
   private suspend fun executeAddTransaction(action: AIAssistantTypedAction.AddTransaction, traceContext: AITraceContext): String {
+    val effectiveDateTimestamp = if (action.hasExplicitDate) action.dateTimestamp else currentLocalDayTimestamp()
+    appLogLogger.debug(
+      source = "AI",
+      category = "remote_date_interpretation",
+      message = "远端记账日期解析",
+      details = "rawDate=${action.rawDate ?: "<missing>"},parsedTimestamp=${action.dateTimestamp},parsedDate=${formatTimestamp(action.dateTimestamp)},explicitDate=${action.hasExplicitDate},effectiveTimestamp=$effectiveDateTimestamp,effectiveDate=${formatTimestamp(effectiveDateTimestamp)},transactionType=${action.transactionTypeRaw},amount=${action.amount},note=${action.note}"
+    )
     val resolution = resolveAddTransactionExecution(action, traceContext)
+    appLogLogger.info(
+      source = "AI",
+      category = "image_entity_resolution",
+      message = "图片记账实体解析完成",
+      details = "transactionType=${resolution.transactionType},autoCreatedAccount=${resolution.autoCreatedAccountLabel != null},autoCreatedCategory=${resolution.autoCreatedCategoryLabel != null},autoCreatedTransferAccount=${resolution.autoCreatedTransferAccountLabel != null},hasFailure=${resolution.failureMessage != null}"
+    )
     return resolution.failureMessage ?: if (resolution.transactionType == TransactionType.TRANSFER) {
       executeResolvedTransfer(
         amount = action.amount,
@@ -182,7 +224,7 @@ class AIAssistantActionExecutor @Inject constructor(
         targetAccount = resolution.transferAccount,
         category = resolution.category,
         note = action.note,
-        dateTimestamp = action.dateTimestamp,
+        dateTimestamp = effectiveDateTimestamp,
         traceContext = traceContext,
         autoCreatedAccountLabel = resolution.autoCreatedAccountLabel,
         autoCreatedTransferAccountLabel = resolution.autoCreatedTransferAccountLabel,
@@ -190,12 +232,12 @@ class AIAssistantActionExecutor @Inject constructor(
       )
     } else {
       executeResolvedAddTransaction(
-        amount = action.amount,
+        amount = abs(action.amount),
         transactionType = resolution.transactionType,
         account = resolution.account,
         category = resolution.category,
         note = action.note,
-        dateTimestamp = action.dateTimestamp,
+        dateTimestamp = effectiveDateTimestamp,
         traceContext = traceContext,
         autoCreatedAccountLabel = resolution.autoCreatedAccountLabel,
         autoCreatedCategoryLabel = resolution.autoCreatedCategoryLabel
@@ -208,6 +250,7 @@ class AIAssistantActionExecutor @Inject constructor(
     traceContext: AITraceContext
   ): String {
     val resolution = resolveAddTransactionExecution(action, traceContext)
+    val effectiveDateTimestamp = if (action.hasExplicitDate) action.dateTimestamp else currentLocalDayTimestamp()
     val querySummary = buildQueryBeforeExecutionSummary(action, resolution)
     val executionResult = resolution.failureMessage ?: if (resolution.transactionType == TransactionType.TRANSFER) {
       executeResolvedTransfer(
@@ -216,7 +259,7 @@ class AIAssistantActionExecutor @Inject constructor(
         targetAccount = resolution.transferAccount,
         category = resolution.category,
         note = action.note,
-        dateTimestamp = action.dateTimestamp,
+        dateTimestamp = effectiveDateTimestamp,
         traceContext = traceContext,
         autoCreatedAccountLabel = resolution.autoCreatedAccountLabel,
         autoCreatedTransferAccountLabel = resolution.autoCreatedTransferAccountLabel,
@@ -224,12 +267,12 @@ class AIAssistantActionExecutor @Inject constructor(
       )
     } else {
       executeResolvedAddTransaction(
-        amount = action.amount,
+        amount = abs(action.amount),
         transactionType = resolution.transactionType,
         account = resolution.account,
         category = resolution.category,
         note = action.note,
-        dateTimestamp = action.dateTimestamp,
+        dateTimestamp = effectiveDateTimestamp,
         traceContext = traceContext,
         autoCreatedAccountLabel = resolution.autoCreatedAccountLabel,
         autoCreatedCategoryLabel = resolution.autoCreatedCategoryLabel
@@ -641,6 +684,13 @@ class AIAssistantActionExecutor @Inject constructor(
     val resolvedAccount = account ?: return "记账失败：无法创建或找到账户"
     val resolvedCategory = category ?: return "记账失败：无法创建或找到分类"
 
+    appLogLogger.debug(
+      source = "AI",
+      category = "remote_date_persist",
+      message = "远端记账落库日期",
+      details = "timestamp=$dateTimestamp,formatted=${formatTimestamp(dateTimestamp)},account=${resolvedAccount.name},category=${resolvedCategory.name},transactionType=$transactionType,note=${note.ifBlank { "AI记账" }}"
+    )
+
     val operation = AIOperation.AddTransaction(
       amount = amount,
       type = transactionType,
@@ -834,12 +884,6 @@ class AIAssistantActionExecutor @Inject constructor(
     }
   }
 
-  private fun logDebug(message: String) {
-    runCatching {
-      Log.d("AIAssistantActionExecutor", message)
-    }
-  }
-
   private fun logError(message: String, throwable: Throwable) {
     runCatching {
       Log.e("AIAssistantActionExecutor", message, throwable)
@@ -848,6 +892,27 @@ class AIAssistantActionExecutor @Inject constructor(
 
   private fun formatIndexedResult(index: Int, result: String): String {
     return "$index. $result"
+  }
+
+  private fun formatTimestamp(timestamp: Long): String {
+    return runCatching {
+      SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date(timestamp))
+    }.getOrDefault(timestamp.toString())
+  }
+
+  private fun currentLocalDayTimestamp(): Long {
+    val calendar = java.util.Calendar.getInstance()
+    calendar.set(java.util.Calendar.HOUR_OF_DAY, 0)
+    calendar.set(java.util.Calendar.MINUTE, 0)
+    calendar.set(java.util.Calendar.SECOND, 0)
+    calendar.set(java.util.Calendar.MILLISECOND, 0)
+    return calendar.timeInMillis
+  }
+
+  private fun logDebug(message: String) {
+    runCatching {
+      Log.d("AIAssistantActionExecutor", message)
+    }
   }
 
   /**

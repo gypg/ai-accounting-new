@@ -8,6 +8,7 @@ import com.example.aiaccounting.data.model.Butler
 import com.example.aiaccounting.data.model.ChatMessage
 import com.example.aiaccounting.data.model.MessageRole
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
@@ -76,13 +77,19 @@ ${currentButler.systemPrompt}
         val categoriesInfo = buildCategoriesContext(categories, userMessage)
         val hasExistingAccounts = accounts.isNotEmpty()
         val hasExistingCategories = categories.isNotEmpty()
+        val shouldAllowSemanticEntityOutput = shouldAllowSemanticEntityOutput(
+            userMessage = userMessage,
+            accounts = accounts,
+            categories = categories
+        )
 
         return buildFullBookkeepingPrompt(
             baseSystemPrompt = baseSystemPrompt,
             accountsInfo = accountsInfo,
             categoriesInfo = categoriesInfo,
             hasExistingAccounts = hasExistingAccounts,
-            hasExistingCategories = hasExistingCategories
+            hasExistingCategories = hasExistingCategories,
+            shouldAllowSemanticEntityOutput = shouldAllowSemanticEntityOutput
         )
     }
 
@@ -91,42 +98,44 @@ ${currentButler.systemPrompt}
         accountsInfo: String,
         categoriesInfo: String,
         hasExistingAccounts: Boolean,
-        hasExistingCategories: Boolean
+        hasExistingCategories: Boolean,
+        shouldAllowSemanticEntityOutput: Boolean
     ): String {
-        val categoryRule = if (hasExistingCategories) {
+        val categoryRule = if (!shouldAllowSemanticEntityOutput && hasExistingCategories) {
             "2. 🎯 分类必须从上面已有的分类列表中选择最合适的一个，用 categoryRef.id 引用。"
         } else {
-            "2. 🎯 当前暂无分类上下文时，优先使用 categoryRef.name 按语义给出分类，执行阶段自动解析或补全。"
+            "2. 🎯 若现有分类不足以覆盖用户输入，优先使用 categoryRef.name 按语义给出分类，执行阶段自动解析或补全。"
         }
-        val accountRule = if (hasExistingAccounts) {
+        val accountRule = if (!shouldAllowSemanticEntityOutput && hasExistingAccounts) {
             "3. 💳 账户必须从上面已有的账户列表中选择，用 accountRef.id 引用。"
         } else {
-            "3. 💳 当前暂无账户上下文时，优先使用 name 按支付渠道给出 accountRef.name，执行阶段自动解析或补全。"
+            "3. 💳 若现有账户不足以覆盖支付渠道，优先使用 accountRef.name 给出微信、支付宝、现金、银行卡、银行代发等语义账户名，执行阶段自动解析或补全。"
         }
-        val referenceRule = if (hasExistingAccounts && hasExistingCategories) {
+        val referenceRule = if (!shouldAllowSemanticEntityOutput && hasExistingAccounts && hasExistingCategories) {
             "7. ⚠️ 禁止凭空捏造账户名或分类名，必须使用上面提供的列表中的名称或 ID。"
         } else {
-            "7. ⚠️ 禁止把商家名当账户名；支付渠道才是账户。若账本为空，可用语义名称，由执行阶段自动解析或补全。"
+            "7. ⚠️ 禁止把商家名当账户名；支付渠道才是账户。若账本不完整，可输出语义账户名/分类名，由执行阶段自动解析或补全。"
         }
-        val exampleEnvelope = if (hasExistingAccounts && hasExistingCategories) {
-            "{\"actions\":[{\"action\":\"add_transaction\",\"amount\":25.00,\"transactionType\":\"expense\",\"accountRef\":{\"id\":1,\"name\":\"微信\"},\"categoryRef\":{\"id\":10,\"name\":\"餐饮\"},\"note\":\"午餐\",\"date\":1743000000000}],\"reply\":\"已记账\"}"
+        val currentTimestamp = getCurrentTimestamp()
+        val exampleEnvelope = if (!shouldAllowSemanticEntityOutput && hasExistingAccounts && hasExistingCategories) {
+            "{\"actions\":[{\"action\":\"add_transaction\",\"amount\":25.00,\"transactionType\":\"expense\",\"accountRef\":{\"id\":1,\"name\":\"微信\"},\"categoryRef\":{\"id\":10,\"name\":\"餐饮\"},\"note\":\"午餐\",\"date\":$currentTimestamp}],\"reply\":\"已记账\"}"
         } else {
-            "{\"actions\":[{\"action\":\"add_transaction\",\"amount\":25.00,\"transactionType\":\"expense\",\"accountRef\":{\"name\":\"微信\",\"kind\":\"account\"},\"categoryRef\":{\"name\":\"餐饮\",\"kind\":\"category\"},\"note\":\"午餐\",\"date\":1743000000000}],\"reply\":\"已记账\"}"
+            "{\"actions\":[{\"action\":\"add_transaction\",\"amount\":25.00,\"transactionType\":\"expense\",\"accountRef\":{\"name\":\"微信\",\"kind\":\"account\"},\"categoryRef\":{\"name\":\"餐饮\",\"kind\":\"category\"},\"note\":\"午餐\",\"date\":$currentTimestamp}],\"reply\":\"已记账\"}"
         }
-        val transactionOutputRule = if (hasExistingAccounts && hasExistingCategories) {
+        val transactionOutputRule = if (!shouldAllowSemanticEntityOutput && hasExistingAccounts && hasExistingCategories) {
             "- 交易动作统一使用 add_transaction，accountRef 和 categoryRef 必须包含 id 字段并引用上面列表中的 ID。"
         } else {
-            "- 交易动作统一使用 add_transaction；若缺少现成账本上下文，可优先输出 accountRef.name / categoryRef.name，由执行阶段自动解析或补全。"
+            "- 交易动作统一使用 add_transaction；若现有账本覆盖不足，优先输出 accountRef.name / categoryRef.name，由执行阶段自动解析或补全。"
         }
-        val uncertaintyRule = if (hasExistingAccounts && hasExistingCategories) {
+        val uncertaintyRule = if (!shouldAllowSemanticEntityOutput && hasExistingAccounts && hasExistingCategories) {
             "- 对不确定字段，优先使用 query_accounts / query_categories 获取上下文，不得臆造。"
         } else {
-            "- 对不确定字段不要臆造；可直接给出支付渠道和语义分类名称，不要因为账本为空而只返回 query。"
+            "- 对不确定字段不要臆造；但不要因为账本不完整而只返回 query。优先输出可执行的 add_transaction 动作。"
         }
-        val createAccountRule = if (hasExistingAccounts) {
+        val createAccountRule = if (!shouldAllowSemanticEntityOutput && hasExistingAccounts) {
             "- ⚠️ 严禁调用 create_account！现有账户足以覆盖所有支付场景，绝不要创建同名或近似名账户。"
         } else {
-            "- ⚠️ 不要把瑞幸、美团、医院等商家名当成账户；优先输出微信、支付宝、现金、信用卡、银行卡等支付渠道。"
+            "- ⚠️ 不要把瑞幸、美团、医院等商家名当成账户；优先输出微信、支付宝、现金、信用卡、银行卡、银行代发等支付渠道。"
         }
 
         return """
@@ -238,5 +247,30 @@ $createAccountRule
      */
     private fun getCurrentDateTime(): String {
         return SimpleDateFormat("yyyy年MM月dd日 HH:mm", Locale.getDefault()).format(Date())
+    }
+
+    private fun getCurrentTimestamp(): Long {
+        val calendar = Calendar.getInstance()
+        calendar.set(Calendar.SECOND, 0)
+        calendar.set(Calendar.MILLISECOND, 0)
+        return calendar.timeInMillis
+    }
+
+    private fun shouldAllowSemanticEntityOutput(
+        userMessage: String,
+        accounts: List<Account>,
+        categories: List<Category>
+    ): Boolean {
+        if (accounts.isEmpty() || categories.isEmpty()) return true
+
+        val normalizedMessage = userMessage.lowercase()
+        val accountNames = accounts.map { it.name.lowercase() }
+        val categoryNames = categories.map { it.name.lowercase() }
+        val hasUnknownPaymentChannel = listOf("现金", "支付宝", "银行", "银行代发", "银行卡", "微信转账", "信用卡")
+            .any { keyword -> keyword.lowercase() in normalizedMessage && accountNames.none { it in normalizedMessage } }
+        val hasUnknownCategory = listOf("购物", "娱乐", "交通", "红包", "工资", "收入")
+            .any { keyword -> keyword.lowercase() in normalizedMessage && categoryNames.none { it == keyword.lowercase() } }
+
+        return hasUnknownPaymentChannel || hasUnknownCategory
     }
 }

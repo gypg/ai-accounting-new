@@ -6,6 +6,7 @@ import com.example.aiaccounting.data.local.entity.Category
 import com.example.aiaccounting.data.local.entity.Transaction
 import com.example.aiaccounting.data.local.entity.TransactionType
 import com.example.aiaccounting.data.repository.TransactionRepository
+import com.example.aiaccounting.logging.AppLogLogger
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -15,7 +16,8 @@ import javax.inject.Inject
 @HiltViewModel
 class TransactionListViewModel @Inject constructor(
     private val transactionRepository: TransactionRepository,
-    private val categoryRepository: com.example.aiaccounting.data.repository.CategoryRepository
+    private val categoryRepository: com.example.aiaccounting.data.repository.CategoryRepository,
+    private val appLogLogger: AppLogLogger
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(TransactionListUiState())
@@ -57,6 +59,22 @@ class TransactionListViewModel @Inject constructor(
         loadCategories()
     }
 
+    fun logTransactionScreenEnter(theme: String, selectedView: String? = null) {
+        appLogLogger.info(
+            source = "UI",
+            category = "screen_enter",
+            message = "进入明细页",
+            details = buildString {
+                append("screen=TransactionList,theme=")
+                append(theme)
+                if (selectedView != null) {
+                    append(",view=")
+                    append(selectedView)
+                }
+            }
+        )
+    }
+
     private fun loadCategories() {
         viewModelScope.launch {
             categoryRepository.getAllCategories().collect { categories ->
@@ -67,6 +85,21 @@ class TransactionListViewModel @Inject constructor(
     }
 
     private fun loadTransactions() {
+        viewModelScope.launch {
+            combine(_transactions, _categories, _uiState) { transactions, categories, state ->
+                Triple(transactions, categories, state)
+            }.collect { (transactions, categories, state) ->
+                val visibleTransactions = filterTransactions(transactions, state)
+                val hasAiTransactions = visibleTransactions.any { it.aiSourceType == "AI_LOCAL" || it.aiSourceType == "AI_REMOTE" }
+                appLogLogger.debug(
+                    source = "UI",
+                    category = "transaction_list_refresh",
+                    message = "明细交易列表刷新",
+                    details = "transactions=${visibleTransactions.size},allTransactions=${transactions.size},categories=${categories.size},year=${state.selectedYear},month=${state.selectedMonth},typeFilter=${state.filterType},sourceFilter=${state.sourceFilter},sortBy=${state.sortBy},hasAiTransactions=$hasAiTransactions"
+                )
+            }
+        }
+
         viewModelScope.launch {
             transactionRepository.getAllTransactions().collect { transactions ->
                 _transactions.value = transactions
@@ -151,7 +184,13 @@ class TransactionListViewModel @Inject constructor(
                 newMonth = 12
                 newYear--
             }
-            state.copy(selectedMonth = newMonth, selectedYear = newYear)
+            appLogLogger.info(
+                source = "UI",
+                category = "transaction_list_interaction",
+                message = "切换明细月份",
+                details = "action=prev_month,fromYear=${state.selectedYear},fromMonth=${state.selectedMonth},toYear=$newYear,toMonth=$newMonth"
+            )
+            state.copy(selectedMonth = newMonth, selectedYear = newYear, selectedDate = null)
         }
     }
 
@@ -163,26 +202,63 @@ class TransactionListViewModel @Inject constructor(
                 newMonth = 1
                 newYear++
             }
-            state.copy(selectedMonth = newMonth, selectedYear = newYear)
+            appLogLogger.info(
+                source = "UI",
+                category = "transaction_list_interaction",
+                message = "切换明细月份",
+                details = "action=next_month,fromYear=${state.selectedYear},fromMonth=${state.selectedMonth},toYear=$newYear,toMonth=$newMonth"
+            )
+            state.copy(selectedMonth = newMonth, selectedYear = newYear, selectedDate = null)
         }
     }
 
-    fun selectDate(date: Int) {
+    fun selectDate(date: Int?) {
         _uiState.update { state ->
-            state.copy(selectedDate = if (state.selectedDate == date) null else date)
+            state.copy(selectedDate = if (date != null && state.selectedDate == date) null else date)
+        }
+    }
+
+    fun setYearMonth(year: Int, month: Int) {
+        require(month in 1..12) { "month must be between 1 and 12" }
+        _uiState.update { state ->
+            state.copy(selectedYear = year, selectedMonth = month, selectedDate = null)
         }
     }
 
     fun setFilterType(type: String) {
+        appLogLogger.info(
+            source = "UI",
+            category = "transaction_list_interaction",
+            message = "切换明细筛选类型",
+            details = "filterType=$type"
+        )
         _uiState.update { it.copy(filterType = type) }
     }
 
     fun setSortBy(sortBy: String) {
+        appLogLogger.info(
+            source = "UI",
+            category = "transaction_list_interaction",
+            message = "切换明细排序",
+            details = "sortBy=$sortBy"
+        )
         _uiState.update { it.copy(sortBy = sortBy) }
     }
 
     fun setSourceFilter(sourceFilter: String) {
+        appLogLogger.info(
+            source = "UI",
+            category = "transaction_list_interaction",
+            message = "切换明细来源筛选",
+            details = "sourceFilter=$sourceFilter"
+        )
         _uiState.update { it.copy(sourceFilter = sourceFilter) }
+    }
+
+    fun buildTransactionDebugSummary(limit: Int = 20): String {
+        return _transactions.value.take(limit).joinToString("\n") { transaction ->
+            "id=${transaction.id},accountId=${transaction.accountId},categoryId=${transaction.categoryId},type=${transaction.type},amount=${transaction.amount},date=${transaction.date},note=${transaction.note}"
+        }
     }
 
     /**

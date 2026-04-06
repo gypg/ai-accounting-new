@@ -14,6 +14,7 @@ import com.example.aiaccounting.data.repository.AccountRepository
 import com.example.aiaccounting.data.repository.CategoryRepository
 import com.example.aiaccounting.data.repository.TagRepository
 import com.example.aiaccounting.data.repository.TransactionRepository
+import com.example.aiaccounting.logging.AppLogLogger
 import com.example.aiaccounting.widget.WidgetUpdateService
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -34,6 +35,7 @@ class TransactionViewModel @Inject constructor(
     private val tagRepository: TagRepository,
     private val aiOperationTraceRepository: AIOperationTraceRepository,
     private val widgetUpdateService: WidgetUpdateService,
+    private val appLogLogger: AppLogLogger,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
 
@@ -131,9 +133,16 @@ class TransactionViewModel @Inject constructor(
                 )
                 
                 transactionRepository.insertTransaction(transaction)
+                applyBalanceDeltaForTransaction(transaction)
                 _uiState.update { it.copy(isLoading = false, showAddDialog = false) }
                 loadMonthSummary() // Update summary
             } catch (e: Exception) {
+                appLogLogger.error(
+                    source = "TRANSACTION",
+                    category = "manual_bookkeeping",
+                    message = "手动记账失败",
+                    details = e.message
+                )
                 _uiState.update { it.copy(isLoading = false, error = e.message) }
             }
         }
@@ -143,10 +152,20 @@ class TransactionViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 _uiState.update { it.copy(isLoading = true, error = null) }
+                val existingTransaction = transactionRepository.getTransactionById(transaction.id)
+                    ?: throw IllegalArgumentException("Transaction not found: ${transaction.id}")
                 transactionRepository.updateTransaction(transaction)
+                revertBalanceDeltaForTransaction(existingTransaction)
+                applyBalanceDeltaForTransaction(transaction)
                 _uiState.update { it.copy(isLoading = false, showEditDialog = false) }
                 loadMonthSummary() // Update summary
             } catch (e: Exception) {
+                appLogLogger.error(
+                    source = "TRANSACTION",
+                    category = "manual_bookkeeping",
+                    message = "手动记账失败",
+                    details = e.message
+                )
                 _uiState.update { it.copy(isLoading = false, error = e.message) }
             }
         }
@@ -156,6 +175,7 @@ class TransactionViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 transactionRepository.deleteTransaction(transaction)
+                revertBalanceDeltaForTransaction(transaction)
                 loadMonthSummary() // Update summary
             } catch (e: Exception) {
                 _uiState.update { it.copy(error = e.message) }
@@ -171,7 +191,8 @@ class TransactionViewModel @Inject constructor(
         categoryId: Long,
         date: java.util.Date,
         note: String,
-        selectedTags: List<Tag> = emptyList()
+        selectedTags: List<Tag> = emptyList(),
+        entrySource: String = "direct_add"
     ) {
         viewModelScope.launch {
             try {
@@ -189,6 +210,15 @@ class TransactionViewModel @Inject constructor(
                 )
 
                 val transactionId = transactionRepository.insertTransaction(transaction)
+                applyBalanceDeltaForTransaction(transaction)
+                appLogLogger.info(
+                    source = "TRANSACTION",
+                    category = "manual_bookkeeping",
+                    message = "手动记账成功",
+                    details = "transactionId=$transactionId,accountId=$accountId,categoryId=$categoryId,type=$type,amount=$amount,entrySource=$entrySource",
+                    entityType = "transaction",
+                    entityId = transactionId.toString()
+                )
                 if (selectedTags.isNotEmpty()) {
                     tagRepository.setTransactionTags(transactionId, selectedTags.map { it.id })
                 }
@@ -199,6 +229,12 @@ class TransactionViewModel @Inject constructor(
                 _uiState.update { it.copy(isLoading = false) }
                 loadMonthSummary() // Update summary
             } catch (e: Exception) {
+                appLogLogger.error(
+                    source = "TRANSACTION",
+                    category = "manual_bookkeeping",
+                    message = "手动记账失败",
+                    details = e.message
+                )
                 _uiState.update { it.copy(isLoading = false, error = e.message) }
             }
         }
@@ -230,10 +266,18 @@ class TransactionViewModel @Inject constructor(
                     tags = tagsString
                 )
                 transactionRepository.updateTransaction(updatedTransaction)
+                revertBalanceDeltaForTransaction(transaction)
+                applyBalanceDeltaForTransaction(updatedTransaction)
                 tagRepository.setTransactionTags(transactionId, selectedTags.map { it.id })
                 _uiState.update { it.copy(isLoading = false, showEditDialog = false) }
                 loadMonthSummary()
             } catch (e: Exception) {
+                appLogLogger.error(
+                    source = "TRANSACTION",
+                    category = "manual_bookkeeping",
+                    message = "手动记账失败",
+                    details = e.message
+                )
                 _uiState.update { it.copy(isLoading = false, error = e.message) }
             }
         }
@@ -245,6 +289,7 @@ class TransactionViewModel @Inject constructor(
                 val transaction = transactionRepository.getTransactionById(transactionId)
                 transaction?.let {
                     transactionRepository.deleteTransaction(it)
+                    revertBalanceDeltaForTransaction(it)
                     loadMonthSummary()
                 }
             } catch (e: Exception) {
@@ -269,6 +314,19 @@ class TransactionViewModel @Inject constructor(
         return transactionRepository.searchTransactions(query)
     }
 
+    fun logAddTransactionScreenEnter(
+        entrySource: String,
+        accountCount: Int,
+        categoryCount: Int
+    ) {
+        appLogLogger.info(
+            source = "UI",
+            category = "screen_enter",
+            message = "进入手动记账页",
+            details = "screen=AddTransaction,entrySource=$entrySource,accounts=$accountCount,categories=$categoryCount"
+        )
+    }
+
     fun showAddDialog() {
         _uiState.update { it.copy(showAddDialog = true, error = null) }
     }
@@ -287,6 +345,34 @@ class TransactionViewModel @Inject constructor(
 
     fun clearError() {
         _uiState.update { it.copy(error = null) }
+    }
+
+    private suspend fun applyBalanceDeltaForTransaction(transaction: Transaction) {
+        val delta = when (transaction.type) {
+            TransactionType.INCOME -> transaction.amount
+            TransactionType.EXPENSE -> -transaction.amount
+            TransactionType.TRANSFER -> 0.0
+        }
+        if (delta != 0.0) {
+            accountRepository.adjustAccountBalance(transaction.accountId, delta)
+        }
+    }
+
+    private suspend fun revertBalanceDeltaForTransaction(transaction: Transaction) {
+        val delta = when (transaction.type) {
+            TransactionType.INCOME -> -transaction.amount
+            TransactionType.EXPENSE -> transaction.amount
+            TransactionType.TRANSFER -> 0.0
+        }
+        if (delta != 0.0) {
+            accountRepository.adjustAccountBalance(transaction.accountId, delta)
+        }
+    }
+
+    fun buildTransactionDebugSummary(limit: Int = 20): String {
+        return _uiState.value.transactions.take(limit).joinToString("\n") { transaction ->
+            "id=${transaction.id},accountId=${transaction.accountId},categoryId=${transaction.categoryId},type=${transaction.type},amount=${transaction.amount},date=${transaction.date},note=${transaction.note}"
+        }
     }
 
     fun loadTraceDetails(traceId: String) {

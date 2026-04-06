@@ -163,6 +163,19 @@ internal class AIAssistantMessageOrchestrator {
         }
 
         if (analysis.hasClarificationAction) {
+            val shouldPreferRemoteBookkeeping =
+                analysis.engineMode == AIAssistantEngineMode.Remote &&
+                    analysis.topLevelIntent == AIAssistantTopLevelIntent.BOOKKEEPING &&
+                    shouldRouteBookkeepingClarificationRemotely(analysis.userMessage)
+            if (shouldPreferRemoteBookkeeping) {
+                return AIAssistantMessageRoute.RemoteRequest(
+                    RemoteExecutionRequest(
+                        userMessage = analysis.userMessage,
+                        responseRequirement = AIAssistantRemoteResponseRequirement.ActionEnvelopeRequired,
+                        promptScenario = AIAssistantRemotePromptScenario.Bookkeeping
+                    )
+                )
+            }
             return AIAssistantMessageRoute.LocalActions(
                 actions = analysis.reasoningResult.actions,
                 stage = AIAssistantInteractionStage.Clarification
@@ -295,5 +308,17 @@ internal class AIAssistantMessageOrchestrator {
 
         val imageFileRegex = Regex("""(?:https?|file)://\S+\.(png|jpg|jpeg|webp|gif)\b""", RegexOption.IGNORE_CASE)
         return trimmed.startsWith("data:image/") || imageFileRegex.containsMatchIn(trimmed)
+    }
+
+    private fun shouldRouteBookkeepingClarificationRemotely(message: String): Boolean {
+        val normalizedMessage = message.lowercase().trim()
+        val hasAmount = Regex("""(?:\d+(?:\.\d+)?)|(?:[¥￥]\s*\d+(?:\.\d+)?)""").containsMatchIn(normalizedMessage)
+        val hasBookkeepingIntent = listOf(
+            "记一笔", "记一下", "记个", "收入", "支出", "花了", "消费", "用了", "收到", "赚", "工资", "奖金"
+        ).any { normalizedMessage.contains(it) }
+        val hasAccountCarrier = listOf("到", "进", "存到", "放到", "打到", "转到", "入", "到账").any {
+            normalizedMessage.contains(it)
+        }
+        return hasAmount && hasBookkeepingIntent && hasAccountCarrier
     }
 }

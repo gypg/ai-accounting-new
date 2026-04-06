@@ -62,7 +62,7 @@ function Get-VersionInfo {
         
         # 尝试提取版本号
         $versionCodeMatch = [regex]::Match($content, 'versionCode\s*=\s*(\d+)')
-        $versionNameMatch = [regex]::Match($content, 'versionName\s*=\s*["\'](.+?)["\']')
+        $versionNameMatch = [regex]::Match($content, "versionName\s*=\s*[""'](.+?)[""']")
         
         $script:VersionCode = if ($versionCodeMatch.Success) { $versionCodeMatch.Groups[1].Value } else { "1" }
         $script:VersionName = if ($versionNameMatch.Success) { $versionNameMatch.Groups[1].Value } else { "1.0.0" }
@@ -396,6 +396,7 @@ function Main {
     }
     catch {
         Write-Log "流程执行出错: $_" "Error"
+        Write-Log "异常详情: $($_.Exception.ToString())" "Error"
         Write-Log $_.ScriptStackTrace "Error"
         exit 1
     }

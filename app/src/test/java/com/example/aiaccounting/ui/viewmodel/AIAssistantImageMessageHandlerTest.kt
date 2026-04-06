@@ -9,6 +9,7 @@ import com.example.aiaccounting.data.model.ButlerPersonality
 import com.example.aiaccounting.data.repository.AIUsageRepository
 import com.example.aiaccounting.data.service.AIService
 import com.example.aiaccounting.data.service.ImageProcessingService
+import com.example.aiaccounting.logging.AppLogLogger
 import com.example.aiaccounting.data.service.image.OcrAgreementLevel
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -47,7 +48,12 @@ class AIAssistantImageMessageHandlerTest {
     fun buildImagePrompt_fallsBackToAnyContentWhenNoHighConfidenceResultExists() = runTest {
         val aiService = mockk<AIService>(relaxed = true)
         val imageProcessingService = mockk<ImageProcessingService>()
-        val handler = AIAssistantImageMessageHandler(aiService, imageProcessingService, mockk<AIUsageRepository>(relaxed = true))
+        val handler = AIAssistantImageMessageHandler(
+            aiService,
+            imageProcessingService,
+            mockk<AIUsageRepository>(relaxed = true),
+            mockk<AppLogLogger>(relaxed = true)
+        )
 
         val uri = mockk<Uri>()
         val context = mockk<Context>()
@@ -95,7 +101,12 @@ class AIAssistantImageMessageHandlerTest {
     fun buildImagePrompt_usesOnlyHighConfidenceResultsInPrompt() = runTest {
         val aiService = mockk<AIService>(relaxed = true)
         val imageProcessingService = mockk<ImageProcessingService>()
-        val handler = AIAssistantImageMessageHandler(aiService, imageProcessingService, mockk<AIUsageRepository>(relaxed = true))
+        val handler = AIAssistantImageMessageHandler(
+            aiService,
+            imageProcessingService,
+            mockk<AIUsageRepository>(relaxed = true),
+            mockk<AppLogLogger>(relaxed = true)
+        )
 
         val firstUri = mockk<Uri>()
         val secondUri = mockk<Uri>()
@@ -162,7 +173,12 @@ class AIAssistantImageMessageHandlerTest {
     fun processImageMessage_returnsConfigErrorBeforeImageProcessing() = runTest {
         val aiService = mockk<AIService>(relaxed = true)
         val imageProcessingService = mockk<ImageProcessingService>(relaxed = true)
-        val handler = AIAssistantImageMessageHandler(aiService, imageProcessingService, mockk<AIUsageRepository>(relaxed = true))
+        val handler = AIAssistantImageMessageHandler(
+            aiService,
+            imageProcessingService,
+            mockk<AIUsageRepository>(relaxed = true),
+            mockk<AppLogLogger>(relaxed = true)
+        )
 
         val result = handler.processImageMessage(
             message = "帮我记账",
@@ -190,7 +206,12 @@ class AIAssistantImageMessageHandlerTest {
     fun processImageMessage_shortCircuitsWhenNetworkUnavailable() = runTest {
         val aiService = mockk<AIService>(relaxed = true)
         val imageProcessingService = mockk<ImageProcessingService>(relaxed = true)
-        val handler = AIAssistantImageMessageHandler(aiService, imageProcessingService, mockk<AIUsageRepository>(relaxed = true))
+        val handler = AIAssistantImageMessageHandler(
+            aiService,
+            imageProcessingService,
+            mockk<AIUsageRepository>(relaxed = true),
+            mockk<AppLogLogger>(relaxed = true)
+        )
 
         val result = handler.processImageMessage(
             message = "帮我记账",
@@ -220,7 +241,12 @@ class AIAssistantImageMessageHandlerTest {
     fun processImageMessage_usesNativeImagePathWhenModelSupportsNativeImage() = runTest {
         val aiService = mockk<AIService>(relaxed = true)
         val imageProcessingService = mockk<ImageProcessingService>()
-        val handler = AIAssistantImageMessageHandler(aiService, imageProcessingService, mockk<AIUsageRepository>(relaxed = true))
+        val handler = AIAssistantImageMessageHandler(
+            aiService,
+            imageProcessingService,
+            mockk<AIUsageRepository>(relaxed = true),
+            mockk<AppLogLogger>(relaxed = true)
+        )
 
         val firstUri = mockk<Uri>()
         val secondUri = mockk<Uri>()
@@ -282,7 +308,12 @@ class AIAssistantImageMessageHandlerTest {
     fun processImageMessage_nativePath_returnsExecutableEnvelope_whenActionsPresent() = runTest {
         val aiService = mockk<AIService>(relaxed = true)
         val imageProcessingService = mockk<ImageProcessingService>()
-        val handler = AIAssistantImageMessageHandler(aiService, imageProcessingService, mockk<AIUsageRepository>(relaxed = true))
+        val handler = AIAssistantImageMessageHandler(
+            aiService,
+            imageProcessingService,
+            mockk<AIUsageRepository>(relaxed = true),
+            mockk<AppLogLogger>(relaxed = true)
+        )
 
         val uri = mockk<Uri>()
         val context = mockk<Context>()
@@ -341,7 +372,12 @@ class AIAssistantImageMessageHandlerTest {
     fun processImageMessage_nonNativePath_returnsBookkeepingPromptForRemoteExecution() = runTest {
         val aiService = mockk<AIService>(relaxed = true)
         val imageProcessingService = mockk<ImageProcessingService>()
-        val handler = AIAssistantImageMessageHandler(aiService, imageProcessingService, mockk<AIUsageRepository>(relaxed = true))
+        val handler = AIAssistantImageMessageHandler(
+            aiService,
+            imageProcessingService,
+            mockk<AIUsageRepository>(relaxed = true),
+            mockk<AppLogLogger>(relaxed = true)
+        )
 
         val uri = mockk<Uri>()
         val context = mockk<Context>()
@@ -393,7 +429,12 @@ class AIAssistantImageMessageHandlerTest {
     fun buildImagePrompt_whenLowConfidenceButHasRawText_stillBuildsPrompt() = runTest {
         val aiService = mockk<AIService>(relaxed = true)
         val imageProcessingService = mockk<ImageProcessingService>()
-        val handler = AIAssistantImageMessageHandler(aiService, imageProcessingService, mockk<AIUsageRepository>(relaxed = true))
+        val handler = AIAssistantImageMessageHandler(
+            aiService,
+            imageProcessingService,
+            mockk<AIUsageRepository>(relaxed = true),
+            mockk<AppLogLogger>(relaxed = true)
+        )
 
         val uri = mockk<Uri>()
         val context = mockk<Context>()
@@ -442,7 +483,12 @@ class AIAssistantImageMessageHandlerTest {
     fun buildImagePrompt_whenOnlyLabelsExist_stillBuildsPrompt() = runTest {
         val aiService = mockk<AIService>(relaxed = true)
         val imageProcessingService = mockk<ImageProcessingService>()
-        val handler = AIAssistantImageMessageHandler(aiService, imageProcessingService, mockk<AIUsageRepository>(relaxed = true))
+        val handler = AIAssistantImageMessageHandler(
+            aiService,
+            imageProcessingService,
+            mockk<AIUsageRepository>(relaxed = true),
+            mockk<AppLogLogger>(relaxed = true)
+        )
 
         val uri = mockk<Uri>()
         val context = mockk<Context>()
@@ -491,7 +537,12 @@ class AIAssistantImageMessageHandlerTest {
     fun buildImagePrompt_whenBatchAnalysisReturnsAllEmpty_retriesPerImageAndSucceedsIfAnyImageHasContent() = runTest {
         val aiService = mockk<AIService>(relaxed = true)
         val imageProcessingService = mockk<ImageProcessingService>()
-        val handler = AIAssistantImageMessageHandler(aiService, imageProcessingService, mockk<AIUsageRepository>(relaxed = true))
+        val handler = AIAssistantImageMessageHandler(
+            aiService,
+            imageProcessingService,
+            mockk<AIUsageRepository>(relaxed = true),
+            mockk<AppLogLogger>(relaxed = true)
+        )
 
         val firstUri = mockk<Uri>()
         val secondUri = mockk<Uri>()
@@ -564,7 +615,12 @@ class AIAssistantImageMessageHandlerTest {
     fun buildImagePrompt_whenBatchAndPerImageFallbackAllEmpty_returnsNoTextError() = runTest {
         val aiService = mockk<AIService>(relaxed = true)
         val imageProcessingService = mockk<ImageProcessingService>()
-        val handler = AIAssistantImageMessageHandler(aiService, imageProcessingService, mockk<AIUsageRepository>(relaxed = true))
+        val handler = AIAssistantImageMessageHandler(
+            aiService,
+            imageProcessingService,
+            mockk<AIUsageRepository>(relaxed = true),
+            mockk<AppLogLogger>(relaxed = true)
+        )
 
         val firstUri = mockk<Uri>()
         val secondUri = mockk<Uri>()

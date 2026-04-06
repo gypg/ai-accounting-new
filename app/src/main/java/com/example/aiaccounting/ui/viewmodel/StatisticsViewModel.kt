@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.aiaccounting.data.local.entity.TransactionType
 import com.example.aiaccounting.data.repository.CategoryRepository
 import com.example.aiaccounting.data.repository.TransactionRepository
+import com.example.aiaccounting.logging.AppLogLogger
 import com.example.aiaccounting.ui.components.charts.MonthlyData
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
@@ -17,7 +18,8 @@ import javax.inject.Inject
 @HiltViewModel
 class StatisticsViewModel @Inject constructor(
     private val transactionRepository: TransactionRepository,
-    private val categoryRepository: CategoryRepository
+    private val categoryRepository: CategoryRepository,
+    private val appLogLogger: AppLogLogger
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(StatisticsUiState())
@@ -28,6 +30,13 @@ class StatisticsViewModel @Inject constructor(
         categoryRepository.getAllCategories(),
         _uiState
     ) { transactions, categories, state ->
+        val currentCalendar = Calendar.getInstance()
+        appLogLogger.debug(
+            source = "UI",
+            category = "statistics_refresh",
+            message = "统计数据刷新",
+            details = "transactions=${transactions.size},categories=${categories.size},filter=${state.timeFilter},tab=${state.selectedTab},year=${currentCalendar.get(Calendar.YEAR)},month=${currentCalendar.get(Calendar.MONTH) + 1},isEmpty=${transactions.isEmpty()}"
+        )
         calculateStatistics(transactions, categories, state)
     }.stateIn(
         scope = viewModelScope,
@@ -176,10 +185,10 @@ class StatisticsViewModel @Inject constructor(
 
         val totalIncome = filteredTransactions
             .filter { it.type == TransactionType.INCOME }
-            .sumOf { it.amount }
+            .sumOf { kotlin.math.abs(it.amount) }
         val totalExpense = filteredTransactions
             .filter { it.type == TransactionType.EXPENSE }
-            .sumOf { it.amount }
+            .sumOf { kotlin.math.abs(it.amount) }
 
         // 创建分类ID到名称和颜色的映射
         val categoryMap = categories.associateBy { it.id }
@@ -188,7 +197,7 @@ class StatisticsViewModel @Inject constructor(
         val categoryStats = typeFiltered
             .groupBy { it.categoryId }
             .map { (categoryId, transList) ->
-                val amount = transList.sumOf { it.amount }
+                val amount = transList.sumOf { kotlin.math.abs(it.amount) }
                 val total = if (state.selectedTab == "income") totalIncome else totalExpense
                 val category = categoryMap[categoryId]
                 CategoryStat(
@@ -201,16 +210,23 @@ class StatisticsViewModel @Inject constructor(
             .sortedByDescending { it.amount }
 
         // 计算各种趋势数据
-        val monthlyData = calculateMonthlyTrend(transactions, state.timeFilter)
+        val monthlyData = calculateMonthlyTrend(typeFiltered, state.timeFilter, state.selectedTab)
         val dailyData = calculateDailyTrend(filteredTransactions, state.timeFilter)
         val weeklyData = calculateWeeklyTrend(filteredTransactions, state.timeFilter)
+
+        appLogLogger.debug(
+            source = "UI",
+            category = "statistics_trend_detail",
+            message = "统计趋势明细",
+            details = "filter=${state.timeFilter},tab=${state.selectedTab},typeFiltered=${typeFiltered.size},monthlyPoints=${monthlyData.size},nonZeroIncome=${monthlyData.count { it.income > 0 }},nonZeroExpense=${monthlyData.count { it.expense > 0 }},transactionsReturned=${typeFiltered.size}"
+        )
 
         return StatisticsData(
             totalIncome = totalIncome,
             totalExpense = totalExpense,
             categoryStats = categoryStats,
             monthlyTrend = monthlyData,
-            transactions = filteredTransactions,
+            transactions = typeFiltered,
             dailyTrend = dailyData,
             weeklyTrend = weeklyData
         )
@@ -221,7 +237,8 @@ class StatisticsViewModel @Inject constructor(
      */
     private fun calculateMonthlyTrend(
         transactions: List<com.example.aiaccounting.data.local.entity.Transaction>,
-        timeFilter: String
+        timeFilter: String,
+        selectedTab: String
     ): List<MonthlyData> {
         val calendar = Calendar.getInstance()
         val monthFormat = SimpleDateFormat("yyyy-MM", Locale.getDefault())
@@ -268,6 +285,10 @@ class StatisticsViewModel @Inject constructor(
             }
             timeFilter == "current" || timeFilter == "this_month" -> {
                 calendar.set(Calendar.DAY_OF_MONTH, 1)
+                calendar.set(Calendar.HOUR_OF_DAY, 0)
+                calendar.set(Calendar.MINUTE, 0)
+                calendar.set(Calendar.SECOND, 0)
+                calendar.set(Calendar.MILLISECOND, 0)
                 val start = calendar.timeInMillis
                 calendar.add(Calendar.MONTH, 1)
                 Pair(start, calendar.timeInMillis)
@@ -275,6 +296,10 @@ class StatisticsViewModel @Inject constructor(
             timeFilter == "this_year" -> {
                 calendar.set(Calendar.MONTH, 0)
                 calendar.set(Calendar.DAY_OF_MONTH, 1)
+                calendar.set(Calendar.HOUR_OF_DAY, 0)
+                calendar.set(Calendar.MINUTE, 0)
+                calendar.set(Calendar.SECOND, 0)
+                calendar.set(Calendar.MILLISECOND, 0)
                 val start = calendar.timeInMillis
                 calendar.add(Calendar.YEAR, 1)
                 Pair(start, calendar.timeInMillis)
@@ -282,24 +307,46 @@ class StatisticsViewModel @Inject constructor(
             timeFilter == "last" -> {
                 calendar.add(Calendar.MONTH, -1)
                 calendar.set(Calendar.DAY_OF_MONTH, 1)
+                calendar.set(Calendar.HOUR_OF_DAY, 0)
+                calendar.set(Calendar.MINUTE, 0)
+                calendar.set(Calendar.SECOND, 0)
+                calendar.set(Calendar.MILLISECOND, 0)
                 val start = calendar.timeInMillis
                 calendar.add(Calendar.MONTH, 1)
                 Pair(start, calendar.timeInMillis)
             }
             timeFilter == "3months" -> {
-                val end = calendar.timeInMillis
-                calendar.add(Calendar.MONTH, -3)
-                Pair(calendar.timeInMillis, end)
+                calendar.set(Calendar.DAY_OF_MONTH, 1)
+                calendar.set(Calendar.HOUR_OF_DAY, 0)
+                calendar.set(Calendar.MINUTE, 0)
+                calendar.set(Calendar.SECOND, 0)
+                calendar.set(Calendar.MILLISECOND, 0)
+                calendar.add(Calendar.MONTH, -2)
+                val start = calendar.timeInMillis
+                calendar.add(Calendar.MONTH, 3)
+                Pair(start, calendar.timeInMillis)
             }
             timeFilter == "6months" -> {
-                val end = calendar.timeInMillis
-                calendar.add(Calendar.MONTH, -6)
-                Pair(calendar.timeInMillis, end)
+                calendar.set(Calendar.DAY_OF_MONTH, 1)
+                calendar.set(Calendar.HOUR_OF_DAY, 0)
+                calendar.set(Calendar.MINUTE, 0)
+                calendar.set(Calendar.SECOND, 0)
+                calendar.set(Calendar.MILLISECOND, 0)
+                calendar.add(Calendar.MONTH, -5)
+                val start = calendar.timeInMillis
+                calendar.add(Calendar.MONTH, 6)
+                Pair(start, calendar.timeInMillis)
             }
             timeFilter == "1year" -> {
-                val end = calendar.timeInMillis
-                calendar.add(Calendar.YEAR, -1)
-                Pair(calendar.timeInMillis, end)
+                calendar.set(Calendar.MONTH, 0)
+                calendar.set(Calendar.DAY_OF_MONTH, 1)
+                calendar.set(Calendar.HOUR_OF_DAY, 0)
+                calendar.set(Calendar.MINUTE, 0)
+                calendar.set(Calendar.SECOND, 0)
+                calendar.set(Calendar.MILLISECOND, 0)
+                val start = calendar.timeInMillis
+                calendar.add(Calendar.YEAR, 1)
+                Pair(start, calendar.timeInMillis)
             }
             timeFilter == "all" -> {
                 // 显示所有数据，从最早的记录开始
@@ -334,12 +381,20 @@ class StatisticsViewModel @Inject constructor(
             val monthKey = monthFormat.format(calendar.time)
             val monthTransactions = monthlyGroups[monthKey] ?: emptyList()
 
-            val income = monthTransactions
-                .filter { it.type == TransactionType.INCOME }
-                .sumOf { it.amount }
-            val expense = monthTransactions
-                .filter { it.type == TransactionType.EXPENSE }
-                .sumOf { it.amount }
+            val income = if (selectedTab == "expense") {
+                0.0
+            } else {
+                monthTransactions
+                    .filter { it.type == TransactionType.INCOME }
+                    .sumOf { kotlin.math.abs(it.amount) }
+            }
+            val expense = if (selectedTab == "income") {
+                0.0
+            } else {
+                monthTransactions
+                    .filter { it.type == TransactionType.EXPENSE }
+                    .sumOf { kotlin.math.abs(it.amount) }
+            }
 
             result.add(
                 MonthlyData(
@@ -356,10 +411,22 @@ class StatisticsViewModel @Inject constructor(
     }
 
     fun setSelectedTab(tab: String) {
+        appLogLogger.info(
+            source = "UI",
+            category = "statistics_interaction",
+            message = "切换统计标签",
+            details = "selectedTab=$tab"
+        )
         _uiState.update { it.copy(selectedTab = tab) }
     }
 
     fun setTimeFilter(filter: String) {
+        appLogLogger.info(
+            source = "UI",
+            category = "statistics_interaction",
+            message = "切换统计时间筛选",
+            details = "timeFilter=$filter"
+        )
         _uiState.update { it.copy(timeFilter = filter) }
     }
 
@@ -391,27 +458,60 @@ class StatisticsViewModel @Inject constructor(
         val fullDateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
         val dayOfWeekFormat = SimpleDateFormat("EEE", Locale.getDefault())
 
-        // 根据时间筛选确定日期范围
-        val daysToShow = when (timeFilter) {
-            "current", "last" -> 30 // 当月/上月显示30天
-            "3months" -> 90
-            "6months" -> 180
-            "1year" -> 365
-            "all" -> 30
-            else -> 30
+        val range = when {
+            timeFilter.matches(Regex("\\d{4}-\\d{2}-\\d{2}")) -> {
+                val parts = timeFilter.split("-")
+                val year = parts[0].toInt()
+                val month = parts[1].toInt() - 1
+                val day = parts[2].toInt()
+                val start = Calendar.getInstance().apply {
+                    set(year, month, day, 0, 0, 0)
+                    set(Calendar.MILLISECOND, 0)
+                }
+                val end = Calendar.getInstance().apply {
+                    set(year, month, day, 23, 59, 59)
+                    set(Calendar.MILLISECOND, 999)
+                }
+                start to end
+            }
+            timeFilter.matches(Regex("\\d{4}-\\d{2}")) -> {
+                val parts = timeFilter.split("-")
+                val year = parts[0].toInt()
+                val month = parts[1].toInt() - 1
+                val start = Calendar.getInstance().apply {
+                    set(year, month, 1, 0, 0, 0)
+                    set(Calendar.MILLISECOND, 0)
+                }
+                val end = Calendar.getInstance().apply {
+                    set(year, month, getActualMaximum(Calendar.DAY_OF_MONTH), 23, 59, 59)
+                    set(Calendar.MILLISECOND, 999)
+                }
+                start to end
+            }
+            else -> {
+                val daysToShow = when (timeFilter) {
+                    "current", "last" -> 30
+                    "3months" -> 90
+                    "6months" -> 180
+                    "1year" -> 365
+                    "all" -> 30
+                    else -> 30
+                }
+                val end = Calendar.getInstance()
+                val start = Calendar.getInstance().apply {
+                    add(Calendar.DAY_OF_MONTH, -daysToShow + 1)
+                }
+                start to end
+            }
         }
 
-        val endDate = Calendar.getInstance()
-        val startDate = Calendar.getInstance().apply {
-            add(Calendar.DAY_OF_MONTH, -daysToShow + 1)
-        }
+        val startDate = range.first
+        val endDate = range.second
 
-        // 按日期分组
         val dailyGroups = transactions.groupBy { transaction ->
             fullDateFormat.format(Date(transaction.date))
         }
 
-        // 生成所有日期（包括没有数据的日期）
         val result = mutableListOf<DailyData>()
         calendar.timeInMillis = startDate.timeInMillis
 
@@ -421,10 +521,10 @@ class StatisticsViewModel @Inject constructor(
 
             val income = dayTransactions
                 .filter { it.type == TransactionType.INCOME }
-                .sumOf { it.amount }
+                .sumOf { kotlin.math.abs(it.amount) }
             val expense = dayTransactions
                 .filter { it.type == TransactionType.EXPENSE }
-                .sumOf { it.amount }
+                .sumOf { kotlin.math.abs(it.amount) }
 
             result.add(
                 DailyData(
@@ -483,10 +583,10 @@ class StatisticsViewModel @Inject constructor(
 
             val income = weekTransactions
                 .filter { it.type == TransactionType.INCOME }
-                .sumOf { it.amount }
+                .sumOf { kotlin.math.abs(it.amount) }
             val expense = weekTransactions
                 .filter { it.type == TransactionType.EXPENSE }
-                .sumOf { it.amount }
+                .sumOf { kotlin.math.abs(it.amount) }
 
             val weekStart = calendar.timeInMillis
             calendar.add(Calendar.DAY_OF_MONTH, 6)

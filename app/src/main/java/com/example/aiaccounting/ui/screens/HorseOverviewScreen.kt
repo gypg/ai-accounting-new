@@ -14,6 +14,8 @@ import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -21,6 +23,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
@@ -36,6 +41,7 @@ import com.example.aiaccounting.ui.theme.HorseTheme2026Colors
 import com.example.aiaccounting.ui.theme.LocalUiScale
 import com.example.aiaccounting.ui.navigation.Screen
 import com.example.aiaccounting.ui.viewmodel.OverviewViewModel
+import com.example.aiaccounting.utils.NumberUtils
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -46,10 +52,14 @@ fun HorseOverviewScreen(
  onNavigateToAddTransaction: () -> Unit = {},
  onNavigateToAI: () -> Unit = {},
  onNavigateToButlerMarket: () -> Unit = {},
- onNavigateToTransactions: () -> Unit = {},
+ onNavigateToTransactions: (String) -> Unit = {},
  onNavigateToStatistics: () -> Unit = {},
- onNavigateToAccounts: () -> Unit = {}
+ onNavigateToAccounts: () -> Unit = {},
+ onNavigateToBudgets: () -> Unit = {},
+ onNavigateToCalendar: (Int, Int) -> Unit = { _, _ -> },
+ onNavigateToYearlyWealth: (Int) -> Unit = {}
 ) {
+ val selectedYear by viewModel.selectedYear.collectAsState()
  val monthlyStats by viewModel.monthlyStats.collectAsState()
  val recentTransactions by viewModel.recentTransactions.collectAsState()
  val yearlyTrendData by viewModel.yearlyTrendData.collectAsState()
@@ -57,14 +67,51 @@ fun HorseOverviewScreen(
  val categories by viewModel.categories.collectAsState()
  val todayStats by viewModel.todayStats.collectAsState()
  val weekStats by viewModel.weekStats.collectAsState()
+ val yearlyBudgetProgress by viewModel.yearlyBudgetProgress.collectAsState()
+ val totalBudgetProgress by viewModel.totalBudgetProgress.collectAsState()
+ val lifecycleOwner = LocalLifecycleOwner.current
 
  // UI scaling
  val uiScale = LocalUiScale.current
- val overviewScale = uiScale.overviewScale
+ val cardScale = uiScale.cardScale
  val fontScale = uiScale.fontScale
 
- var selectedYear by remember { mutableStateOf(Calendar.getInstance().get(Calendar.YEAR)) }
+ var showAddMenu by remember { mutableStateOf(false) }
  val currentMonth = Calendar.getInstance().get(Calendar.MONTH) + 1
+
+ LaunchedEffect(Unit) {
+ viewModel.logOverviewScreenEnter(
+ theme = "horse_2026",
+ selectedYear = selectedYear,
+ accountCount = accounts.size,
+ categoryCount = categories.size,
+ recentTransactionCount = recentTransactions.size
+ )
+ }
+ DisposableEffect(lifecycleOwner) {
+ val observer = LifecycleEventObserver { _, event ->
+ if (event == Lifecycle.Event.ON_RESUME) {
+ viewModel.refreshCurrentYearMonth()
+ }
+ }
+ lifecycleOwner.lifecycle.addObserver(observer)
+ onDispose {
+ lifecycleOwner.lifecycle.removeObserver(observer)
+ }
+ }
+
+ AddTransactionMenu(
+ onDismiss = { showAddMenu = false },
+ isVisible = showAddMenu,
+ onAIAccounting = {
+ viewModel.logOverviewEntrySelected(theme = "horse_2026", entry = "ai_accounting")
+ onNavigateToAI()
+ },
+ onManualAccounting = {
+ viewModel.logOverviewEntrySelected(theme = "horse_2026", entry = "manual_accounting")
+ onNavigateToAddTransaction()
+ }
+ )
 
  Scaffold(
  topBar = {
@@ -75,7 +122,7 @@ fun HorseOverviewScreen(
  horizontalArrangement = Arrangement.Center,
  modifier = Modifier.fillMaxWidth()
  ) {
- IconButton(onClick = { selectedYear = selectedYear - 1 }) {
+ IconButton(onClick = { viewModel.setSelectedYear(selectedYear - 1) }) {
  Icon(
  imageVector = Icons.Default.ChevronLeft,
  contentDescription = "上一年",
@@ -88,7 +135,7 @@ fun HorseOverviewScreen(
  fontWeight = FontWeight.Bold,
  color = HorseTheme2026Colors.TextPrimary
  )
- IconButton(onClick = { selectedYear = selectedYear + 1 }) {
+ IconButton(onClick = { viewModel.setSelectedYear(selectedYear + 1) }) {
  Icon(
  imageVector = Icons.Default.ChevronRight,
  contentDescription = "下一年",
@@ -113,7 +160,10 @@ fun HorseOverviewScreen(
  },
  containerColor = Color.Transparent,
  floatingActionButton = {
- AIButton(onClick = onNavigateToAI)
+ AIButton(onClick = {
+ viewModel.logOverviewAddMenuOpened(theme = "horse_2026")
+ showAddMenu = true
+ })
  }
  ) { padding ->
  HorseBackground {
@@ -133,7 +183,7 @@ fun HorseOverviewScreen(
  totalExpense = monthlyStats.totalExpense,
  balance = monthlyStats.totalIncome - monthlyStats.totalExpense,
  butlerName = butlerName,
- overviewScale = overviewScale,
+ cardScale = cardScale,
  fontScale = fontScale
  )
 
@@ -146,11 +196,33 @@ fun HorseOverviewScreen(
  monthlyExpense = monthlyStats.monthlyExpense,
  yearlyExpense = monthlyStats.totalExpense,
  accountCount = accounts.size,
- onNavigateToTransactions = onNavigateToTransactions,
+ accountPreview = accounts.sortedByDescending { kotlin.math.abs(it.balance) }.take(3),
+ onNavigateToTransactions = {
+ onNavigateToTransactions(Screen.MonthlyTransactions.createRoute(selectedYear, currentMonth))
+ },
  onNavigateToStatistics = onNavigateToStatistics,
  onNavigateToAccounts = onNavigateToAccounts,
- overviewScale = overviewScale,
+ onNavigateToCalendar = onNavigateToCalendar,
+ onNavigateToYearlyWealth = onNavigateToYearlyWealth,
+ selectedYear = selectedYear,
+ cardScale = cardScale,
  fontScale = fontScale
+ )
+
+ Spacer(modifier = Modifier.height(16.dp))
+
+ BudgetOverviewCard(
+ title = "${selectedYear}年度预算",
+ budgetProgress = yearlyBudgetProgress,
+ onClick = onNavigateToBudgets
+ )
+
+ Spacer(modifier = Modifier.height(12.dp))
+
+ BudgetOverviewCard(
+ title = "${selectedYear}年${Calendar.getInstance().get(Calendar.MONTH) + 1}月预算",
+ budgetProgress = totalBudgetProgress,
+ onClick = onNavigateToBudgets
  )
 
  Spacer(modifier = Modifier.height(16.dp))
@@ -158,7 +230,7 @@ fun HorseOverviewScreen(
  // 本月支出趋势（真实数据）
  MonthlyTrendCard(
  yearlyTrendData = yearlyTrendData,
- overviewScale = overviewScale,
+ cardScale = cardScale,
  fontScale = fontScale
  )
 
@@ -168,7 +240,7 @@ fun HorseOverviewScreen(
  CategorySummaryCard(
  recentTransactions = recentTransactions,
  categories = categories,
- overviewScale = overviewScale,
+ cardScale = cardScale,
  fontScale = fontScale
  )
 
@@ -177,7 +249,7 @@ fun HorseOverviewScreen(
  // 最近交易（真实数据）
  RecentTransactionsCard(
  transactions = recentTransactions,
- overviewScale = overviewScale,
+ cardScale = cardScale,
  fontScale = fontScale
  )
 
@@ -211,7 +283,7 @@ fun YearlySummaryCard(
  totalExpense: Double,
  balance: Double,
  butlerName: String,
- overviewScale: Float = 1f,
+ cardScale: Float = 1f,
  fontScale: Float = 1f
 ) {
  Card(
@@ -243,7 +315,7 @@ fun YearlySummaryCard(
  amount = "¥${String.format("%.2f", totalIncome)}",
  color = HorseTheme2026Colors.Income,
  icon = Icons.AutoMirrored.Filled.TrendingUp,
- overviewScale = overviewScale,
+ cardScale = cardScale,
  fontScale = fontScale
  )
 
@@ -253,7 +325,7 @@ fun YearlySummaryCard(
  amount = "¥${String.format("%.2f", totalExpense)}",
  color = HorseTheme2026Colors.Expense,
  icon = Icons.AutoMirrored.Filled.TrendingDown,
- overviewScale = overviewScale,
+ cardScale = cardScale,
  fontScale = fontScale
  )
 
@@ -263,7 +335,7 @@ fun YearlySummaryCard(
  amount = "¥${String.format("%.2f", balance)}",
  color = HorseTheme2026Colors.Gold,
  icon = Icons.Default.AccountBalance,
- overviewScale = overviewScale,
+ cardScale = cardScale,
  fontScale = fontScale
  )
  }
@@ -277,7 +349,7 @@ fun SummaryItem(
  amount: String,
  color: Color,
  icon: ImageVector,
- overviewScale: Float = 1f,
+ cardScale: Float = 1f,
  fontScale: Float = 1f
 ) {
  Column(
@@ -286,7 +358,7 @@ fun SummaryItem(
  // 图标
  Box(
  modifier = Modifier
- .size((40 * overviewScale).dp)
+ .size((40 * cardScale).dp)
  .clip(CircleShape)
  .background(color.copy(alpha = 0.2f)),
  contentAlignment = Alignment.Center
@@ -295,7 +367,7 @@ fun SummaryItem(
  imageVector = icon,
  contentDescription = label,
  tint = color,
- modifier = Modifier.size((24 * overviewScale).dp)
+ modifier = Modifier.size((24 * cardScale).dp)
  )
  }
  Spacer(modifier = Modifier.height(8.dp))
@@ -316,208 +388,127 @@ fun SummaryItem(
 
 @Composable
 fun QuickActionCards(
+ cardScale: Float = 1f,
  currentMonth: Int,
  monthlyIncome: Double,
  monthlyExpense: Double,
  yearlyExpense: Double,
  accountCount: Int,
+ accountPreview: List<com.example.aiaccounting.data.local.entity.Account> = emptyList(),
  onNavigateToTransactions: () -> Unit,
  onNavigateToStatistics: () -> Unit,
  onNavigateToAccounts: () -> Unit = {},
- overviewScale: Float = 1f,
+ onNavigateToCalendar: (Int, Int) -> Unit,
+ onNavigateToYearlyWealth: (Int) -> Unit,
+ selectedYear: Int,
  fontScale: Float = 1f
 ) {
+ val today = Calendar.getInstance()
+ val dateLabel = "${today.get(Calendar.MONTH) + 1}月${today.get(Calendar.DAY_OF_MONTH)}日"
+ val weekDays = listOf("周日", "周一", "周二", "周三", "周四", "周五", "周六")
+ val incomeText = if (monthlyIncome >= 10000) "${String.format("%.1f", monthlyIncome / 10000)}万" else NumberUtils.formatMoney(monthlyIncome)
+ val expenseText = if (monthlyExpense >= 10000) "${String.format("%.1f", monthlyExpense / 10000)}万" else NumberUtils.formatMoney(monthlyExpense)
+ val trendText = if (yearlyExpense >= 10000) "${String.format("%.1f", yearlyExpense / 10000)}万" else NumberUtils.formatMoney(yearlyExpense)
+
+ Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
  Row(
  modifier = Modifier.fillMaxWidth(),
  horizontalArrangement = Arrangement.spacedBy(12.dp)
  ) {
- // 方框1：日历信息 - 点击跳转到交易明细
- val today = Calendar.getInstance()
- val currentYear = today.get(Calendar.YEAR)
- val currentMonthNum = today.get(Calendar.MONTH) + 1
- val currentDay = today.get(Calendar.DAY_OF_MONTH)
-
  ActionCard(
  title = "日历",
- subtitle = "",
+ subtitle = "${selectedYear}年${currentMonth}月",
  icon = Icons.Default.CalendarMonth,
  content = {
- Column(
- modifier = Modifier.fillMaxWidth(),
- horizontalAlignment = Alignment.CenterHorizontally
- ) {
- // 年份（放大）
- Text(
- text = "$currentYear",
- color = HorseTheme2026Colors.TextPrimary,
- fontSize = (26 * overviewScale * fontScale).sp,
- fontWeight = FontWeight.Bold
- )
- Spacer(modifier = Modifier.height(2.dp))
- // 月份和日期
- Text(
- text = "${currentMonthNum}月${currentDay}日",
- color = HorseTheme2026Colors.Gold,
- fontSize = (14 * fontScale).sp,
- fontWeight = FontWeight.Medium
- )
- Spacer(modifier = Modifier.height(2.dp))
- // 星期
- val weekDays = listOf("周日", "周一", "周二", "周三", "周四", "周五", "周六")
  Text(
  text = weekDays[today.get(Calendar.DAY_OF_WEEK) - 1],
- color = HorseTheme2026Colors.TextSecondary,
- fontSize = (12 * fontScale).sp
- )
- }
- },
- onClick = onNavigateToTransactions,
- modifier = Modifier.weight(1f),
- overviewScale = overviewScale,
- fontScale = fontScale
- )
-
- // 方框2：月度收支数据 - 点击跳转到交易明细
- ActionCard(
- title = "本月收支",
- subtitle = "",
- icon = Icons.Default.AccountBalanceWallet,
- content = {
- Column(
- modifier = Modifier.fillMaxWidth(),
- horizontalAlignment = Alignment.CenterHorizontally
- ) {
- // 收入
- val incomeText = if (monthlyIncome >= 10000) {
- "${(monthlyIncome / 10000).toInt()}万"
- } else {
- monthlyIncome.toInt().toString()
- }
- Row(
- verticalAlignment = Alignment.CenterVertically,
- modifier = Modifier.fillMaxWidth()
- ) {
- Text(
- text = "收",
- color = HorseTheme2026Colors.TextSecondary,
- fontSize = (11 * fontScale).sp,
- modifier = Modifier.width(20.dp)
+ color = HorseTheme2026Colors.Gold,
+ fontSize = (14 * fontScale).sp,
+ fontWeight = FontWeight.SemiBold
  )
  Text(
- text = "¥$incomeText",
- color = HorseTheme2026Colors.Income,
- fontSize = (16 * fontScale).sp,
- fontWeight = FontWeight.Bold
- )
- }
-
- Spacer(modifier = Modifier.height(4.dp))
-
- // 支出
- val expenseText = if (monthlyExpense >= 10000) {
- "${(monthlyExpense / 10000).toInt()}万"
- } else {
- monthlyExpense.toInt().toString()
- }
- Row(
- verticalAlignment = Alignment.CenterVertically,
- modifier = Modifier.fillMaxWidth()
- ) {
- Text(
- text = "支",
- color = HorseTheme2026Colors.TextSecondary,
- fontSize = (11 * fontScale).sp,
- modifier = Modifier.width(20.dp)
- )
- Text(
- text = "¥$expenseText",
- color = HorseTheme2026Colors.Expense,
- fontSize = (16 * fontScale).sp,
- fontWeight = FontWeight.Bold
- )
- }
- }
- },
- onClick = onNavigateToTransactions,
- modifier = Modifier.weight(1f),
- overviewScale = overviewScale,
- fontScale = fontScale
- )
-
- // 账户明细 - 点击跳转到账户列表
- ActionCard(
- title = "账户明细",
- icon = Icons.Default.Receipt,
- content = {
- Column(
- horizontalAlignment = Alignment.CenterHorizontally,
- modifier = Modifier.fillMaxWidth()
- ) {
- Box(
- modifier = Modifier
- .size((40 * overviewScale).dp)
- .clip(CircleShape)
- .background(HorseTheme2026Colors.Gold.copy(alpha = 0.2f)),
- contentAlignment = Alignment.Center
- ) {
- Icon(
- imageVector = Icons.Default.Receipt,
- contentDescription = null,
- tint = HorseTheme2026Colors.Gold,
- modifier = Modifier.size((24 * overviewScale).dp)
- )
- }
- Spacer(modifier = Modifier.height(4.dp))
- Text(
- text = "${accountCount}个账户",
+ text = dateLabel,
  color = HorseTheme2026Colors.TextSecondary,
  fontSize = (11 * fontScale).sp
  )
+ },
+ onClick = { onNavigateToCalendar(selectedYear, currentMonth) },
+ modifier = Modifier.weight(1f),
+ cardScale = cardScale,
+ fontScale = fontScale
+ )
+
+ ActionCard(
+ title = "本月收支",
+ subtitle = "${currentMonth}月",
+ icon = Icons.Default.AccountBalanceWallet,
+ content = {
+ Column(modifier = Modifier.fillMaxWidth()) {
+ Text("收 $incomeText", color = HorseTheme2026Colors.Income, fontSize = (13 * fontScale).sp, fontWeight = FontWeight.Bold)
+ Spacer(modifier = Modifier.height(4.dp))
+ Text("支 $expenseText", color = HorseTheme2026Colors.Expense, fontSize = (13 * fontScale).sp, fontWeight = FontWeight.Bold)
+ }
+ },
+ onClick = onNavigateToTransactions,
+ modifier = Modifier.weight(1f),
+ cardScale = cardScale,
+ fontScale = fontScale
+ )
+ }
+
+ Row(
+ modifier = Modifier.fillMaxWidth(),
+ horizontalArrangement = Arrangement.spacedBy(12.dp)
+ ) {
+ ActionCard(
+ title = "账户明细",
+ subtitle = "共${accountCount}个",
+ icon = Icons.Default.Receipt,
+ content = {
+ if (accountPreview.isEmpty()) {
+ Text(
+ text = "暂无账户",
+ color = HorseTheme2026Colors.TextSecondary,
+ fontSize = (12 * fontScale).sp,
+ fontWeight = FontWeight.Medium
+ )
+ } else {
+ Column(modifier = Modifier.fillMaxWidth()) {
+ accountPreview.forEach { account ->
+ Text(
+ text = "${account.name} ${NumberUtils.formatMoney(account.balance)}",
+ color = HorseTheme2026Colors.TextSecondary,
+ fontSize = (11 * fontScale).sp,
+ maxLines = 1
+ )
+ }
+ }
  }
  },
  onClick = onNavigateToAccounts,
  modifier = Modifier.weight(1f),
- overviewScale = overviewScale,
+ cardScale = cardScale,
  fontScale = fontScale
  )
 
- // 年度趋势 - 点击跳转到统计
  ActionCard(
  title = "年度趋势",
+ subtitle = "${selectedYear}年财富分析",
  icon = Icons.AutoMirrored.Filled.ShowChart,
  content = {
- Column(
- horizontalAlignment = Alignment.CenterHorizontally,
- modifier = Modifier.fillMaxWidth()
- ) {
- Box(
- modifier = Modifier
- .size((40 * overviewScale).dp)
- .clip(CircleShape)
- .background(HorseTheme2026Colors.Gold.copy(alpha = 0.2f)),
- contentAlignment = Alignment.Center
- ) {
- Icon(
- imageVector = Icons.AutoMirrored.Filled.ShowChart,
- contentDescription = null,
- tint = HorseTheme2026Colors.Gold,
- modifier = Modifier.size((24 * overviewScale).dp)
- )
- }
- Spacer(modifier = Modifier.height(4.dp))
  Text(
- text = "¥${String.format("%.2f", yearlyExpense)}",
+ text = trendText,
  color = HorseTheme2026Colors.Gold,
  fontSize = (14 * fontScale).sp,
  fontWeight = FontWeight.Bold
  )
- }
  },
- onClick = onNavigateToStatistics,
+ onClick = { onNavigateToYearlyWealth(selectedYear) },
  modifier = Modifier.weight(1f),
- overviewScale = overviewScale,
+ cardScale = cardScale,
  fontScale = fontScale
  )
+ }
  }
 }
 
@@ -529,13 +520,13 @@ fun ActionCard(
  content: @Composable () -> Unit,
  onClick: () -> Unit = {},
  modifier: Modifier = Modifier,
- overviewScale: Float = 1f,
+ cardScale: Float = 1f,
  fontScale: Float = 1f
 ) {
  Card(
  modifier = modifier
  .clickable(onClick = onClick)
- .height((130 * overviewScale).dp),
+ .height((130 * cardScale).dp),
  shape = RoundedCornerShape(12.dp),
  colors = CardDefaults.cardColors(
  containerColor = HorseTheme2026Colors.CardBackground
@@ -580,7 +571,7 @@ fun ActionCard(
 @Composable
  fun MonthlyTrendCard(
  yearlyTrendData: List<com.example.aiaccounting.ui.components.charts.MonthlyData>,
- overviewScale: Float = 1f,
+ cardScale: Float = 1f,
  fontScale: Float = 1f
 ) {
  var selectedMonth by remember { mutableStateOf<com.example.aiaccounting.ui.components.charts.MonthlyData?>(null) }
@@ -623,13 +614,13 @@ fun ActionCard(
  horizontalArrangement = Arrangement.Center
  ) {
  Row(verticalAlignment = Alignment.CenterVertically) {
- Box(modifier = Modifier.size((10 * overviewScale).dp).background(Color(0xFF00E676), CircleShape))
+ Box(modifier = Modifier.size((10 * cardScale).dp).background(Color(0xFF00E676), CircleShape))
  Spacer(modifier = Modifier.width(4.dp))
  Text("收入", color = HorseTheme2026Colors.TextSecondary, fontSize = (10 * fontScale).sp)
  }
  Spacer(modifier = Modifier.width(16.dp))
  Row(verticalAlignment = Alignment.CenterVertically) {
- Box(modifier = Modifier.size((10 * overviewScale).dp).background(Color(0xFF00B0FF), CircleShape))
+ Box(modifier = Modifier.size((10 * cardScale).dp).background(Color(0xFF00B0FF), CircleShape))
  Spacer(modifier = Modifier.width(4.dp))
  Text("支出", color = HorseTheme2026Colors.TextSecondary, fontSize = (10 * fontScale).sp)
  }
@@ -648,7 +639,7 @@ fun ActionCard(
  Row(
  modifier = Modifier
  .fillMaxWidth()
- .height((100 * overviewScale).dp),
+ .height((100 * cardScale).dp),
  horizontalArrangement = Arrangement.SpaceEvenly,
  verticalAlignment = Alignment.Bottom
  ) {
@@ -667,7 +658,7 @@ fun ActionCard(
  Box(
  modifier = Modifier
  .width((12 * fontScale).dp)
- .height((incomeHeight * 40 * overviewScale).dp)
+ .height((incomeHeight * 40 * cardScale).dp)
  .clip(RoundedCornerShape(2.dp))
  .background(
  if (isSelected) Color(0xFF00E676)
@@ -681,7 +672,7 @@ fun ActionCard(
  Box(
  modifier = Modifier
  .width((12 * fontScale).dp)
- .height((expenseHeight * 40 * overviewScale).dp)
+ .height((expenseHeight * 40 * cardScale).dp)
  .clip(RoundedCornerShape(2.dp))
  .background(
  if (isSelected) Color(0xFF00B0FF)
@@ -774,7 +765,7 @@ fun ActionCard(
 fun CategorySummaryCard(
  recentTransactions: List<com.example.aiaccounting.data.local.entity.Transaction>,
  categories: List<com.example.aiaccounting.data.local.entity.Category>,
- overviewScale: Float = 1f,
+ cardScale: Float = 1f,
  fontScale: Float = 1f
 ) {
  // 从真实交易计算分类统计，使用真实的分类名称
@@ -828,7 +819,7 @@ fun CategorySummaryCard(
  progress = { stat.percentage },
  modifier = Modifier
  .weight(1f)
- .height((6 * overviewScale).dp)
+ .height((6 * cardScale).dp)
  .clip(RoundedCornerShape(3.dp)),
  color = stat.color,
  trackColor = HorseTheme2026Colors.TextSecondary.copy(alpha = 0.1f)
@@ -871,7 +862,7 @@ fun rememberCategoryStats(
 ): List<OverviewCategoryStat> {
  return remember(transactions, categories) {
  val expenseTransactions = transactions.filter { it.type == TransactionType.EXPENSE }
- val totalExpense = expenseTransactions.sumOf { it.amount }
+ val totalExpense = expenseTransactions.sumOf { kotlin.math.abs(it.amount) }
 
  if (totalExpense <= 0) return@remember emptyList()
 
@@ -881,7 +872,7 @@ fun rememberCategoryStats(
  expenseTransactions
  .groupBy { it.categoryId }
  .map { (categoryId, transList) ->
- val amount = transList.sumOf { it.amount }
+ val amount = transList.sumOf { kotlin.math.abs(it.amount) }
  // 从分类映射中获取真实名称，如果没有则显示"未分类"
  val categoryName = categoryMap[categoryId]?.name ?: "未分类"
  // 使用分类的颜色，如果没有则使用默认颜色
@@ -911,7 +902,7 @@ fun rememberCategoryStats(
 @Composable
 fun RecentTransactionsCard(
  transactions: List<com.example.aiaccounting.data.local.entity.Transaction>,
- overviewScale: Float = 1f,
+ cardScale: Float = 1f,
  fontScale: Float = 1f
 ) {
  val dateFormat = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
@@ -962,7 +953,7 @@ fun RecentTransactionsCard(
  Row(verticalAlignment = Alignment.CenterVertically) {
  Box(
  modifier = Modifier
- .size((36 * overviewScale).dp)
+ .size((36 * cardScale).dp)
  .clip(RoundedCornerShape(8.dp))
  .background(
  if (isExpense)
@@ -976,7 +967,7 @@ fun RecentTransactionsCard(
  imageVector = if (isExpense) Icons.Default.ShoppingCart else Icons.Default.AttachMoney,
  contentDescription = null,
  tint = amountColor,
- modifier = Modifier.size((20 * overviewScale).dp)
+ modifier = Modifier.size((20 * cardScale).dp)
  )
  }
  Spacer(modifier = Modifier.width(10.dp))

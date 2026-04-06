@@ -23,6 +23,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.aiaccounting.BuildConfig
 import com.example.aiaccounting.data.local.prefs.AppStateManager
 import com.example.aiaccounting.ui.theme.AppThemeOptions
+import com.example.aiaccounting.ui.theme.LocalUiScale
 import com.example.aiaccounting.ui.viewmodel.SettingsViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -38,6 +39,7 @@ fun SettingsScreen(
     onNavigateToTemplates: () -> Unit = {},
     onNavigateToImport: () -> Unit = {},
     onNavigateToAISettings: () -> Unit = {},
+    onNavigateToLogBrowser: () -> Unit = {},
     onNavigateToBudgets: () -> Unit = {},
     onNavigateToSetupPin: () -> Unit = {},
     onLogout: () -> Unit = {},
@@ -51,8 +53,14 @@ fun SettingsScreen(
     var showLogoutConfirmDialog by remember { mutableStateOf(false) }
     var showThemeDialog by remember { mutableStateOf(false) }
     var showUiScaleDialog by remember { mutableStateOf(false) }
+    var showLogAutoClearDialog by remember { mutableStateOf(false) }
+    var showBiometricDialog by remember { mutableStateOf(false) }
+    var showPinOptionsDialog by remember { mutableStateOf(false) }
     val currentTheme = appStateManager.getTheme()
-    val uiScale by remember(uiScaleKey) { mutableStateOf(appStateManager.getUiScalePreferences()) }
+    val uiState by viewModel.uiState.collectAsState()
+    val uiScale = LocalUiScale.current
+    val cardScale = uiScale.cardScale
+    val fontScale = uiScale.fontScale
 
     Scaffold(
         topBar = {
@@ -60,7 +68,7 @@ fun SettingsScreen(
                 title = { 
                     Text(
                         text = "设置",
-                        fontSize = 24.sp,
+                        fontSize = (24 * fontScale).sp,
                         fontWeight = FontWeight.Bold
                     )
                 },
@@ -77,36 +85,42 @@ fun SettingsScreen(
                 .fillMaxSize()
                 .padding(padding)
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp)
+                .padding(horizontal = (16 * cardScale).dp)
         ) {
+            Spacer(modifier = Modifier.height(8.dp))
+
             // 数据管理区域
-            SettingsSectionTitle("数据管理")
+            SettingsSectionTitle("数据管理", fontScale = fontScale)
             
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                horizontalArrangement = Arrangement.spacedBy((12 * cardScale).dp)
             ) {
                 SettingsGridItem(
                     icon = Icons.Default.AccountBalance,
                     title = "账户管理",
                     subtitle = "管理银行卡、现金等账户",
                     onClick = onNavigateToAccounts,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(1f),
+                    cardScale = cardScale,
+                    fontScale = fontScale
                 )
                 SettingsGridItem(
                     icon = Icons.Default.Label,
                     title = "分类管理",
                     subtitle = "管理收支分类",
                     onClick = onNavigateToCategories,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(1f),
+                    cardScale = cardScale,
+                    fontScale = fontScale
                 )
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height((12 * cardScale).dp))
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                horizontalArrangement = Arrangement.spacedBy((12 * cardScale).dp)
             ) {
                 SettingsGridItem(
                     icon = Icons.Default.Backup,
@@ -114,7 +128,9 @@ fun SettingsScreen(
                     subtitle = "备份与恢复数据库",
                     onClick = onNavigateToExport,
                     modifier = Modifier.weight(1f),
-                    iconBackgroundColor = Color(0xFFFFF3E0)
+                    iconBackgroundColor = Color(0xFFFFF3E0),
+                    cardScale = cardScale,
+                    fontScale = fontScale
                 )
                 SettingsGridItem(
                     icon = Icons.Default.Person,
@@ -122,16 +138,18 @@ fun SettingsScreen(
                     subtitle = "个人资料与头像",
                     onClick = onNavigateToProfile,
                     modifier = Modifier.weight(1f),
-                    iconBackgroundColor = Color(0xFFE8F5E9)
+                    iconBackgroundColor = Color(0xFFE8F5E9),
+                    cardScale = cardScale,
+                    fontScale = fontScale
                 )
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height((12 * cardScale).dp))
 
             // 新增功能入口
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                horizontalArrangement = Arrangement.spacedBy((12 * cardScale).dp)
             ) {
                 SettingsGridItem(
                     icon = Icons.Default.Bookmark,
@@ -139,7 +157,9 @@ fun SettingsScreen(
                     subtitle = "快速记账模板管理",
                     onClick = onNavigateToTemplates,
                     modifier = Modifier.weight(1f),
-                    iconBackgroundColor = Color(0xFFF3E5F5)
+                    iconBackgroundColor = Color(0xFFF3E5F5),
+                    cardScale = cardScale,
+                    fontScale = fontScale
                 )
                 SettingsGridItem(
                     icon = Icons.Default.FileUpload,
@@ -147,42 +167,60 @@ fun SettingsScreen(
                     subtitle = "导入支付宝/微信账单",
                     onClick = onNavigateToImport,
                     modifier = Modifier.weight(1f),
-                    iconBackgroundColor = Color(0xFFE0F2F1)
+                    iconBackgroundColor = Color(0xFFE0F2F1),
+                    cardScale = cardScale,
+                    fontScale = fontScale
                 )
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height((12 * cardScale).dp))
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                SettingsGridItem(
-                    icon = Icons.Default.SmartToy,
-                    title = "AI助手设置",
-                    subtitle = "配置AI大模型API",
-                    onClick = onNavigateToAISettings,
-                    modifier = Modifier.weight(1f),
-                    iconBackgroundColor = Color(0xFFFFF8E1)
-                )
-                SettingsGridItem(
-                    icon = Icons.Default.AccountBalanceWallet,
-                    title = "预算管理",
-                    subtitle = "设置月度预算",
-                    onClick = onNavigateToBudgets,
-                    modifier = Modifier.weight(1f),
-                    iconBackgroundColor = Color(0xFFE3F2FD)
-                )
-            }
+            SettingsListItem(
+                icon = Icons.Default.SmartToy,
+                title = "AI助手设置",
+                subtitle = "配置AI大模型API",
+                onClick = onNavigateToAISettings,
+                cardScale = cardScale,
+                fontScale = fontScale
+            )
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(8.dp))
+
+            SettingsListItem(
+                icon = Icons.Default.Article,
+                title = "平台日志",
+                subtitle = "查看操作与错误日志",
+                onClick = onNavigateToLogBrowser,
+                cardScale = cardScale,
+                fontScale = fontScale
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            SettingsListItem(
+                icon = Icons.Default.Schedule,
+                title = "日志自动清理",
+                subtitle = if (uiState.logAutoClearPreferences.enabled) "每 ${uiState.logAutoClearPreferences.intervalHours} 小时自动清理一次" else "已关闭",
+                onClick = { showLogAutoClearDialog = true },
+                cardScale = cardScale,
+                fontScale = fontScale
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            SettingsListItem(
+                icon = Icons.Default.AccountBalanceWallet,
+                title = "预算管理",
+                subtitle = "设置月度预算",
+                onClick = onNavigateToBudgets,
+                cardScale = cardScale,
+                fontScale = fontScale
+            )
+
+            Spacer(modifier = Modifier.height((24 * cardScale).dp))
 
             // 安全设置区域
-            SettingsSectionTitle("安全")
-
-            val uiState by viewModel.uiState.collectAsState()
-            var showBiometricDialog by remember { mutableStateOf(false) }
-            var showPinOptionsDialog by remember { mutableStateOf(false) }
+            SettingsSectionTitle("安全", fontScale = fontScale)
 
             // PIN码设置
             SettingsListItem(
@@ -191,7 +229,9 @@ fun SettingsScreen(
                 subtitle = if (uiState.isPinSet) "已设置" else "未设置",
                 onClick = {
                     showPinOptionsDialog = true
-                }
+                },
+                cardScale = cardScale,
+                fontScale = fontScale
             )
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -203,7 +243,9 @@ fun SettingsScreen(
                 subtitle = if (uiState.isBiometricEnabled) "已开启" else "已关闭",
                 onClick = {
                     showBiometricDialog = true
-                }
+                },
+                cardScale = cardScale,
+                fontScale = fontScale
             )
 
             // PIN码选项对话框
@@ -290,10 +332,10 @@ fun SettingsScreen(
                 )
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height((24 * cardScale).dp))
 
             // 外观设置区域
-            SettingsSectionTitle("外观")
+            SettingsSectionTitle("外观", fontScale = fontScale)
 
             // 主题设置
             val themeText = when (currentTheme) {
@@ -309,7 +351,9 @@ fun SettingsScreen(
                 icon = Icons.Default.Palette,
                 title = "主题",
                 subtitle = themeText,
-                onClick = { showThemeDialog = true }
+                onClick = { showThemeDialog = true },
+                cardScale = cardScale,
+                fontScale = fontScale
             )
 
             // Material You动态主题开关（仅Android 12+）
@@ -325,7 +369,9 @@ fun SettingsScreen(
                         val newTheme = if (dynamicThemeEnabled) "dynamic" else "system"
                         appStateManager.setTheme(newTheme)
                         onThemeChanged()
-                    }
+                    },
+                    cardScale = cardScale,
+                    fontScale = fontScale
                 )
             }
 
@@ -334,30 +380,34 @@ fun SettingsScreen(
                 icon = Icons.Default.ZoomIn,
                 title = "显示大小",
                 subtitle = "调整界面和字体大小",
-                onClick = { showUiScaleDialog = true }
+                onClick = { showUiScaleDialog = true },
+                cardScale = cardScale,
+                fontScale = fontScale
             )
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height((24 * cardScale).dp))
 
             // 管家设置区域
-            SettingsSectionTitle("管家")
+            SettingsSectionTitle("管家", fontScale = fontScale)
 
             // 管家角色管理
             SettingsListItem(
                 icon = Icons.Default.SmartToy,
                 title = "AI管家",
                 subtitle = "选择或创建自定义管家",
-                onClick = onNavigateToButlerSettings
+                onClick = onNavigateToButlerSettings,
+                cardScale = cardScale,
+                fontScale = fontScale
             )
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height((24 * cardScale).dp))
 
             // 其他区域
-            SettingsSectionTitle("其他")
+            SettingsSectionTitle("其他", fontScale = fontScale)
             
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                horizontalArrangement = Arrangement.spacedBy((12 * cardScale).dp)
             ) {
                 // 关于按钮
                 OutlinedButton(
@@ -416,6 +466,58 @@ fun SettingsScreen(
 
             Spacer(modifier = Modifier.height(32.dp))
         }
+    }
+
+    // 日志自动清理设置对话框
+    if (showLogAutoClearDialog) {
+        val intervalOptions = listOf(1, 6, 24, 168)
+        AlertDialog(
+            onDismissRequest = { showLogAutoClearDialog = false },
+            title = { Text("日志自动清理", fontSize = (18 * fontScale).sp) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy((12 * cardScale).dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "启用自动清理",
+                            fontSize = (15 * fontScale).sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Switch(
+                            checked = uiState.logAutoClearPreferences.enabled,
+                            onCheckedChange = { viewModel.updateLogAutoClearEnabled(it) }
+                        )
+                    }
+                    intervalOptions.forEach { hours ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { viewModel.updateLogAutoClearIntervalHours(hours) }
+                                .padding(vertical = (8 * cardScale).dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = uiState.logAutoClearPreferences.intervalHours == hours,
+                                onClick = { viewModel.updateLogAutoClearIntervalHours(hours) }
+                            )
+                            Spacer(modifier = Modifier.width((8 * cardScale).dp))
+                            Text(
+                                text = if (hours < 24) "每 ${hours} 小时" else if (hours == 24) "每天" else "每 7 天",
+                                fontSize = (14 * fontScale).sp
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showLogAutoClearDialog = false }) {
+                    Text("确定", fontSize = (14 * fontScale).sp)
+                }
+            }
+        )
     }
 
     // 关于对话框
@@ -548,10 +650,7 @@ fun SettingsScreen(
 
     // 显示大小对话框
     if (showUiScaleDialog) {
-        var localOverviewScale by remember { mutableFloatStateOf(uiScale.overviewScale) }
-        var localStatisticsScale by remember { mutableFloatStateOf(uiScale.statisticsScale) }
-        var localTransactionScale by remember { mutableFloatStateOf(uiScale.transactionScale) }
-        var localSettingsScale by remember { mutableFloatStateOf(uiScale.settingsScale) }
+        var localCardScale by remember { mutableFloatStateOf(uiScale.cardScale) }
         var localFontScale by remember { mutableFloatStateOf(uiScale.fontScale) }
 
         AlertDialog(
@@ -559,38 +658,15 @@ fun SettingsScreen(
             title = { Text("显示大小", fontWeight = FontWeight.Bold) },
             text = {
                 Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
-                    Text("调整各项界面的显示大小（${(localOverviewScale * 100).toInt()}%）", fontSize = 12.sp, color = Color(0xFF888888))
+                    Text("调整卡片大小与全局字体（${(localCardScale * 100).toInt()}%）", fontSize = 12.sp, color = Color(0xFF888888))
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    // 总览界面
                     ScaleSliderItem(
-                        label = "总览界面",
-                        value = localOverviewScale,
-                        onValueChange = { localOverviewScale = it }
+                        label = "卡片大小",
+                        value = localCardScale,
+                        onValueChange = { localCardScale = it }
                     )
 
-                    // 统计界面
-                    ScaleSliderItem(
-                        label = "统计界面",
-                        value = localStatisticsScale,
-                        onValueChange = { localStatisticsScale = it }
-                    )
-
-                    // 交易明细界面
-                    ScaleSliderItem(
-                        label = "交易明细",
-                        value = localTransactionScale,
-                        onValueChange = { localTransactionScale = it }
-                    )
-
-                    // 设置界面
-                    ScaleSliderItem(
-                        label = "设置界面",
-                        value = localSettingsScale,
-                        onValueChange = { localSettingsScale = it }
-                    )
-
-                    // 全局字体
                     ScaleSliderItem(
                         label = "全局字体",
                         value = localFontScale,
@@ -602,20 +678,15 @@ fun SettingsScreen(
                 Row {
                     TextButton(onClick = {
                         // 重置为默认值
-                        localOverviewScale = 1.0f
-                        localStatisticsScale = 1.0f
-                        localTransactionScale = 1.0f
-                        localSettingsScale = 1.0f
+                        localCardScale = 1.0f
                         localFontScale = 1.0f
                     }) {
                         Text("重置")
                     }
                     Spacer(modifier = Modifier.width(8.dp))
                     TextButton(onClick = {
-                        appStateManager.setOverviewScale(localOverviewScale)
-                        appStateManager.setStatisticsScale(localStatisticsScale)
-                        appStateManager.setTransactionScale(localTransactionScale)
-                        appStateManager.setSettingsScale(localSettingsScale)
+                        viewModel.logUiScaleChanged(localCardScale, localFontScale)
+                        appStateManager.setCardScale(localCardScale)
                         appStateManager.setFontScale(localFontScale)
                         showUiScaleDialog = false
                         onUiScaleChanged()
@@ -634,10 +705,10 @@ fun SettingsScreen(
 }
 
 @Composable
-fun SettingsSectionTitle(title: String) {
+fun SettingsSectionTitle(title: String, fontScale: Float = 1f) {
     Text(
         text = title,
-        fontSize = 14.sp,
+        fontSize = (14 * fontScale).sp,
         color = Color(0xFF888888),
         modifier = Modifier.padding(bottom = 12.dp)
     )
@@ -650,7 +721,9 @@ fun SettingsGridItem(
     subtitle: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    iconBackgroundColor: Color = Color(0xFFE3F2FD)
+    iconBackgroundColor: Color = Color(0xFFE3F2FD),
+    cardScale: Float = 1f,
+    fontScale: Float = 1f
 ) {
     Card(
         modifier = modifier
@@ -662,14 +735,14 @@ fun SettingsGridItem(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
+                .padding((16 * cardScale).dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             // 图标
             Box(
                 modifier = Modifier
-                    .size(48.dp)
-                    .clip(RoundedCornerShape(12.dp))
+                    .size((48 * cardScale).dp)
+                    .clip(RoundedCornerShape((12 * cardScale).dp))
                     .background(iconBackgroundColor.copy(alpha = 0.3f)),
                 contentAlignment = Alignment.Center
             ) {
@@ -677,23 +750,23 @@ fun SettingsGridItem(
                     imageVector = icon,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(24.dp)
+                    modifier = Modifier.size((24 * cardScale).dp)
                 )
             }
 
-            Spacer(modifier = Modifier.width(12.dp))
+            Spacer(modifier = Modifier.width((12 * cardScale).dp))
 
             // 文字内容
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = title,
-                    fontSize = 16.sp,
+                    fontSize = (16 * fontScale).sp,
                     fontWeight = FontWeight.Medium,
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
                     text = subtitle,
-                    fontSize = 12.sp,
+                    fontSize = (12 * fontScale).sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
@@ -715,7 +788,9 @@ fun SettingsListItem(
     title: String,
     subtitle: String,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    cardScale: Float = 1f,
+    fontScale: Float = 1f
 ) {
     Card(
         modifier = modifier
@@ -728,14 +803,14 @@ fun SettingsListItem(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
+                .padding((16 * cardScale).dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             // 图标
             Box(
                 modifier = Modifier
-                    .size(40.dp)
-                    .clip(RoundedCornerShape(10.dp))
+                    .size((40 * cardScale).dp)
+                    .clip(RoundedCornerShape((10 * cardScale).dp))
                     .background(MaterialTheme.colorScheme.primaryContainer),
                 contentAlignment = Alignment.Center
             ) {
@@ -743,23 +818,23 @@ fun SettingsListItem(
                     imageVector = icon,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(20.dp)
+                    modifier = Modifier.size((20 * cardScale).dp)
                 )
             }
 
-            Spacer(modifier = Modifier.width(16.dp))
+            Spacer(modifier = Modifier.width((16 * cardScale).dp))
 
             // 文字内容
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = title,
-                    fontSize = 16.sp,
+                    fontSize = (16 * fontScale).sp,
                     fontWeight = FontWeight.Medium,
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
                     text = subtitle,
-                    fontSize = 12.sp,
+                    fontSize = (12 * fontScale).sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }

@@ -4,6 +4,7 @@ import androidx.arch.core.executor.testing.InstantTaskExecutorRule
 import com.example.aiaccounting.data.local.entity.Account
 import com.example.aiaccounting.data.local.entity.AccountType
 import com.example.aiaccounting.data.repository.AccountRepository
+import com.example.aiaccounting.logging.AppLogLogger
 import io.mockk.Awaits
 import io.mockk.MockKAnnotations
 import io.mockk.coEvery
@@ -36,6 +37,9 @@ class AccountViewModelTest {
     @MockK
     private lateinit var accountRepository: AccountRepository
 
+    @MockK(relaxed = true)
+    private lateinit var appLogLogger: AppLogLogger
+
     private lateinit var viewModel: AccountViewModel
 
     @Before
@@ -47,7 +51,7 @@ class AccountViewModelTest {
         // Setup default mock behavior
         every { accountRepository.getAllAccounts() } returns flowOf(emptyList())
 
-        viewModel = AccountViewModel(accountRepository)
+        viewModel = AccountViewModel(accountRepository, appLogLogger)
     }
 
     @After

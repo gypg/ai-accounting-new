@@ -8,6 +8,7 @@ import com.example.aiaccounting.data.repository.AIUsageRepository
 import com.example.aiaccounting.data.service.AIService
 import com.example.aiaccounting.data.service.ImageAction
 import com.example.aiaccounting.data.service.ImageProcessingService
+import com.example.aiaccounting.logging.AppLogLogger
 
 internal sealed class ImagePromptResult {
     data class Success(val prompt: String) : ImagePromptResult()
@@ -24,7 +25,8 @@ internal sealed class ImageMessageProcessingResult {
 internal class AIAssistantImageMessageHandler(
     private val aiService: AIService,
     private val imageProcessingService: ImageProcessingService,
-    private val aiUsageRepository: AIUsageRepository
+    private val aiUsageRepository: AIUsageRepository,
+    private val appLogLogger: AppLogLogger
 ) {
     private companion object {
         const val OCR_BATCH_TIMEOUT_MS = 15_000L
@@ -109,6 +111,13 @@ internal class AIAssistantImageMessageHandler(
             analysisResult.message.takeIf { it.isNotBlank() }?.let(replies::add)
         }
 
+        appLogLogger.info(
+            source = "AI",
+            category = "image_action_parse",
+            message = "图片记账动作解析完成",
+            details = "images=${imageUris.size},typedActions=${typedActions.size},replies=${replies.size},missingAccountOrCategory=${typedActions.count { action -> action is AIAssistantTypedAction.AddTransaction && (action.accountRef.name.isBlank() || action.categoryRef.name.isBlank()) }}"
+        )
+
         if (typedActions.isNotEmpty()) {
             return ImageMessageProcessingResult.ExecuteEnvelope(
                 envelope = AIAssistantActionEnvelope(
@@ -158,6 +167,13 @@ internal class AIAssistantImageMessageHandler(
         }
 
         val resultsForPrompt = effectiveResults.filter { it.hasContent }
+
+        appLogLogger.info(
+            source = "AI",
+            category = "image_prompt",
+            message = "图片记账Prompt构建",
+            details = "images=${imageUris.size},resultsForPrompt=${resultsForPrompt.size},userMessageLength=${message.length},native=false"
+        )
 
         if (resultsForPrompt.isEmpty()) {
             return ImagePromptResult.Error("😥 没有在图片里识别到文字或标签，可能图片过模糊或无法读取。请尝试更清晰的账单照片再试一次。")

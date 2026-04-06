@@ -20,7 +20,9 @@ internal sealed class AIAssistantTypedAction {
         val accountRef: AIAssistantEntityReference,
         val transferAccountRef: AIAssistantEntityReference? = null,
         val note: String,
-        val dateTimestamp: Long
+        val dateTimestamp: Long,
+        val rawDate: String? = null,
+        val hasExplicitDate: Boolean = false
     ) : AIAssistantTypedAction()
 
     data class CreateAccount(
