@@ -584,7 +584,6 @@ class AIReasoningEngine @Inject constructor(
         }
 
         val accountHint = inferAccount(message)
-        val canDeferDateResolutionToRemote = type != TransactionType.TRANSFER
         val canDeferAccountResolutionToRemote = type != TransactionType.TRANSFER && accountHint != null
 
         if (requiresTransactionCategoryClarification(message)) {
@@ -593,7 +592,7 @@ class AIReasoningEngine @Inject constructor(
             )
         }
 
-        if (requiresTransactionDateClarification(message) && !canDeferDateResolutionToRemote) {
+        if (requiresTransactionDateClarification(message)) {
             return listOf(
                 AIAction.RequestClarification("这笔是哪天发生的呢？比如今天、昨天或 3 月 15 日。")
             )

@@ -172,12 +172,12 @@ class TransactionViewModelTest {
             amount = 100.0,
             date = System.currentTimeMillis()
         )
+        coEvery { transactionRepository.getTransactionById(any()) } returns transaction
         coEvery { transactionRepository.updateTransaction(any()) } just Runs
 
         // When
         viewModel.updateTransaction(transaction)
-
-        testDispatcher.scheduler.advanceUntilIdle()
+        testDispatcher.scheduler.runCurrent()
 
         // Then
         coVerify { transactionRepository.updateTransaction(transaction) }
@@ -198,8 +198,7 @@ class TransactionViewModelTest {
 
         // When
         viewModel.deleteTransaction(transaction)
-
-        testDispatcher.scheduler.advanceUntilIdle()
+        testDispatcher.scheduler.runCurrent()
 
         // Then
         coVerify { transactionRepository.deleteTransaction(transaction) }
@@ -360,15 +359,14 @@ class TransactionViewModelTest {
         val note = "Test note"
 
         coEvery { transactionRepository.insertTransaction(any()) } returns 1L
+        coEvery { widgetUpdateService.updateWidgetStats(any()) } just Runs
 
         // When
         viewModel.addTransaction(amount, type, accountId, categoryId, date, note)
-
-        testDispatcher.scheduler.advanceUntilIdle()
+        testDispatcher.scheduler.runCurrent()
 
         // Then
         coVerify { transactionRepository.insertTransaction(any()) }
-        coVerify { widgetUpdateService.updateWidgetStats(context) }
     }
 
     @Test

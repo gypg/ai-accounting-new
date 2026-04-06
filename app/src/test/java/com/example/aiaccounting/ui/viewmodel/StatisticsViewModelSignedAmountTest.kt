@@ -14,6 +14,7 @@ import io.mockk.mockk
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
@@ -108,10 +109,13 @@ class StatisticsViewModelSignedAmountTest {
         )
 
         val viewModel = StatisticsViewModel(transactionRepository, categoryRepository, appLogLogger)
+        val collectionJob = backgroundScope.launch { viewModel.statistics.collect { } }
         advanceUntilIdle()
 
         assertEquals(188.0, viewModel.statistics.value.totalIncome, 0.001)
         assertEquals(31.0, viewModel.statistics.value.totalExpense, 0.001)
+
+        collectionJob.cancel()
     }
 
     @Test
@@ -165,6 +169,7 @@ class StatisticsViewModelSignedAmountTest {
         )
 
         val viewModel = StatisticsViewModel(transactionRepository, categoryRepository, appLogLogger)
+        val collectionJob = backgroundScope.launch { viewModel.statistics.collect { } }
         advanceUntilIdle()
 
         viewModel.setTimeFilter("2026-04")
@@ -176,5 +181,7 @@ class StatisticsViewModelSignedAmountTest {
         advanceUntilIdle()
         assertEquals(200.0, viewModel.statistics.value.totalIncome, 0.001)
         assertEquals(12.0, viewModel.statistics.value.totalExpense, 0.001)
+
+        collectionJob.cancel()
     }
 }

@@ -136,7 +136,7 @@ class AIAssistantPromptBuilderTest {
         val systemPrompt = messages[0].content
         assertTrue(systemPrompt.contains("暂无账户"))
         assertTrue(systemPrompt.contains("暂无分类"))
-        assertTrue(systemPrompt.contains("优先使用 name"))
+        assertTrue(systemPrompt.contains("优先使用 categoryRef.name"))
         assertTrue(systemPrompt.contains("执行阶段自动解析或补全"))
         assertFalse(systemPrompt.contains("必须包含 id 字段"))
         assertFalse(systemPrompt.contains("严禁调用 create_account"))

@@ -5,7 +5,7 @@ import kotlin.math.max
 import kotlin.math.min
 
 internal object ReceiptTextHeuristics {
-    private val amountRegex = Regex("(?:(?:¥|￥|RMB)\\s*([0-9]{1,6}(?:\\.[0-9]{1,2})?))|([0-9]{2,6}\\.[0-9]{1,2})")
+    private val amountRegex = Regex("(?:(?:¥|￥|RMB)\\s*([0-9]{1,6}(?:\\.[0-9]{1,2})?))|([0-9]{1,6}\\.[0-9]{1,2})")
     private val dateRegex = Regex("(?:20\\d{2}[-/.年]\\d{1,2}[-/.月]\\d{1,2}(?:日)?(?:\\s+\\d{1,2}:\\d{2})?)")
     private val paymentMethodKeywords = listOf(
         "微信支付", "支付宝", "信用卡", "借记卡", "银行卡", "云闪付", "现金", "Apple Pay", "银联"
