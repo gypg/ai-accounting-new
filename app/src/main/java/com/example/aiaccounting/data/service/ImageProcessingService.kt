@@ -413,12 +413,12 @@ class ImageProcessingService @Inject constructor(
         val sanitizedRawLines = rawText.lines().map { it.trim() }.filter { it.isNotBlank() }
         if (sanitizedKeyLines.isEmpty() && sanitizedRawLines.isEmpty()) return ""
 
-        val chosenLines = if (sanitizedKeyLines.size >= sanitizedRawLines.size / 2 && sanitizedKeyLines.isNotEmpty()) {
-            mergeReceiptCoverageLines(sanitizedKeyLines)
+        val sourceLines = if (sanitizedKeyLines.isNotEmpty()) {
+            sanitizedKeyLines
         } else {
-            mergeReceiptCoverageLines(sanitizedRawLines)
+            sanitizedRawLines
         }
-
+        val chosenLines = mergeReceiptCoverageLines(sourceLines)
         val joined = chosenLines.joinToString("\n").trim()
         return if (joined.length > 1800) {
             joined.take(1800) + "..."
@@ -431,9 +431,10 @@ class ImageProcessingService @Inject constructor(
         if (lines.isEmpty()) return emptyList()
         if (lines.size <= 18) return lines.distinct()
 
-        val header = lines.take(4)
-        val tail = lines.takeLast(4)
-        val middle = lines.drop(4).dropLast(4)
+        val distinctLines = lines.distinct()
+        val header = distinctLines.take(4)
+        val tail = distinctLines.takeLast(4)
+        val middle = distinctLines.drop(4).dropLast(4)
         val sampledMiddle = middle.filterIndexed { index, _ -> index % 2 == 0 }.take(12)
 
         return (header + sampledMiddle + tail).distinct()

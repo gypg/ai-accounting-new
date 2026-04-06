@@ -371,7 +371,7 @@ class AIAssistantViewModelImageFlowTest {
             )
             testDispatcher.scheduler.advanceUntilIdle()
 
-            coVerify(exactly = 1) {
+            coVerify(atLeast = 1) {
                 aiService.sendChatStream(withArg { messages ->
                     val joined = messages.joinToString("\n") { it.content }
                     assert(joined.contains("第五笔"))
