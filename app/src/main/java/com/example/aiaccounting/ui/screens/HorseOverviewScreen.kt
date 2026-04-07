@@ -523,11 +523,12 @@ fun ActionCard(
  cardScale: Float = 1f,
  fontScale: Float = 1f
 ) {
+ val safeCardScale = if (cardScale < 0.85f) 0.85f else cardScale
  Card(
  modifier = modifier
  .clickable(onClick = onClick)
- .height((130 * cardScale).dp),
- shape = RoundedCornerShape(12.dp),
+ .height((130 * safeCardScale).dp),
+ shape = RoundedCornerShape((12 * safeCardScale).dp),
  colors = CardDefaults.cardColors(
  containerColor = HorseTheme2026Colors.CardBackground
  ),
@@ -536,11 +537,11 @@ fun ActionCard(
  Column(
  modifier = Modifier
  .fillMaxSize()
- .padding(10.dp)
+ .padding((10 * safeCardScale).dp)
  ) {
  Row(
  verticalAlignment = Alignment.CenterVertically,
- horizontalArrangement = Arrangement.spacedBy(4.dp)
+ horizontalArrangement = Arrangement.spacedBy((4 * safeCardScale).dp)
  ) {
  Icon(
  imageVector = icon,
@@ -551,7 +552,8 @@ fun ActionCard(
  Text(
  text = title,
  color = HorseTheme2026Colors.TextSecondary,
- fontSize = (11 * fontScale).sp
+ fontSize = (11 * fontScale).sp,
+ maxLines = 1
  )
  }
  subtitle?.let {
@@ -559,10 +561,11 @@ fun ActionCard(
  text = it,
  color = HorseTheme2026Colors.TextPrimary,
  fontSize = (13 * fontScale).sp,
- fontWeight = FontWeight.Medium
+ fontWeight = FontWeight.Medium,
+ maxLines = 1
  )
  }
- Spacer(modifier = Modifier.height(4.dp))
+ Spacer(modifier = Modifier.height((4 * safeCardScale).dp))
  content()
  }
  }

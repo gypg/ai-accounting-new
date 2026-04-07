@@ -56,8 +56,11 @@ fun FreshSettingsScreen(
     var showLogoutConfirmDialog by remember { mutableStateOf(false) }
     var showThemeDialog by remember { mutableStateOf(false) }
     var showUiScaleDialog by remember { mutableStateOf(false) }
-    val currentTheme by remember(uiScaleKey) { mutableStateOf(appStateManager.getTheme()) }
-    val uiScale by remember(uiScaleKey) { mutableStateOf(appStateManager.getUiScalePreferences()) }
+    val currentTheme = appStateManager.getTheme()
+    val uiScale = appStateManager.getUiScalePreferences()
+    val globalUiScale = LocalUiScale.current
+    val cardScale = globalUiScale.cardScale
+    val fontScale = globalUiScale.fontScale
 
     Scaffold(
         topBar = {
@@ -65,7 +68,7 @@ fun FreshSettingsScreen(
                 title = {
                     Text(
                         text = "设置",
-                        fontSize = 24.sp,
+                        fontSize = (24 * fontScale).sp,
                         fontWeight = FontWeight.Bold,
                         color = Color(0xFF0D1B2E)
                     )
@@ -88,19 +91,25 @@ fun FreshSettingsScreen(
                     .fillMaxSize()
                     .padding(padding)
                     .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 16.dp)
+                    .padding(horizontal = (16 * cardScale).dp)
             ) {
                 Spacer(modifier = Modifier.height(16.dp))
 
                 // 账号管理区域
-                SettingsSectionTitle("账号管理", primaryColor = FreshSciThemeColors.primary)
+                SettingsSectionTitle(
+                    "账号管理", primaryColor = FreshSciThemeColors.primary,
+                    cardScale = cardScale,
+                    fontScale = fontScale
+                )
 
                 SettingsRow(
                     icon = Icons.Default.AccountCircle,
                     title = "个人中心",
                     subtitle = "管理个人信息",
                     onClick = onNavigateToProfile,
-                    primaryColor = FreshSciThemeColors.primary
+                    primaryColor = FreshSciThemeColors.primary,
+                    cardScale = cardScale,
+                    fontScale = fontScale
                 )
 
                 SettingsRow(
@@ -108,114 +117,158 @@ fun FreshSettingsScreen(
                     title = "AI管家",
                     subtitle = "管理您的AI管家",
                     onClick = onNavigateToButlerSettings,
-                    primaryColor = FreshSciThemeColors.primary
+                    primaryColor = FreshSciThemeColors.primary,
+                    cardScale = cardScale,
+                    fontScale = fontScale
                 )
 
-                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height((24 * cardScale).dp))
 
                 // 账户分类区域
-                SettingsSectionTitle("账户分类", primaryColor = FreshSciThemeColors.primary)
+                SettingsSectionTitle(
+                    "账户分类", primaryColor = FreshSciThemeColors.primary,
+                    cardScale = cardScale,
+                    fontScale = fontScale
+                )
 
                 SettingsRow(
                     icon = Icons.Default.AccountBalance,
                     title = "账户管理",
                     subtitle = "管理银行卡、现金等账户",
                     onClick = onNavigateToAccounts,
-                    primaryColor = FreshSciThemeColors.primary
+                    primaryColor = FreshSciThemeColors.primary,
+                    cardScale = cardScale,
+                    fontScale = fontScale
                 )
                 SettingsRow(
                     icon = Icons.AutoMirrored.Filled.Label,
                     title = "分类管理",
                     subtitle = "管理收支分类",
                     onClick = onNavigateToCategories,
-                    primaryColor = FreshSciThemeColors.primary
+                    primaryColor = FreshSciThemeColors.primary,
+                    cardScale = cardScale,
+                    fontScale = fontScale
                 )
 
-                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height((24 * cardScale).dp))
 
                 // 数据管理区域
-                SettingsSectionTitle("数据管理", primaryColor = FreshSciThemeColors.primary)
+                SettingsSectionTitle(
+                    "数据管理", primaryColor = FreshSciThemeColors.primary,
+                    cardScale = cardScale,
+                    fontScale = fontScale
+                )
 
                 SettingsRow(
                     icon = Icons.Default.Download,
                     title = "导入数据",
                     subtitle = "从文件导入交易数据",
                     onClick = onNavigateToImport,
-                    primaryColor = FreshSciThemeColors.primary
+                    primaryColor = FreshSciThemeColors.primary,
+                    cardScale = cardScale,
+                    fontScale = fontScale
                 )
                 SettingsRow(
                     icon = Icons.Default.Upload,
                     title = "导出数据",
                     subtitle = "导出交易数据到文件",
                     onClick = onNavigateToExport,
-                    primaryColor = FreshSciThemeColors.primary
+                    primaryColor = FreshSciThemeColors.primary,
+                    cardScale = cardScale,
+                    fontScale = fontScale
                 )
 
-                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height((24 * cardScale).dp))
 
                 // AI设置区域
-                SettingsSectionTitle("AI设置", primaryColor = FreshSciThemeColors.primary)
+                SettingsSectionTitle(
+                    "AI设置", primaryColor = FreshSciThemeColors.primary,
+                    cardScale = cardScale,
+                    fontScale = fontScale
+                )
 
                 SettingsRow(
                     icon = Icons.Default.SettingsEthernet,
                     title = "AI设置",
                     subtitle = "配置AI模型和API",
                     onClick = onNavigateToAISettings,
-                    primaryColor = FreshSciThemeColors.primary
+                    primaryColor = FreshSciThemeColors.primary,
+                    cardScale = cardScale,
+                    fontScale = fontScale
                 )
                 SettingsRow(
                     icon = Icons.Default.Article,
                     title = "平台日志",
                     subtitle = "查看操作与错误日志",
                     onClick = onNavigateToLogBrowser,
-                    primaryColor = FreshSciThemeColors.primary
+                    primaryColor = FreshSciThemeColors.primary,
+                    cardScale = cardScale,
+                    fontScale = fontScale
                 )
 
-                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height((24 * cardScale).dp))
 
                 // 模板和预算区域
-                SettingsSectionTitle("模板与预算", primaryColor = FreshSciThemeColors.primary)
+                SettingsSectionTitle(
+                    "模板与预算", primaryColor = FreshSciThemeColors.primary,
+                    cardScale = cardScale,
+                    fontScale = fontScale
+                )
 
                 SettingsRow(
                     icon = Icons.Default.Description,
                     title = "账单模板",
                     subtitle = "管理常用账单模板",
                     onClick = onNavigateToTemplates,
-                    primaryColor = FreshSciThemeColors.primary
+                    primaryColor = FreshSciThemeColors.primary,
+                    cardScale = cardScale,
+                    fontScale = fontScale
                 )
                 SettingsRow(
                     icon = Icons.Default.PieChart,
                     title = "预算管理",
                     subtitle = "设置月度预算",
                     onClick = onNavigateToBudgets,
-                    primaryColor = FreshSciThemeColors.primary
+                    primaryColor = FreshSciThemeColors.primary,
+                    cardScale = cardScale,
+                    fontScale = fontScale
                 )
 
-                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height((24 * cardScale).dp))
 
                 // 隐私安全区域
-                SettingsSectionTitle("隐私与安全", primaryColor = FreshSciThemeColors.primary)
+                SettingsSectionTitle(
+                    "隐私与安全", primaryColor = FreshSciThemeColors.primary,
+                    cardScale = cardScale,
+                    fontScale = fontScale
+                )
 
                 SettingsRow(
                     icon = Icons.Default.Lock,
                     title = "设置锁屏PIN",
                     subtitle = "${if (viewModel.uiState.value.isPinSet) "已设置" else "未设置"}",
                     onClick = onNavigateToSetupPin,
-                    primaryColor = FreshSciThemeColors.primary
+                    primaryColor = FreshSciThemeColors.primary,
+                    cardScale = cardScale,
+                    fontScale = fontScale
                 )
                 SettingsRow(
                     icon = Icons.Default.Palette,
                     title = "主题选择",
                     subtitle = "当前主题：${getCurrentThemeName(currentTheme)}",
                     onClick = { showThemeDialog = true },
-                    primaryColor = FreshSciThemeColors.primary
+                    primaryColor = FreshSciThemeColors.primary,
+                    cardScale = cardScale,
+                    fontScale = fontScale
                 )
                 SettingsRow(
                     icon = Icons.Default.ZoomIn,
                     title = "显示大小",
                     subtitle = "调整界面和字体大小",
                     onClick = { showUiScaleDialog = true },
-                    primaryColor = FreshSciThemeColors.primary
+                    primaryColor = FreshSciThemeColors.primary,
+                    cardScale = cardScale,
+                    fontScale = fontScale
                 )
 
                 Spacer(modifier = Modifier.weight(1f))
@@ -225,12 +278,12 @@ fun FreshSettingsScreen(
                     onClick = { showLogoutConfirmDialog = true },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(48.dp)
+                        .height((48 * cardScale).dp)
                 ) {
                     Text(
                         text = "退出登录",
                         color = Color(0xFFFF5252),
-                        fontSize = 16.sp,
+                        fontSize = (16 * fontScale).sp,
                         fontWeight = FontWeight.Medium
                     )
                 }
@@ -288,14 +341,16 @@ fun FreshSettingsScreen(
 @Composable
 fun SettingsSectionTitle(
     title: String,
-    primaryColor: Color = FreshSciThemeColors.primary
+    primaryColor: Color = FreshSciThemeColors.primary,
+    cardScale: Float = 1f,
+    fontScale: Float = 1f
 ) {
     Text(
         text = title,
-        fontSize = 14.sp,
+        fontSize = (14 * fontScale).sp,
         fontWeight = FontWeight.Medium,
         color = primaryColor,
-        modifier = Modifier.padding(vertical = 8.dp)
+        modifier = Modifier.padding(vertical = (8 * cardScale).dp)
     )
 }
 
@@ -305,34 +360,36 @@ fun SettingsRow(
     title: String,
     subtitle: String,
     onClick: () -> Unit,
-    primaryColor: Color = FreshSciThemeColors.primary
+    primaryColor: Color = FreshSciThemeColors.primary,
+    cardScale: Float = 1f,
+    fontScale: Float = 1f
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape((12 * cardScale).dp))
             .background(Color(0xFFFFFFFF).copy(alpha = 0.88f))
             .clickable(onClick = onClick)
-            .padding(16.dp),
+            .padding((16 * cardScale).dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(
             imageVector = icon,
             contentDescription = title,
             tint = primaryColor,
-            modifier = Modifier.size(24.dp)
+            modifier = Modifier.size((24 * cardScale).dp)
         )
-        Spacer(modifier = Modifier.width(16.dp))
+        Spacer(modifier = Modifier.width((16 * cardScale).dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = title,
-                fontSize = 15.sp,
+                fontSize = (15 * fontScale).sp,
                 fontWeight = FontWeight.Medium,
                 color = Color(0xFF0D1B2E)
             )
             Text(
                 text = subtitle,
-                fontSize = 12.sp,
+                fontSize = (12 * fontScale).sp,
                 color = Color(0xFF656D78)
             )
         }
@@ -340,7 +397,7 @@ fun SettingsRow(
             imageVector = Icons.Default.ChevronRight,
             contentDescription = null,
             tint = Color(0xFFB0B8C4),
-            modifier = Modifier.size(20.dp)
+            modifier = Modifier.size((20 * cardScale).dp)
         )
     }
 }

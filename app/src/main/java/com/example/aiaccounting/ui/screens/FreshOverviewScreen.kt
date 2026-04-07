@@ -526,11 +526,12 @@ fun ActionCard(
     cardScale: Float = 1f,
     fontScale: Float = 1f
 ) {
+    val safeCardScale = if (cardScale < 0.85f) 0.85f else cardScale
     Card(
         modifier = modifier
             .clickable(onClick = onClick)
-            .height((130 * cardScale).dp),
-        shape = RoundedCornerShape(12.dp),
+            .height((130 * safeCardScale).dp),
+        shape = RoundedCornerShape((12 * safeCardScale).dp),
         colors = CardDefaults.cardColors(
             containerColor = Color(0xFFFFFFFF).copy(alpha = 0.88f)
         ),
@@ -539,11 +540,11 @@ fun ActionCard(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(10.dp)
+                .padding((10 * safeCardScale).dp)
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                horizontalArrangement = Arrangement.spacedBy((4 * safeCardScale).dp)
             ) {
                 Icon(
                     imageVector = icon,
@@ -554,7 +555,8 @@ fun ActionCard(
                 Text(
                     text = title,
                     color = primaryColor.copy(alpha = 0.7f),
-                    fontSize = (11 * fontScale).sp
+                    fontSize = (11 * fontScale).sp,
+                    maxLines = 1
                 )
             }
             subtitle?.let {
@@ -562,10 +564,11 @@ fun ActionCard(
                     text = it,
                     color = Color(0xFF0D1B2E),
                     fontSize = (13 * fontScale).sp,
-                    fontWeight = FontWeight.Medium
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1
                 )
             }
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height((4 * safeCardScale).dp))
             content()
         }
     }
@@ -676,49 +679,66 @@ fun MonthlyTrendCard(
                                         else Color(0xFF2196F3).copy(alpha = 0.8f)
                                     )
                             )
-                            Spacer(modifier = Modifier.height(2.dp))
-                            if (isSelected) {
-                                Card(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    shape = RoundedCornerShape(8.dp),
-                                    colors = CardDefaults.cardColors(
-                                        containerColor = primaryColor.copy(alpha = 0.1f)
-                                    )
-                                ) {
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(8.dp),
-                                        horizontalArrangement = Arrangement.SpaceEvenly,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(
-                                            text = data.month,
-                                            color = Color(0xFF0D1B2E),
-                                            fontSize = (14 * fontScale).sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                        Row {
-                                            Text(
-                                                text = "收: ¥${data.income.toInt()}",
-                                                color = Color(0xFF4CAF50),
-                                                fontSize = (13 * fontScale).sp,
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                            Spacer(modifier = Modifier.width(12.dp))
-                                            Text(
-                                                text = "支: ¥${data.expense.toInt()}",
-                                                color = Color(0xFF2196F3),
-                                                fontSize = (13 * fontScale).sp,
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                        }
-                                    }
-                                }
+
+                            Spacer(modifier = Modifier.height(4.dp))
+
+                            Text(
+                                text = data.month,
+                                color = if (isSelected) primaryColor else Color(0xFF656D78),
+                                fontSize = (10 * fontScale).sp,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                maxLines = 1
+                            )
+                        }
+                    }
+                }
+
+                selectedMonth?.let { data ->
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(8.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = primaryColor.copy(alpha = 0.1f)
+                        )
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(8.dp),
+                            horizontalArrangement = Arrangement.SpaceEvenly,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = data.month,
+                                color = Color(0xFF0D1B2E),
+                                fontSize = (14 * fontScale).sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Row {
+                                Text(
+                                    text = "收: ¥${data.income.toInt()}",
+                                    color = Color(0xFF4CAF50),
+                                    fontSize = (13 * fontScale).sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Text(
+                                    text = "支: ¥${data.expense.toInt()}",
+                                    color = Color(0xFF2196F3),
+                                    fontSize = (13 * fontScale).sp,
+                                    fontWeight = FontWeight.Bold
+                                )
                             }
                         }
                     }
                 }
+            } else {
+                Text(
+                    text = "暂无数据",
+                    color = Color(0xFF656D78),
+                    fontSize = (14 * fontScale).sp
+                )
             }
         }
     }

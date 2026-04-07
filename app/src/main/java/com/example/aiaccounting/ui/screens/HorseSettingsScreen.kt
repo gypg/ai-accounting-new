@@ -24,6 +24,7 @@ import com.example.aiaccounting.data.local.prefs.AppStateManager
 import com.example.aiaccounting.ui.components.*
 import com.example.aiaccounting.ui.theme.HorseTheme2026Colors
 import com.example.aiaccounting.ui.theme.AppThemeOptions
+import com.example.aiaccounting.ui.theme.LocalUiScale
 import com.example.aiaccounting.ui.viewmodel.SettingsViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -53,6 +54,9 @@ fun HorseSettingsScreen(
     val currentTheme = appStateManager.getTheme()
     val uiState by viewModel.uiState.collectAsState()
     val uiScale by remember(uiScaleKey) { mutableStateOf(appStateManager.getUiScalePreferences()) }
+    val globalUiScale = LocalUiScale.current
+    val cardScale = globalUiScale.cardScale
+    val fontScale = globalUiScale.fontScale
 
     Scaffold(
         topBar = {
@@ -60,7 +64,7 @@ fun HorseSettingsScreen(
                 title = {
                     Text(
                         text = "设置",
-                        fontSize = 22.sp,
+                        fontSize = (22 * fontScale).sp,
                         fontWeight = FontWeight.Bold,
                         color = HorseTheme2026Colors.TextPrimary
                     )
@@ -90,7 +94,7 @@ fun HorseSettingsScreen(
                         .fillMaxSize()
                         .padding(padding)
                         .verticalScroll(rememberScrollState())
-                        .padding(horizontal = 16.dp)
+                        .padding(horizontal = (16 * cardScale).dp)
                 ) {
                     // 功能按钮网格 - 3列
                     val settingsItems = listOf(
@@ -118,14 +122,16 @@ fun HorseSettingsScreen(
                     settingsItems.chunked(3).forEachIndexed { index, rowItems ->
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            horizontalArrangement = Arrangement.spacedBy((12 * cardScale).dp)
                         ) {
                             rowItems.forEach { (title, icon, onClick) ->
                                 SettingsGridButton(
                                     icon = icon,
                                     title = title,
                                     onClick = onClick,
-                                    modifier = Modifier.weight(1f)
+                                    modifier = Modifier.weight(1f),
+                                    cardScale = cardScale,
+                                    fontScale = fontScale
                                 )
                             }
                             repeat(3 - rowItems.size) {
@@ -134,11 +140,11 @@ fun HorseSettingsScreen(
                         }
 
                         if (index != settingsItems.chunked(3).lastIndex) {
-                            Spacer(modifier = Modifier.height(12.dp))
+                            Spacer(modifier = Modifier.height((12 * cardScale).dp))
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(120.dp))
+                    Spacer(modifier = Modifier.height((120 * cardScale).dp))
                 }
 
                 // 底部装饰
@@ -183,13 +189,15 @@ fun SettingsGridButton(
     icon: ImageVector,
     title: String,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    cardScale: Float = 1f,
+    fontScale: Float = 1f
 ) {
     Card(
         modifier = modifier
             .clickable(onClick = onClick)
-            .height(100.dp),
-        shape = RoundedCornerShape(12.dp),
+            .height((100 * cardScale).dp),
+        shape = RoundedCornerShape((12 * cardScale).dp),
         colors = CardDefaults.cardColors(
             containerColor = HorseTheme2026Colors.CardBackground
         ),
@@ -203,8 +211,8 @@ fun SettingsGridButton(
             // 图标背景
             Box(
                 modifier = Modifier
-                    .size(48.dp)
-                    .clip(RoundedCornerShape(12.dp))
+                    .size((48 * cardScale).dp)
+                    .clip(RoundedCornerShape((12 * cardScale).dp))
                     .background(HorseTheme2026Colors.Gold.copy(alpha = 0.2f)),
                 contentAlignment = Alignment.Center
             ) {
@@ -212,14 +220,14 @@ fun SettingsGridButton(
                     imageVector = icon,
                     contentDescription = title,
                     tint = HorseTheme2026Colors.Gold,
-                    modifier = Modifier.size(28.dp)
+                    modifier = Modifier.size((28 * cardScale).dp)
                 )
             }
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height((8 * cardScale).dp))
             Text(
                 text = title,
                 color = HorseTheme2026Colors.TextPrimary,
-                fontSize = 12.sp,
+                fontSize = (12 * fontScale).sp,
                 maxLines = 1
             )
         }
