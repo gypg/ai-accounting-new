@@ -86,4 +86,18 @@ object NetworkModule {
             .writeTimeout(30, TimeUnit.SECONDS)
             .build()
     }
+
+    @Provides
+    @Singleton
+    @GithubReleaseOkHttpClient
+    fun provideGithubReleaseOkHttpClient(): OkHttpClient {
+        return OkHttpClient.Builder()
+            .dns(ipv4FirstDns)
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(20, TimeUnit.SECONDS)
+            .writeTimeout(15, TimeUnit.SECONDS)
+            .retryOnConnectionFailure(true)
+            .connectionPool(ConnectionPool(2, 2, TimeUnit.MINUTES))
+            .build()
+    }
 }

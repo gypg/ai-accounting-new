@@ -1,6 +1,6 @@
 # AI记账 - 构建与发布指南
 
-> 当前版本：`v1.8.3`（`versionCode 19`）
+> 当前版本：`v1.8.4`（`versionCode 20`）
 
 ## 1. 当前构建事实
 
@@ -101,7 +101,7 @@ export KEY_PASSWORD="your_key_password"
    - 邀请码绑定与 Auto 自动优选模型
    - 主要记账与统计路径
 4. 更新版本文档与发布清单
-5. 创建并推送 tag，例如 `v1.8.3`
+5. 创建并推送 tag，例如 `v1.8.4`
 6. 观察 GitHub Actions 的 Lint / Unit Tests / Build APK / release 四段流程
 
 ## 6. 常见问题

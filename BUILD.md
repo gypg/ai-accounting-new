@@ -11,8 +11,8 @@
 
 - `applicationId`: `com.moneytalk.ai`
 - `namespace`: `com.example.aiaccounting`
-- `versionName`: `1.8.3`
-- `versionCode`: `19`
+- `versionName`: `1.8.4`
+- `versionCode`: `20`
 - `org.gradle.jvmargs`: `-Xmx4096m -Dfile.encoding=UTF-8`
 
 ## 构建步骤

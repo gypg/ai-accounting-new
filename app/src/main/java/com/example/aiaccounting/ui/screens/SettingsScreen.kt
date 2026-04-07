@@ -1,5 +1,7 @@
 package com.example.aiaccounting.ui.screens
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -19,6 +21,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.LocalContext
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.aiaccounting.BuildConfig
 import com.example.aiaccounting.data.local.prefs.AppStateManager
@@ -58,6 +61,12 @@ fun SettingsScreen(
     var showPinOptionsDialog by remember { mutableStateOf(false) }
     val currentTheme = appStateManager.getTheme()
     val uiState by viewModel.uiState.collectAsState()
+    val context = LocalContext.current
+    val openReleasePage: (String) -> Unit = { url ->
+        runCatching {
+            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+        }
+    }
     val uiScale = LocalUiScale.current
     val cardScale = uiScale.cardScale
     val fontScale = uiScale.fontScale
@@ -445,6 +454,21 @@ fun SettingsScreen(
                     )
                 }
                 
+                // 检查更新按钮
+                OutlinedButton(
+                    onClick = { viewModel.checkForUpdates() },
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.SystemUpdate,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(if (uiState.isCheckingUpdate) "检查中" else "更新")
+                }
+
                 // 退出登录按钮
                 OutlinedButton(
                     onClick = { showLogoutConfirmDialog = true },
@@ -536,6 +560,20 @@ fun SettingsScreen(
                     Text("• 数据加密安全存储")
                     Text("• 多维度统计分析")
                     Text("• Excel导出功能")
+                    Spacer(modifier = Modifier.height(12.dp))
+                    OutlinedButton(
+                        onClick = { viewModel.checkForUpdates() },
+                        enabled = !uiState.isCheckingUpdate
+                    ) {
+                        if (uiState.isCheckingUpdate) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                        }
+                        Text(if (uiState.isCheckingUpdate) "正在检查更新" else "检查更新")
+                    }
                 }
             },
             confirmButton = {
@@ -589,6 +627,15 @@ fun SettingsScreen(
                     Text("取消")
                 }
             }
+        )
+    }
+
+    uiState.updateDialogState?.let { dialogState ->
+        UpdateResultDialog(
+            state = dialogState,
+            onDismiss = viewModel::dismissUpdateDialog,
+            onRetry = viewModel::checkForUpdates,
+            onOpenReleasePage = openReleasePage
         )
     }
 

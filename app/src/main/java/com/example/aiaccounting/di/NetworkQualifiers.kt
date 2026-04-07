@@ -17,3 +17,7 @@ annotation class InviteGatewayOkHttpClient
 @Qualifier
 @Retention(AnnotationRetention.BINARY)
 annotation class VoiceOkHttpClient
+
+@Qualifier
+@Retention(AnnotationRetention.BINARY)
+annotation class GithubReleaseOkHttpClient

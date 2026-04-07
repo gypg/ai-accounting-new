@@ -6,6 +6,29 @@
 
 ## 版本历史
 
+### v1.8.4 (2026-04-07)
+**版本代号：应用内检查更新首版**
+
+#### 新增功能
+1. **GitHub Releases + 应用内检查更新**
+   - 在个人中心关于页新增可用的“检查更新”入口
+   - 在设置页“其他”区域与关于弹窗新增“检查更新”入口
+   - 应用内可检查 GitHub Releases 最新正式版本
+   - 发现新版本后可展示版本号、发布时间和更新说明，并跳转到 Release 页面下载
+
+#### 交互优化
+- 当仓库尚未发布 GitHub Release 时，更新提示明确说明“请先发布 Release 后再检查更新”
+- 已是最新版本、网络失败、接口失败等场景均有明确弹窗反馈
+
+#### 稳定性验证
+- 本地验证通过：
+  - `./gradlew :app:testDebugUnitTest --tests "com.example.aiaccounting.data.service.AppUpdateServiceTest" --tests "com.example.aiaccounting.ui.viewmodel.SettingsViewModelUpdateTest"`
+  - `./gradlew :app:compileDebugKotlin`
+
+---
+
+## 版本历史
+
 ### v1.8.3 (2026-03-22)
 **版本代号：发布准备与 AI 设置收口**
 

@@ -1,6 +1,6 @@
 # AI记账 - 发布检查清单
 
-> 当前发布目标：`v1.8.3`
+> 当前发布目标：`v1.8.4`
 
 ## 一、发布前检查
 
@@ -19,8 +19,8 @@
 
 ### 构建配置
 - [x] `applicationId = com.moneytalk.ai`
-- [x] `versionName = 1.8.3`
-- [x] `versionCode = 19`
+- [x] `versionName = 1.8.4`
+- [x] `versionCode = 20`
 - [x] Release 已开启混淆与资源压缩
 - [x] Release 签名走环境变量配置
 
@@ -58,7 +58,7 @@
 - artifacts 中可下载 release APK
 
 ### 4. Tag 与 Release
-- 创建 tag：`v1.8.3`
+- 创建 tag：`v1.8.4`
 - 推送 tag 到远程
 - 确认 GitHub Release 自动生成并包含 APK 产物
 

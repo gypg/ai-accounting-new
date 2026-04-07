@@ -107,6 +107,11 @@ fun PersonalCenterScreen(
     
     // 关于对话框
     var showAboutDialog by remember { mutableStateOf(false) }
+    val openReleasePage: (String) -> Unit = { url ->
+        runCatching {
+            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+        }
+    }
     
     // 图片选择器
     val imagePickerLauncher = rememberLauncherForActivityResult(
@@ -350,7 +355,18 @@ fun PersonalCenterScreen(
     if (showAboutDialog) {
         AboutDialog(
             context = context,
+            isCheckingUpdate = uiState.isCheckingUpdate,
+            onCheckUpdate = { viewModel.checkForUpdates() },
             onDismiss = { showAboutDialog = false }
+        )
+    }
+
+    uiState.updateDialogState?.let { dialogState ->
+        UpdateResultDialog(
+            state = dialogState,
+            onDismiss = viewModel::dismissUpdateDialog,
+            onRetry = viewModel::checkForUpdates,
+            onOpenReleasePage = openReleasePage
         )
     }
 }
@@ -1262,8 +1278,84 @@ private fun HelpFeedbackDialog(
  * 关于对话框
  */
 @Composable
+fun UpdateResultDialog(
+    state: com.example.aiaccounting.ui.viewmodel.UpdateDialogState,
+    onDismiss: () -> Unit,
+    onRetry: () -> Unit,
+    onOpenReleasePage: (String) -> Unit
+) {
+    when (state) {
+        is com.example.aiaccounting.ui.viewmodel.UpdateDialogState.UpToDate -> {
+            AlertDialog(
+                onDismissRequest = onDismiss,
+                title = { Text("当前已是最新版本") },
+                text = { Text("当前版本 ${state.currentVersion} 已是最新版本。") },
+                confirmButton = {
+                    TextButton(onClick = onDismiss) {
+                        Text("知道了")
+                    }
+                }
+            )
+        }
+
+        is com.example.aiaccounting.ui.viewmodel.UpdateDialogState.UpdateAvailable -> {
+            AlertDialog(
+                onDismissRequest = onDismiss,
+                title = { Text("发现新版本 ${state.releaseInfo.versionName}") },
+                text = {
+                    Column {
+                        Text("当前版本：${state.currentVersion}")
+                        state.releaseInfo.publishedAt?.let {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text("发布时间：$it")
+                        }
+                        if (state.releaseInfo.body.isNotBlank()) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(state.releaseInfo.body)
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { onOpenReleasePage(state.releaseInfo.htmlUrl) }) {
+                        Text("前往下载")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = onDismiss) {
+                        Text("稍后再说")
+                    }
+                }
+            )
+        }
+
+        is com.example.aiaccounting.ui.viewmodel.UpdateDialogState.Error -> {
+            AlertDialog(
+                onDismissRequest = onDismiss,
+                title = { Text("暂时无法获取更新") },
+                text = { Text(state.message) },
+                confirmButton = {
+                    TextButton(onClick = onRetry) {
+                        Text("重试")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = onDismiss) {
+                        Text("关闭")
+                    }
+                }
+            )
+        }
+    }
+}
+
+/**
+ * 关于对话框
+ */
+@Composable
 private fun AboutDialog(
     context: Context,
+    isCheckingUpdate: Boolean,
+    onCheckUpdate: () -> Unit,
     onDismiss: () -> Unit
 ) {
     val packageInfo = remember {
@@ -1274,7 +1366,7 @@ private fun AboutDialog(
         }
     }
     val versionName = packageInfo?.versionName ?: "1.0.0"
-    
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { 
@@ -1309,7 +1401,21 @@ private fun AboutDialog(
                 
                 ListItem(
                     headlineContent = { Text("检查更新") },
-                    modifier = Modifier.clickable { onDismiss() }
+                    supportingContent = {
+                        if (isCheckingUpdate) {
+                            Text("正在检查最新版本…")
+                        }
+                    },
+                    trailingContent = {
+                        if (isCheckingUpdate) {
+                            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                        }
+                    },
+                    modifier = Modifier.clickable {
+                        if (!isCheckingUpdate) {
+                            onCheckUpdate()
+                        }
+                    }
                 )
             }
         },
