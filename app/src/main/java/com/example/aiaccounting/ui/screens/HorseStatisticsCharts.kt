@@ -20,7 +20,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.aiaccounting.ui.theme.AppThemeIds
+import com.example.aiaccounting.ui.theme.FreshSciThemeColors
 import com.example.aiaccounting.ui.theme.HorseTheme2026Colors
+import com.example.aiaccounting.ui.theme.LocalAppThemeId
 import java.text.SimpleDateFormat
 import java.util.*
 import kotlin.math.*
@@ -678,10 +681,29 @@ fun CalendarChart(
     dailyData: List<DailyChartData>,
     onDateClick: (Int, Double, Double) -> Unit = { _, _, _ -> }
 ) {
+    val colorScheme = MaterialTheme.colorScheme
+    val appThemeId = LocalAppThemeId.current
+    val isHorseTheme = appThemeId == AppThemeIds.HORSE_2026
+    val isFreshTheme = appThemeId == AppThemeIds.FRESH_SCI
+    val containerColor = when {
+        isHorseTheme -> HorseTheme2026Colors.CardBackground
+        isFreshTheme -> Color(0xFFDCEBFF)
+        else -> colorScheme.surfaceVariant
+    }
+    val titleColor = when {
+        isHorseTheme -> HorseTheme2026Colors.TextPrimary
+        isFreshTheme -> Color(0xFF28476B)
+        else -> colorScheme.onSurface
+    }
+    val hintColor = when {
+        isHorseTheme -> HorseTheme2026Colors.TextSecondary
+        isFreshTheme -> Color(0xFF7A8FA8)
+        else -> colorScheme.onSurfaceVariant
+    }
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = HorseTheme2026Colors.CardBackground)
+        colors = CardDefaults.cardColors(containerColor = containerColor)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(
@@ -691,13 +713,13 @@ fun CalendarChart(
             ) {
                 Text(
                     text = "${year}年${month}月",
-                    color = HorseTheme2026Colors.TextPrimary,
+                    color = titleColor,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold
                 )
                 Text(
                     text = "点击日期查看详情",
-                    color = HorseTheme2026Colors.TextSecondary,
+                    color = hintColor,
                     fontSize = 11.sp
                 )
             }
@@ -709,7 +731,7 @@ fun CalendarChart(
                 listOf("日", "一", "二", "三", "四", "五", "六").forEach { day ->
                     Text(
                         text = day,
-                        color = HorseTheme2026Colors.TextSecondary,
+                        color = hintColor,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.weight(1f),
@@ -730,27 +752,42 @@ fun CalendarChart(
             val dataMap = dailyData.associateBy { it.date }
 
             for (week in 0..5) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly
-                ) {
+                Row(modifier = Modifier.fillMaxWidth()) {
                     for (dayOfWeek in 0..6) {
                         val dayNumber = week * 7 + dayOfWeek - firstDayOfWeek + 1
-                        
-                        if (dayNumber in 1..daysInMonth) {
-                            val dateStr = String.format("%02d-%02d", month, dayNumber)
-                            val dayData = dataMap[dateStr]
-                            val hasData = dayData != null && (dayData.income > 0 || dayData.expense > 0)
 
-                            CalendarDayCell(
-                                day = dayNumber,
-                                income = dayData?.income ?: 0.0,
-                                expense = dayData?.expense ?: 0.0,
-                                hasData = hasData,
-                                onClick = { onDateClick(dayNumber, dayData?.income ?: 0.0, dayData?.expense ?: 0.0) }
-                            )
-                        } else {
-                            Spacer(modifier = Modifier.weight(1f))
+                        Box(
+                            modifier = Modifier.weight(1f),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (dayNumber in 1..daysInMonth) {
+                                val dateStr = String.format("%02d-%02d", month, dayNumber)
+                                val dayData = dataMap[dateStr]
+                                val hasData = dayData != null && (dayData.income > 0 || dayData.expense > 0)
+
+                                CalendarDayCell(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .aspectRatio(1f),
+                                    day = dayNumber,
+                                    income = dayData?.income ?: 0.0,
+                                    expense = dayData?.expense ?: 0.0,
+                                    hasData = hasData,
+                                    onClick = {
+                                        onDateClick(
+                                            dayNumber,
+                                            dayData?.income ?: 0.0,
+                                            dayData?.expense ?: 0.0
+                                        )
+                                    }
+                                )
+                            } else {
+                                Spacer(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .aspectRatio(1f)
+                                )
+                            }
                         }
                     }
                 }
@@ -768,23 +805,41 @@ fun CalendarChart(
  */
 @Composable
 private fun CalendarDayCell(
+    modifier: Modifier = Modifier,
     day: Int,
     income: Double,
     expense: Double,
     hasData: Boolean,
     onClick: () -> Unit
 ) {
+    val colorScheme = MaterialTheme.colorScheme
+    val appThemeId = LocalAppThemeId.current
+    val isHorseTheme = appThemeId == AppThemeIds.HORSE_2026
+    val isFreshTheme = appThemeId == AppThemeIds.FRESH_SCI
+    val cellBackgroundColor = when {
+        !hasData -> Color.Transparent
+        isHorseTheme -> HorseTheme2026Colors.CardBackground.copy(alpha = 0.5f)
+        isFreshTheme -> Color.White.copy(alpha = 0.85f)
+        else -> colorScheme.surface
+    }
+    val cellBorderColor = when {
+        !hasData -> Color.Transparent
+        isHorseTheme -> HorseTheme2026Colors.Gold.copy(alpha = 0.3f)
+        isFreshTheme -> FreshSciThemeColors.primary.copy(alpha = 0.45f)
+        else -> colorScheme.primary.copy(alpha = 0.35f)
+    }
+    val dayTextColor = when {
+        isHorseTheme -> HorseTheme2026Colors.TextPrimary
+        isFreshTheme -> Color(0xFF21344D)
+        else -> colorScheme.onSurface
+    }
     Box(
-        modifier = Modifier
-            .size(44.dp)
+        modifier = modifier
             .clip(RoundedCornerShape(8.dp))
-            .background(
-                if (hasData) HorseTheme2026Colors.CardBackground.copy(alpha = 0.5f)
-                else Color.Transparent
-            )
+            .background(cellBackgroundColor)
             .border(
                 width = if (hasData) 1.dp else 0.dp,
-                color = if (hasData) HorseTheme2026Colors.Gold.copy(alpha = 0.3f) else Color.Transparent,
+                color = cellBorderColor,
                 shape = RoundedCornerShape(8.dp)
             )
             .clickable(enabled = hasData, onClick = onClick),
@@ -793,7 +848,7 @@ private fun CalendarDayCell(
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
                 text = "$day",
-                color = HorseTheme2026Colors.TextPrimary,
+                color = dayTextColor,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Bold
             )
