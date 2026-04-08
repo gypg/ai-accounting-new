@@ -29,19 +29,19 @@ class AIAssistantMessageOrchestratorTest {
     }
 
     @Test
-    fun analyze_returnsBookkeepingTopLevelIntent_whenReasoningIsRecordTransaction() {
+    fun analyze_routesOrdinaryOpenEndedChatToDailyChat_whenReasoningIsUnknownButRemoteAvailable() {
         val analysis = orchestrator.analyze(
-            reasoningResult = reasoningResult(AIReasoningEngine.UserIntent.RECORD_TRANSACTION),
-            userMessage = "帮我记一笔午饭 25 元",
+            reasoningResult = reasoningResult(AIReasoningEngine.UserIntent.UNKNOWN),
+            userMessage = "你今天心情好不好？",
             butlerId = "xiaocainiang",
-            isNetworkAvailable = false,
+            isNetworkAvailable = true,
             isAIEnabled = true,
             hasApiKey = true,
             pendingInteractionState = null
         )
 
-        assertEquals(AIAssistantTopLevelIntent.BOOKKEEPING, analysis.topLevelIntent)
-        assertEquals(AIAssistantEngineMode.Local, analysis.engineMode)
+        assertEquals(AIAssistantTopLevelIntent.DAILY_CHAT, analysis.topLevelIntent)
+        assertEquals(AIAssistantEngineMode.Remote, analysis.engineMode)
     }
 
     @Test

@@ -22,6 +22,11 @@ internal class AIAssistantSessionCoordinator(
     suspend fun getOrCreateCurrentSession(currentSessionId: String?): String {
         currentSessionId?.let { return it }
 
+        val activeSession = chatSessionRepository.getActiveSession()
+        if (activeSession != null) {
+            return activeSession.id
+        }
+
         val existingSession = chatSessionRepository.getAllSessions().first().firstOrNull()
         return existingSession?.id ?: chatSessionRepository.createSession("新对话").id
     }

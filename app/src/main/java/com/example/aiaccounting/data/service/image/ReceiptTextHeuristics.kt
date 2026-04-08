@@ -106,6 +106,12 @@ internal object ReceiptTextHeuristics {
             OcrAgreementLevel.NONE -> 0
         }
 
+        val screenshotLikeDensity = normalizedText.lines().count { line ->
+            val trimmed = line.trim()
+            trimmed.length >= 8 && trimmed.any { it.isDigit() } && trimmed.any { it.isLetter() || it in '一'..'龥' }
+        }
+        score += min(screenshotLikeDensity * 4, 20)
+
         val noisyShortLines = normalizedText.lines().count { line -> line.trim().length in 1..2 }
         score -= min(noisyShortLines * 5, 20)
 

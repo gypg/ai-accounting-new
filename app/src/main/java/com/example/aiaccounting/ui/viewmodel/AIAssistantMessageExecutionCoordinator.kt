@@ -287,10 +287,7 @@ internal class AIAssistantMessageExecutionCoordinator(
         analysis: AIAssistantMessageAnalysis
     ): AIAssistantMessageRoute {
         return if (route is AIAssistantMessageRoute.RemoteRequest) {
-            if (
-                analysis.engineMode == AIAssistantEngineMode.Local ||
-                analysis.topLevelIntent == AIAssistantTopLevelIntent.OCR_IMAGE
-            ) {
+            if (analysis.engineMode == AIAssistantEngineMode.Local) {
                 AIAssistantMessageRoute.LocalActions(
                     actions = analysis.reasoningResult.actions,
                     stage = AIAssistantInteractionStage.Execution

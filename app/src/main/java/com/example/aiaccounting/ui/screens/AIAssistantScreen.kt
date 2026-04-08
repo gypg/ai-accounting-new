@@ -3,6 +3,7 @@ package com.example.aiaccounting.ui.screens
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -51,6 +52,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
+import com.example.aiaccounting.AIAccountingApplication
 import coil.request.ImageRequest
 import coil.request.CachePolicy
 import com.example.aiaccounting.data.local.entity.AIConversation
@@ -74,6 +76,9 @@ fun AIAssistantScreen(
     var inputText by remember { mutableStateOf("") }
     var selectedImageUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
     val context = LocalContext.current
+    val appLogLogger = remember(context) { (context.applicationContext as AIAccountingApplication).let { app ->
+        dagger.hilt.android.EntryPointAccessors.fromApplication(app, AIAccountingApplication.AppLogEntryPoint::class.java).appLogLogger()
+    } }
     val scope = rememberCoroutineScope()
 
     val listState = rememberLazyListState()
@@ -128,9 +133,30 @@ fun AIAssistantScreen(
 
     // 图片选择器 - 支持多选
     val imagePicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetMultipleContents()
+        contract = ActivityResultContracts.OpenMultipleDocuments()
     ) { uris: List<Uri> ->
         if (uris.isNotEmpty()) {
+            uris.forEach { uri ->
+                runCatching {
+                    context.contentResolver.takePersistableUriPermission(
+                        uri,
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    )
+                }.onFailure { error ->
+                    appLogLogger.warning(
+                        source = "AI",
+                        category = "image_picker_permission_warning",
+                        message = "图片持久权限获取失败",
+                        details = "uriTail=${uri.toString().takeLast(64)},exception=${error::class.java.simpleName},message=${error.message}"
+                    )
+                }
+            }
+            appLogLogger.info(
+                source = "AI",
+                category = "image_picker_result",
+                message = "用户选择图片",
+                details = "imageCount=${uris.size}"
+            )
             selectedImageUris = selectedImageUris + uris
         }
     }
@@ -266,7 +292,8 @@ fun AIAssistantScreen(
                                 shouldAnimate = conversation.id == lastAnimatedMessageId,
                                 onCopy = { text ->
                                     copyToClipboard(context, text)
-                                }
+                                },
+                                appLogLogger = appLogLogger
                             )
                         }
                     }
@@ -300,29 +327,53 @@ fun AIAssistantScreen(
                     inputText = inputText,
                     onInputChange = { inputText = it },
                     onSend = {
+                        appLogLogger.info(
+                            source = "AI",
+                            category = "image_send_click",
+                            message = "用户点击发送",
+                            details = "inputLength=${inputText.length},selectedImageCount=${selectedImageUris.size}"
+                        )
                         if (inputText.isNotBlank() || selectedImageUris.isNotEmpty()) {
                             if (selectedImageUris.isNotEmpty()) {
-                                // 发送图片和文字
                                 viewModel.sendMessageWithImages(inputText, selectedImageUris, context)
                                 selectedImageUris = emptyList()
                             } else {
-                                // 只发送文字
                                 viewModel.sendMessage(inputText)
                             }
                             inputText = ""
+                        } else {
+                            appLogLogger.warning(
+                                source = "AI",
+                                category = "image_send_noop",
+                                message = "发送被忽略",
+                                details = "reason=empty_input_and_no_images"
+                            )
                         }
                     },
                     onImageClick = {
-                        imagePicker.launch("image/*")
+                        imagePicker.launch(arrayOf("image/*"))
                     },
                     isLoading = uiState.isLoading,
                     selectedImageUris = selectedImageUris,
                     onClearImage = { uri ->
+                        appLogLogger.info(
+                            source = "AI",
+                            category = "image_picker_remove",
+                            message = "用户移除待发送图片",
+                            details = "remainingBefore=${selectedImageUris.size},uriTail=${uri.toString().takeLast(64)}"
+                        )
                         selectedImageUris = selectedImageUris.filter { it != uri }
                     },
                     onClearAllImages = {
+                        appLogLogger.info(
+                            source = "AI",
+                            category = "image_picker_remove",
+                            message = "用户清空待发送图片",
+                            details = "clearedCount=${selectedImageUris.size}"
+                        )
                         selectedImageUris = emptyList()
-                    }
+                    },
+                    appLogLogger = appLogLogger
                 )
             }
         }
@@ -640,7 +691,8 @@ fun QuickActionButtons(
 fun ChatBubble(
     conversation: AIConversation,
     shouldAnimate: Boolean,
-    onCopy: (String) -> Unit
+    onCopy: (String) -> Unit,
+    appLogLogger: com.example.aiaccounting.logging.AppLogLogger
 ) {
     val isUser = conversation.role == ConversationRole.USER
     val isSuccess = !isUser && conversation.content.startsWith("✅")
@@ -780,6 +832,16 @@ fun ChatBubble(
                                         .size(width = 600, height = 400)
                                         .memoryCachePolicy(CachePolicy.ENABLED)
                                         .diskCachePolicy(CachePolicy.ENABLED)
+                                        .listener(
+                                            onError = { _, result ->
+                                                appLogLogger.warning(
+                                                    source = "AI",
+                                                    category = "chat_image_render_error",
+                                                    message = "聊天图片渲染失败",
+                                                    details = "uriTail=${uris[0].takeLast(64)},throwable=${result.throwable::class.java.simpleName},message=${result.throwable.message}"
+                                                )
+                                            }
+                                        )
                                         .build(),
                                     contentDescription = "图片",
                                     modifier = Modifier
@@ -811,6 +873,16 @@ fun ChatBubble(
                                                 .size(120)
                                                 .memoryCachePolicy(CachePolicy.ENABLED)
                                                 .diskCachePolicy(CachePolicy.ENABLED)
+                                                .listener(
+                                                    onError = { _, result ->
+                                                        appLogLogger.warning(
+                                                            source = "AI",
+                                                            category = "chat_image_render_error",
+                                                            message = "聊天图片渲染失败",
+                                                            details = "uriTail=${uri.takeLast(64)},throwable=${result.throwable::class.java.simpleName},message=${result.throwable.message}"
+                                                        )
+                                                    }
+                                                )
                                                 .build(),
                                             contentDescription = "图片",
                                             modifier = Modifier
@@ -907,7 +979,8 @@ fun ChatInputArea(
     isLoading: Boolean,
     selectedImageUris: List<Uri>,
     onClearImage: (Uri) -> Unit,
-    onClearAllImages: () -> Unit
+    onClearAllImages: () -> Unit,
+    appLogLogger: com.example.aiaccounting.logging.AppLogLogger
 ) {
     // 图片放大查看状态
     var enlargedImageUri by remember { mutableStateOf<Uri?>(null) }
@@ -970,6 +1043,18 @@ fun ChatInputArea(
                                         .size(160)
                                         .memoryCachePolicy(CachePolicy.ENABLED)
                                         .diskCachePolicy(CachePolicy.ENABLED)
+                                        .listener(
+                                            onError = { _, result ->
+                                                val permissionDenied = result.throwable.message?.contains("ACTION_OPEN_DOCUMENT") == true ||
+                                                    result.throwable.message?.contains("Permission Denial") == true
+                                                appLogLogger.warning(
+                                                    source = "AI",
+                                                    category = "chat_image_render_error",
+                                                    message = if (permissionDenied) "历史图片权限已失效" else "聊天图片渲染失败",
+                                                    details = "uriTail=${uri.toString().takeLast(64)},throwable=${result.throwable::class.java.simpleName},message=${result.throwable.message}"
+                                                )
+                                            }
+                                        )
                                         .build(),
                                     contentDescription = "已选图片",
                                     modifier = Modifier

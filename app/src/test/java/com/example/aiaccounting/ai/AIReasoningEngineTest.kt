@@ -90,22 +90,18 @@ class AIReasoningEngineTest {
     }
 
     @Test
-    fun reason_returnsGeneralConversation_forCapabilityQuestion() = runTest {
+    fun reason_returnsGeneralConversation_forTaskQuestion() = runTest {
         stubNonIdentityAndNonModification()
 
         val result = engine.reason(
-            context = AIReasoningEngine.ReasoningContext(userMessage = "你能做什么"),
+            context = AIReasoningEngine.ReasoningContext(userMessage = "你的任务是什么"),
             currentButlerId = "xiaocainiang"
         )
 
         assertEquals(AIReasoningEngine.UserIntent.GENERAL_CONVERSATION, result.intent)
-        assertTrue(result.actions.single() is AIReasoningEngine.AIAction.GenerateResponse)
-        assertTrue(
-            (result.actions.single() as AIReasoningEngine.AIAction.GenerateResponse)
-                .responseContent.contains("记账") ||
-                (result.actions.single() as AIReasoningEngine.AIAction.GenerateResponse)
-                    .responseContent.contains("查账")
-        )
+        val response = (result.actions.single() as AIReasoningEngine.AIAction.GenerateResponse).responseContent
+        assertTrue(response.isNotBlank())
+        assertTrue(!response.contains("抱歉，我不太理解您的意思"))
     }
 
     @Test

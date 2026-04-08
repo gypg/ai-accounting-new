@@ -439,7 +439,12 @@ internal class AIAssistantRemoteResponseInterpreter {
             return trimmed
         }
 
-        val cleanedWrapper = trimmed
+        val cleanedThinking = trimmed
+            .replace(Regex("""<think>[\s\S]*?</think>""", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("""<thinking>[\s\S]*?</thinking>""", RegexOption.IGNORE_CASE), "")
+            .trim()
+
+        val cleanedWrapper = cleanedThinking
             .replace(dirtyNullWrapperRegex, "")
             .replace(trailingDirtyNullWrapperRegex, "")
             .trim()

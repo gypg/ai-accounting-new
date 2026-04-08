@@ -53,6 +53,12 @@ class AIAccountingApplication : Application() {
         fun appLogLogger(): AppLogLogger
     }
 
+    @EntryPoint
+    @InstallIn(SingletonComponent::class)
+    interface AppLogEntryPoint {
+        fun appLogLogger(): AppLogLogger
+    }
+
     private companion object {
         const val MAX_CRASH_LOG_DETAILS_LENGTH = 12_000
     }

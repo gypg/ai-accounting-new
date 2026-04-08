@@ -10,11 +10,12 @@ import android.graphics.ColorMatrixColorFilter
 import android.graphics.Paint
 import android.net.Uri
 import java.io.ByteArrayOutputStream
+import kotlinx.coroutines.CancellationException
 import kotlin.math.max
 import kotlin.math.min
 
 internal object OcrPreprocessingUtils {
-    private const val MAX_EDGE = 1600
+    private const val MAX_EDGE = 2200
     private const val JPEG_QUALITY = 92
     private const val BASE_CONTRAST_SCALE = 1.15f
     private const val DETAIL_CONTRAST_SCALE = 1.3f
@@ -25,8 +26,8 @@ internal object OcrPreprocessingUtils {
         return preprocessVariants(context, uri).firstOrNull()?.bitmap?.let(::bitmapToJpegBytes)
     }
 
-    fun preprocessVariants(context: Context, uri: Uri): List<OcrPreprocessedVariant> {
-        return runCatching {
+    fun preprocessVariants(context: Context, uri: Uri, screenshotLikely: Boolean = false): List<OcrPreprocessedVariant> {
+        return try {
             val variants = context.contentResolver.openInputStream(uri)?.use { inputStream ->
                 val original = BitmapFactory.decodeStream(inputStream) ?: return@use emptyList<OcrPreprocessedVariant>()
                 val normalized = scaleDownIfNeeded(original)
@@ -39,23 +40,7 @@ internal object OcrPreprocessingUtils {
                             imageQualityMetrics = baseMetrics
                         )
                     )
-                    add(
-                        OcrPreprocessedVariant(
-                            profile = OcrPreprocessingProfile.DETAIL,
-                            bitmap = enhanceContrastAndBrightness(normalized, DETAIL_CONTRAST_SCALE, DETAIL_BRIGHTNESS_SHIFT),
-                            imageQualityMetrics = baseMetrics
-                        )
-                    )
-                    if (shouldAddDocumentProfile(baseMetrics)) {
-                        add(
-                            OcrPreprocessedVariant(
-                                profile = OcrPreprocessingProfile.DOCUMENT,
-                                bitmap = toThresholdDocument(normalized),
-                                imageQualityMetrics = baseMetrics
-                            )
-                        )
-                    }
-                    if (shouldAddScreenshotProfile(baseMetrics)) {
+                    if (screenshotLikely || shouldAddScreenshotProfile(baseMetrics)) {
                         add(
                             OcrPreprocessedVariant(
                                 profile = OcrPreprocessingProfile.SCREENSHOT,
@@ -64,10 +49,30 @@ internal object OcrPreprocessingUtils {
                             )
                         )
                     }
+                    add(
+                        OcrPreprocessedVariant(
+                            profile = OcrPreprocessingProfile.DETAIL,
+                            bitmap = enhanceContrastAndBrightness(normalized, DETAIL_CONTRAST_SCALE, DETAIL_BRIGHTNESS_SHIFT),
+                            imageQualityMetrics = baseMetrics
+                        )
+                    )
+                    if (!screenshotLikely && shouldAddDocumentProfile(baseMetrics)) {
+                        add(
+                            OcrPreprocessedVariant(
+                                profile = OcrPreprocessingProfile.DOCUMENT,
+                                bitmap = toThresholdDocument(normalized),
+                                imageQualityMetrics = baseMetrics
+                            )
+                        )
+                    }
                 }
             }
             variants ?: emptyList()
-        }.getOrDefault(emptyList())
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            emptyList()
+        }
     }
 
     private fun scaleDownIfNeeded(bitmap: Bitmap): Bitmap {
@@ -135,11 +140,16 @@ internal object OcrPreprocessingUtils {
     }
 
     private fun shouldAddScreenshotProfile(metrics: ImageQualityMetrics): Boolean {
-        return metrics.nearWhiteRatio >= 35 && metrics.contrastRange >= 60
+        return metrics.width >= 900 && metrics.height >= 1200 ||
+            metrics.height >= 900 && metrics.nearWhiteRatio >= 30 && metrics.contrastRange >= 40
     }
 
     private fun enhanceScreenshotText(bitmap: Bitmap): Bitmap {
-        return enhanceContrastAndGrayscale(bitmap, 1.45f)
+        return enhanceContrastAndBrightness(
+            enhanceContrastAndGrayscale(bitmap, 1.35f),
+            1.1f,
+            6f
+        )
     }
 
     private fun calculateImageQualityMetrics(bitmap: Bitmap): ImageQualityMetrics {

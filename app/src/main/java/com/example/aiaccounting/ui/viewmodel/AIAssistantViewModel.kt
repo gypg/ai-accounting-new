@@ -18,6 +18,7 @@ import com.example.aiaccounting.data.repository.AccountRepository
 import com.example.aiaccounting.data.repository.ButlerRepository
 import com.example.aiaccounting.data.repository.CategoryRepository
 import com.example.aiaccounting.data.repository.ChatSessionRepository
+import com.example.aiaccounting.data.local.entity.ConversationRole
 import com.example.aiaccounting.data.service.AIService
 import com.example.aiaccounting.data.service.ImageProcessingService
 import com.example.aiaccounting.logging.AppLogLogger
@@ -27,6 +28,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import java.util.UUID
 import javax.inject.Inject
 
 /**
@@ -87,7 +89,8 @@ class AIAssistantViewModel @Inject constructor(
     private val remoteResponseIntegrityChecker = AIAssistantRemoteResponseIntegrityChecker()
     private val remoteStreamCollector = AIAssistantRemoteStreamCollector(
         sendChatStream = aiService::sendChatStream,
-        recordUsageFailure = { aiUsageRepository.recordCall(success = false) }
+        recordUsageFailure = { aiUsageRepository.recordCall(success = false) },
+        appLogLogger = appLogLogger
     )
     private val remoteExecutionHandler = AIAssistantRemoteExecutionHandler(
         streamCollector = remoteStreamCollector,
@@ -95,6 +98,7 @@ class AIAssistantViewModel @Inject constructor(
         interpreter = remoteResponseInterpreter,
         recordUsageSuccess = { aiUsageRepository.recordCall(success = true) },
         recordUsageFailure = { aiUsageRepository.recordCall(success = false) },
+        appLogLogger = appLogLogger,
         buildBookkeepingEnvelopeCorrectionMessage =
             messageOrchestrator::buildBookkeepingEnvelopeCorrectionMessage
     )
@@ -356,23 +360,58 @@ class AIAssistantViewModel @Inject constructor(
         val result = remoteExecutionHandler.execute(
             messages = messages,
             config = currentAIConfig,
-            responseRequirement = request.responseRequirement
+            responseRequirement = request.responseRequirement,
+            traceId = request.traceId
         )
 
         return when (result) {
-            is AIAssistantRemoteExecutionResult.Timeout -> "请求超时，请稍后重试。$diagnostics"
+            is AIAssistantRemoteExecutionResult.Timeout -> {
+                appLogLogger.warning(
+                    source = "AI",
+                    category = "remote_request_timeout",
+                    message = "远端执行请求超时",
+                    details = diagnostics,
+                    traceId = request.traceId
+                )
+                "请求超时，请稍后重试。$diagnostics"
+            }
             is AIAssistantRemoteExecutionResult.TransportFailure -> {
+                appLogLogger.error(
+                    source = "AI",
+                    category = "remote_request_transport_failure",
+                    message = "远端执行请求失败",
+                    details = "$diagnostics,message=${result.message}",
+                    traceId = request.traceId
+                )
                 "$USER_SAFE_REMOTE_TRANSPORT_ERROR 建议：检查网络后重试，或切换模型。$diagnostics"
             }
-            is AIAssistantRemoteExecutionResult.IncompleteResponse -> "响应不完整，请稍后重试。$diagnostics"
-            AIAssistantRemoteExecutionResult.IncompleteResponseAfterRetry ->
+            is AIAssistantRemoteExecutionResult.IncompleteResponse -> {
+                appLogLogger.warning(
+                    source = "AI",
+                    category = "remote_response_incomplete",
+                    message = "远端执行返回不完整响应",
+                    details = diagnostics,
+                    traceId = request.traceId
+                )
+                "响应不完整，请稍后重试。$diagnostics"
+            }
+            AIAssistantRemoteExecutionResult.IncompleteResponseAfterRetry -> {
+                appLogLogger.warning(
+                    source = "AI",
+                    category = "remote_response_incomplete",
+                    message = "远端执行自动重试后仍不完整",
+                    details = diagnostics,
+                    traceId = request.traceId
+                )
                 "模型返回了不完整结果，已自动重试一次仍失败。建议：切换模型后重试。$diagnostics"
+            }
             is AIAssistantRemoteExecutionResult.QueryBeforeExecutionRequested -> {
                 appLogLogger.info(
                     source = "AI",
                     category = "remote_execution_branch",
                     message = "远端记账进入查询前执行分支",
-                    details = "route=QueryBeforeExecutionRequested,actions=${result.envelope.actions.size},addTransactionActions=${remoteResponseInterpreter.countAddTransactionActions(result.envelope)}"
+                    details = "route=QueryBeforeExecutionRequested,actions=${result.envelope.actions.size},addTransactionActions=${remoteResponseInterpreter.countAddTransactionActions(result.envelope)}",
+                    traceId = request.traceId
                 )
                 actionExecutor.executeQueryBeforeExecution(result.envelope)
             }
@@ -381,11 +420,19 @@ class AIAssistantViewModel @Inject constructor(
                     source = "AI",
                     category = "remote_execution_branch",
                     message = "远端记账进入直接执行分支",
-                    details = "route=ActionExecutionRequested,actions=${result.envelope.actions.size},addTransactionActions=${remoteResponseInterpreter.countAddTransactionActions(result.envelope)}"
+                    details = "route=ActionExecutionRequested,actions=${result.envelope.actions.size},addTransactionActions=${remoteResponseInterpreter.countAddTransactionActions(result.envelope)}",
+                    traceId = request.traceId
                 )
                 actionExecutor.executeAIActions(result.envelope)
             }
             is AIAssistantRemoteExecutionResult.TransactionActionMissing -> {
+                appLogLogger.warning(
+                    source = "AI",
+                    category = "remote_response_empty",
+                    message = "远端执行未返回动作",
+                    details = "$diagnostics,retriedWithEnvelopeCorrection=${result.retriedWithEnvelopeCorrection}",
+                    traceId = request.traceId
+                )
                 if (result.retriedWithEnvelopeCorrection) {
                     "$USER_SAFE_REMOTE_EXECUTION_MISSING_ERROR$diagnostics（已自动纠正一次动作合同）"
                 } else {
@@ -393,6 +440,13 @@ class AIAssistantViewModel @Inject constructor(
                 }
             }
             is AIAssistantRemoteExecutionResult.EmptyRemoteReply -> {
+                appLogLogger.warning(
+                    source = "AI",
+                    category = "remote_response_empty",
+                    message = "远端执行返回空回复",
+                    details = "$diagnostics,retried=${result.retried}",
+                    traceId = request.traceId
+                )
                 if (result.retried) {
                     "$USER_SAFE_REMOTE_EMPTY_REPLY$diagnostics（已自动重试一次）"
                 } else {
@@ -450,17 +504,39 @@ class AIAssistantViewModel @Inject constructor(
         switchSessionJob?.cancel()
         switchSessionJob = viewModelScope.launch {
             try {
+                appLogLogger.info(
+                    source = "AI",
+                    category = "chat_session_switch_start",
+                    message = "会话切换开始",
+                    details = "sessionId=$sessionId"
+                )
                 val messages = sessionCoordinator.switchSession(sessionId)
                 _uiState.update { it.copy(currentSessionId = sessionId) }
                 clearPendingInteractionStates()
                 conversationRepository.clearAllConversations()
                 messages.forEach { msg ->
                     when (msg.role) {
-                        com.example.aiaccounting.data.local.entity.MessageRole.USER -> conversationRepository.addUserMessage(msg.content)
-                        com.example.aiaccounting.data.local.entity.MessageRole.ASSISTANT -> conversationRepository.addAssistantMessage(msg.content)
+                        com.example.aiaccounting.data.local.entity.MessageRole.USER -> conversationRepository.restoreMessage(
+                            role = ConversationRole.USER,
+                            content = msg.content,
+                            timestamp = msg.timestamp,
+                            imageUri = msg.imageUris
+                        )
+                        com.example.aiaccounting.data.local.entity.MessageRole.ASSISTANT -> conversationRepository.restoreMessage(
+                            role = ConversationRole.ASSISTANT,
+                            content = msg.content,
+                            timestamp = msg.timestamp,
+                            imageUri = msg.imageUris
+                        )
                         else -> {}
                     }
                 }
+                appLogLogger.info(
+                    source = "AI",
+                    category = "chat_session_switch_restore_summary",
+                    message = "会话切换恢复完成",
+                    details = "sessionId=$sessionId,messagesCount=${messages.size},userMessages=${messages.count { it.role == com.example.aiaccounting.data.local.entity.MessageRole.USER }},assistantMessages=${messages.count { it.role == com.example.aiaccounting.data.local.entity.MessageRole.ASSISTANT }},messagesWithImages=${messages.count { !it.imageUris.isNullOrBlank() }},restoredImageUriCount=${messages.sumOf { it.imageUris?.split(",")?.count { uri -> uri.isNotBlank() } ?: 0 }}"
+                )
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -499,11 +575,27 @@ class AIAssistantViewModel @Inject constructor(
                         conversationRepository.clearAllConversations()
                         result.messages.forEach { msg ->
                             when (msg.role) {
-                                com.example.aiaccounting.data.local.entity.MessageRole.USER -> conversationRepository.addUserMessage(msg.content)
-                                com.example.aiaccounting.data.local.entity.MessageRole.ASSISTANT -> conversationRepository.addAssistantMessage(msg.content)
+                                com.example.aiaccounting.data.local.entity.MessageRole.USER -> conversationRepository.restoreMessage(
+                                    role = ConversationRole.USER,
+                                    content = msg.content,
+                                    timestamp = msg.timestamp,
+                                    imageUri = msg.imageUris
+                                )
+                                com.example.aiaccounting.data.local.entity.MessageRole.ASSISTANT -> conversationRepository.restoreMessage(
+                                    role = ConversationRole.ASSISTANT,
+                                    content = msg.content,
+                                    timestamp = msg.timestamp,
+                                    imageUri = msg.imageUris
+                                )
                                 else -> {}
                             }
                         }
+                        appLogLogger.info(
+                            source = "AI",
+                            category = "chat_session_switch_restore_summary",
+                            message = "删除会话后恢复替代会话完成",
+                            details = "sessionId=${result.sessionId},messagesCount=${result.messages.size},userMessages=${result.messages.count { it.role == com.example.aiaccounting.data.local.entity.MessageRole.USER }},assistantMessages=${result.messages.count { it.role == com.example.aiaccounting.data.local.entity.MessageRole.ASSISTANT }},messagesWithImages=${result.messages.count { !it.imageUris.isNullOrBlank() }},restoredImageUriCount=${result.messages.sumOf { it.imageUris?.split(",")?.count { uri -> uri.isNotBlank() } ?: 0 }}"
+                        )
                     }
                 }
             } catch (e: CancellationException) {
@@ -538,14 +630,31 @@ class AIAssistantViewModel @Inject constructor(
      */
     fun sendMessageWithImages(message: String, imageUris: List<Uri>, context: Context) {
         viewModelScope.launch {
+            var sessionId: String? = null
+            val traceId = UUID.randomUUID().toString()
             try {
                 _uiState.update { it.copy(isLoading = true, error = null) }
+                clearPendingInteractionStates()
 
-                val sessionId = getOrCreateCurrentSession()
+                sessionId = getOrCreateCurrentSession()
+                appLogLogger.info(
+                    source = "AI",
+                    category = "image_send_start",
+                    message = "图片消息发送开始",
+                    details = "sessionId=$sessionId,imageCount=${imageUris.size},userMessageLength=${message.length},provider=${currentAIConfig.provider.name},model=${currentAIConfig.model.ifBlank { "AUTO" }}",
+                    traceId = traceId
+                )
                 val displayMessage = message.ifBlank { "发送了${imageUris.size}张图片" }
                 val imageUriStrings = imageUris.map { it.toString() }
                 conversationRepository.addUserMessageWithImages(displayMessage, imageUriStrings)
                 chatSessionRepository.addMessage(sessionId, com.example.aiaccounting.data.local.entity.MessageRole.USER, displayMessage, imageUriStrings)
+                appLogLogger.info(
+                    source = "AI",
+                    category = "image_send_persisted_user_message",
+                    message = "图片用户消息已持久化",
+                    details = "sessionId=$sessionId,imageCount=${imageUriStrings.size},displayMessageLength=${displayMessage.length}",
+                    traceId = traceId
+                )
 
                 val isNetworkAvailable = refreshNetworkAndSyncUi()
                 val currentButler = butlerCoordinator.resolveCurrentButler(_uiState.value.currentButler)
@@ -555,7 +664,8 @@ class AIAssistantViewModel @Inject constructor(
                     context = context,
                     currentButler = currentButler,
                     config = currentAIConfig,
-                    isNetworkAvailable = isNetworkAvailable
+                    isNetworkAvailable = isNetworkAvailable,
+                    traceId = traceId
                 )
 
                 val assistantMessage = when (processingResult) {
@@ -564,7 +674,8 @@ class AIAssistantViewModel @Inject constructor(
                             source = "AI",
                             category = "image_flow_branch",
                             message = "图片消息处理分支",
-                            details = "branch=error,messageLength=${processingResult.message.length}"
+                            details = "branch=error,messageLength=${processingResult.message.length}",
+                            traceId = traceId
                         )
                         processingResult.message
                     }
@@ -573,7 +684,18 @@ class AIAssistantViewModel @Inject constructor(
                             source = "AI",
                             category = "image_flow_branch",
                             message = "图片消息处理分支",
-                            details = "branch=text_reply,messageLength=${processingResult.message.length}"
+                            details = "branch=text_reply,messageLength=${processingResult.message.length}",
+                            traceId = traceId
+                        )
+                        processingResult.message
+                    }
+                    is ImageMessageProcessingResult.Clarification -> {
+                        appLogLogger.info(
+                            source = "AI",
+                            category = "image_flow_branch",
+                            message = "图片消息处理分支",
+                            details = "branch=clarification,messageLength=${processingResult.message.length}",
+                            traceId = traceId
                         )
                         processingResult.message
                     }
@@ -582,7 +704,8 @@ class AIAssistantViewModel @Inject constructor(
                             source = "AI",
                             category = "image_flow_branch",
                             message = "图片消息处理分支",
-                            details = "branch=execute_envelope,actions=${processingResult.envelope.actions.size},replyLength=${processingResult.envelope.reply.length}"
+                            details = "branch=execute_envelope,actions=${processingResult.envelope.actions.size},replyLength=${processingResult.envelope.reply.length}",
+                            traceId = traceId
                         )
                         actionExecutor.executeQueryBeforeExecution(processingResult.envelope)
                     }
@@ -591,26 +714,66 @@ class AIAssistantViewModel @Inject constructor(
                             source = "AI",
                             category = "image_flow_branch",
                             message = "图片消息处理分支",
-                            details = "branch=remote_bookkeeping_prompt,promptLength=${processingResult.prompt.length}"
+                            details = "branch=remote_bookkeeping_prompt,promptLength=${processingResult.prompt.length}",
+                            traceId = traceId
                         )
                         processRemoteExecutionRequest(
                             RemoteExecutionRequest(
                                 userMessage = processingResult.prompt,
                                 responseRequirement = AIAssistantRemoteResponseRequirement.ActionEnvelopeRequired,
-                                promptScenario = AIAssistantRemotePromptScenario.Bookkeeping
+                                promptScenario = AIAssistantRemotePromptScenario.Bookkeeping,
+                                traceId = traceId
+                            )
+                        )
+                    }
+                    is ImageMessageProcessingResult.RemoteChatPrompt -> {
+                        appLogLogger.info(
+                            source = "AI",
+                            category = "image_flow_branch",
+                            message = "图片消息处理分支",
+                            details = "branch=remote_chat_prompt,promptLength=${processingResult.prompt.length}",
+                            traceId = traceId
+                        )
+                        processRemoteExecutionRequest(
+                            RemoteExecutionRequest(
+                                userMessage = processingResult.prompt,
+                                responseRequirement = AIAssistantRemoteResponseRequirement.ReplyAllowed,
+                                promptScenario = AIAssistantRemotePromptScenario.Chat,
+                                traceId = traceId
                             )
                         )
                     }
                 }
                 conversationRepository.addAssistantMessage(assistantMessage)
                 chatSessionRepository.addMessage(sessionId, com.example.aiaccounting.data.local.entity.MessageRole.ASSISTANT, assistantMessage)
+                appLogLogger.info(
+                    source = "AI",
+                    category = "image_send_finish",
+                    message = "图片消息发送完成",
+                    details = "sessionId=$sessionId,assistantMessageLength=${assistantMessage.length}",
+                    traceId = traceId
+                )
                 _uiState.update { it.copy(isLoading = false) }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 aiUsageRepository.recordCall(success = false)
                 _uiState.update { it.copy(isLoading = false, error = USER_SAFE_UI_ERROR) }
+                appLogLogger.error(
+                    source = "AI",
+                    category = "image_send_exception",
+                    message = "图片消息发送失败",
+                    details = "sessionId=$sessionId,exception=${e::class.java.simpleName},message=${e.message}",
+                    traceId = traceId
+                )
                 conversationRepository.addAssistantMessage(USER_SAFE_IMAGE_PROCESSING_ERROR)
+                sessionId?.let {
+                    chatSessionRepository.addMessage(
+                        it,
+                        com.example.aiaccounting.data.local.entity.MessageRole.ASSISTANT,
+                        USER_SAFE_IMAGE_PROCESSING_ERROR
+                    )
+                }
             }
         }
     }

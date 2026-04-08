@@ -38,7 +38,8 @@ internal data class RemoteExecutionRequest(
     val continuationPayload: AIAssistantContinuationPayload? = null,
     val stage: AIAssistantInteractionStage = AIAssistantInteractionStage.Execution,
     val responseRequirement: AIAssistantRemoteResponseRequirement = AIAssistantRemoteResponseRequirement.ReplyAllowed,
-    val promptScenario: AIAssistantRemotePromptScenario = AIAssistantRemotePromptScenario.Chat
+    val promptScenario: AIAssistantRemotePromptScenario = AIAssistantRemotePromptScenario.Chat,
+    val traceId: String? = null
 )
 
 internal data class ModificationExecutionRequest(
@@ -163,6 +164,20 @@ internal class AIAssistantMessageOrchestrator {
         }
 
         if (analysis.hasClarificationAction) {
+            val shouldPreferRemoteDailyChat =
+                analysis.engineMode == AIAssistantEngineMode.Remote &&
+                    analysis.topLevelIntent == AIAssistantTopLevelIntent.DAILY_CHAT &&
+                    analysis.reasoningResult.intent == AIReasoningEngine.UserIntent.UNKNOWN
+            if (shouldPreferRemoteDailyChat) {
+                return AIAssistantMessageRoute.RemoteRequest(
+                    RemoteExecutionRequest(
+                        userMessage = analysis.userMessage,
+                        responseRequirement = AIAssistantRemoteResponseRequirement.ReplyAllowed,
+                        promptScenario = AIAssistantRemotePromptScenario.Chat
+                    )
+                )
+            }
+
             val shouldPreferRemoteBookkeeping =
                 analysis.engineMode == AIAssistantEngineMode.Remote &&
                     analysis.topLevelIntent == AIAssistantTopLevelIntent.BOOKKEEPING &&
@@ -186,10 +201,24 @@ internal class AIAssistantMessageOrchestrator {
             AIReasoningEngine.UserIntent.IDENTITY_CONFIRMATION,
             AIReasoningEngine.UserIntent.QUERY_INFORMATION,
             AIReasoningEngine.UserIntent.ANALYZE_DATA -> {
-                AIAssistantMessageRoute.LocalActions(
-                    actions = analysis.reasoningResult.actions,
-                    stage = AIAssistantInteractionStage.Execution
-                )
+                if (
+                    analysis.engineMode == AIAssistantEngineMode.Remote &&
+                    analysis.topLevelIntent == AIAssistantTopLevelIntent.DAILY_CHAT &&
+                    analysis.reasoningResult.intent == AIReasoningEngine.UserIntent.IDENTITY_CONFIRMATION
+                ) {
+                    AIAssistantMessageRoute.RemoteRequest(
+                        RemoteExecutionRequest(
+                            userMessage = analysis.userMessage,
+                            responseRequirement = AIAssistantRemoteResponseRequirement.ReplyAllowed,
+                            promptScenario = AIAssistantRemotePromptScenario.Chat
+                        )
+                    )
+                } else {
+                    AIAssistantMessageRoute.LocalActions(
+                        actions = analysis.reasoningResult.actions,
+                        stage = AIAssistantInteractionStage.Execution
+                    )
+                }
             }
 
             AIReasoningEngine.UserIntent.MODIFY_TRANSACTION,

@@ -11,6 +11,7 @@ import com.example.aiaccounting.data.model.MessageRole
 import com.example.aiaccounting.data.repository.AIModelPerformanceRepository
 import com.example.aiaccounting.di.AiOkHttpClient
 import com.example.aiaccounting.di.AiTestOkHttpClient
+import com.example.aiaccounting.logging.AppLogLogger
 import com.example.aiaccounting.utils.OpenAiUrlUtils
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -46,7 +47,8 @@ import javax.inject.Singleton
 class AIService @Inject constructor(
     @AiOkHttpClient private val client: OkHttpClient,
     @AiTestOkHttpClient private val testClient: OkHttpClient,
-    private val modelPerformanceRepository: AIModelPerformanceRepository
+    private val modelPerformanceRepository: AIModelPerformanceRepository,
+    private val appLogLogger: AppLogLogger? = null
 ) {
 
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
@@ -249,7 +251,7 @@ class AIService @Inject constructor(
 
             if (!response.isSuccessful) {
                 val body = response.body?.string().orEmpty()
-                logNetworkDiagnostics("model_list_failure url=$url client=${if (httpClient === testClient) "testClient" else "client"} code=${response.code} body=${body.take(400)}")
+                logNetworkDiagnostics("model_list_failure url=$url client=${if (httpClient === testClient) "testClient" else "client"} code=${response.code} bodyLength=${body.length}")
                 throw Exception("获取模型列表失败: ${response.code}")
             }
 
@@ -489,7 +491,7 @@ class AIService @Inject constructor(
         try {
             testClient.newCall(request).execute().use { response ->
                 val rawBody = response.body?.string()
-                logNetworkDiagnostics("chat_test_request url=$url client=testClient model=${config.model} code=${response.code} body=${rawBody?.take(400).orEmpty()}")
+                logNetworkDiagnostics("chat_test_request url=$url client=testClient model=${config.model} code=${response.code} bodyLength=${rawBody?.length ?: 0}")
 
                 if (!response.isSuccessful) {
                     if (isModelUnavailable(response.code, rawBody)) {
@@ -886,7 +888,7 @@ class AIService @Inject constructor(
         try {
             client.newCall(request).execute().use { response ->
                 val rawBody = response.body?.string()
-                logNetworkDiagnostics("chat_request url=$url client=client model=${config.model} bookkeeping=$bookkeepingScenario code=${response.code} body=${rawBody?.take(400).orEmpty()}")
+                logNetworkDiagnostics("chat_request url=$url client=client model=${config.model} bookkeeping=$bookkeepingScenario code=${response.code} bodyLength=${rawBody?.length ?: 0}")
 
                 if (!response.isSuccessful) {
                     if (isModelUnavailable(response.code, rawBody)) {
@@ -1316,8 +1318,16 @@ suspend fun analyzeImageAndRecord(
     imageUri: Uri,
     config: AIConfig,
     context: Context,
-    promptContext: String? = null
+    promptContext: String? = null,
+    traceId: String? = null
 ): ImageAnalysisResult = withContext(Dispatchers.IO) {
+    appLogLogger?.info(
+        source = "AI",
+        category = "image_native_request_start",
+        message = "原生图片请求开始",
+        details = "provider=${config.provider.name},model=${config.model.ifBlank { "AUTO" }},uriTail=${imageUri.toString().takeLast(64)}",
+        traceId = traceId
+    )
     if (!config.isEnabled || config.apiKey.isBlank()) {
         return@withContext ImageAnalysisResult(
             success = false,
@@ -1328,7 +1338,7 @@ suspend fun analyzeImageAndRecord(
 
     try {
         // 读取图片并转换为base64（保留真实图片MIME，避免PNG/WebP等被错误标记）
-        val encodedImage = uriToBase64(imageUri, context)
+        val encodedImage = uriToBase64(imageUri, context, traceId)
             ?: return@withContext ImageAnalysisResult(
                 success = false,
                 message = "无法读取图片",
@@ -1403,6 +1413,13 @@ ${promptContext?.takeIf { it.isNotBlank() } ?: "你是\"小财娘\"，一位可�
                     )
                 } catch (e: Exception) {
                     if (e.message == "UNSUPPORTED_MODEL") {
+                        appLogLogger?.warning(
+                            source = "AI",
+                            category = "image_native_request_retry",
+                            message = "原生图片请求模型不支持，准备切换模型",
+                            details = "provider=${config.provider.name},currentModel=${config.model.ifBlank { "AUTO" }}",
+                            traceId = traceId
+                        )
                         // Best-effort fallback: try another vision-capable model from /v1/models.
                         val ids = fetchRemoteModelIds(config)
                         val fallback = pickPreferredModel(
@@ -1424,9 +1441,24 @@ ${promptContext?.takeIf { it.isNotBlank() } ?: "你是\"小财娘\"，一位可�
             }
         }
 
+        appLogLogger?.info(
+            source = "AI",
+            category = "image_native_request_finish",
+            message = "原生图片请求完成",
+            details = "responseLength=${result.length},provider=${config.provider.name},model=${config.model.ifBlank { "AUTO" }}",
+            traceId = traceId
+        )
+
         // 解析结果
         parseImageAnalysisResult(result)
     } catch (e: Exception) {
+        appLogLogger?.error(
+            source = "AI",
+            category = "image_native_request_exception",
+            message = "原生图片请求失败",
+            details = "provider=${config.provider.name},model=${config.model.ifBlank { "AUTO" }},exception=${e::class.java.simpleName},message=${e.message}",
+            traceId = traceId
+        )
         ImageAnalysisResult(
             success = false,
             message = "图片识别失败: ${e.message}",
@@ -1438,7 +1470,7 @@ ${promptContext?.takeIf { it.isNotBlank() } ?: "你是\"小财娘\"，一位可�
 /**
  * 将URI转换为Base64编码的图片
  */
-private fun uriToBase64(uri: Uri, context: Context): EncodedImage? {
+private fun uriToBase64(uri: Uri, context: Context, traceId: String? = null): EncodedImage? {
     return try {
         val inputStream: InputStream? = context.contentResolver.openInputStream(uri)
         inputStream?.use { stream ->
@@ -1453,14 +1485,27 @@ private fun uriToBase64(uri: Uri, context: Context): EncodedImage? {
                 ?.lowercase()
                 ?.takeIf { it.startsWith("image/") }
                 ?: "image/jpeg"
-            // 压缩图片，限制大小，同时返回压缩后真实MIME
             val compressedImage = compressImageIfNeeded(imageBytes, detectedMimeType)
+            appLogLogger?.info(
+                source = "AI",
+                category = "image_native_payload_ready",
+                message = "原生图片载荷已准备",
+                details = "uriTail=${uri.toString().takeLast(64)},originalBytes=${imageBytes.size},compressedBytes=${compressedImage.bytes.size},mimeType=${compressedImage.mimeType}",
+                traceId = traceId
+            )
             EncodedImage(
                 base64 = Base64.encodeToString(compressedImage.bytes, Base64.NO_WRAP),
                 mimeType = compressedImage.mimeType
             )
         }
     } catch (e: Exception) {
+        appLogLogger?.error(
+            source = "AI",
+            category = "image_native_payload_exception",
+            message = "原生图片读取失败",
+            details = "uriTail=${uri.toString().takeLast(64)},exception=${e::class.java.simpleName},message=${e.message}",
+            traceId = traceId
+        )
         null
     }
 }

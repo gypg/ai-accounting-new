@@ -24,6 +24,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.suspendCancellableCoroutine
+import java.util.UUID
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import javax.inject.Inject
@@ -37,6 +38,13 @@ import javax.inject.Singleton
 class ImageProcessingService @Inject constructor(
     private val appLogLogger: AppLogLogger
 ) {
+
+    private companion object {
+        private const val SCREENSHOT_SINGLE_TIMEOUT_MS = 12_000L
+        private const val DEFAULT_SINGLE_TIMEOUT_MS = 7_500L
+        private const val SCREENSHOT_BATCH_PER_IMAGE_TIMEOUT_MS = 8_000L
+        private const val DEFAULT_BATCH_PER_IMAGE_TIMEOUT_MS = 6_000L
+    }
 
     enum class OcrConfidence {
         NONE,
@@ -75,16 +83,67 @@ class ImageProcessingService @Inject constructor(
     /**
      * 分析单张图片 - 带超时保护
      */
-    suspend fun analyzeImage(uri: Uri, context: Context, timeoutMs: Long = 5000): ImageAnalysisResult {
+    suspend fun analyzeImage(
+        uri: Uri,
+        context: Context,
+        timeoutMs: Long = DEFAULT_SINGLE_TIMEOUT_MS,
+        traceId: String? = null,
+        fallbackUsed: Boolean = false
+    ): ImageAnalysisResult {
+        val effectiveTraceId = traceId ?: UUID.randomUUID().toString()
+        appLogLogger.info(
+            source = "AI",
+            category = "image_ocr_single_start",
+            message = "单张图片OCR开始",
+            details = "timeoutMs=$timeoutMs,uriTail=${uri.toString().takeLast(64)},fallbackUsed=$fallbackUsed",
+            traceId = effectiveTraceId
+        )
         return try {
             withTimeout(timeoutMs) {
+                val screenshotLikely = uri.toString().contains("截图") || uri.toString().contains("screenshot", ignoreCase = true)
+                val fastText = extractFastPathText(uri, context, screenshotLikely).trim()
+                if (fastText.isNotBlank()) {
+                    val fastKeyLines = ReceiptTextHeuristics.extractKeyLines(fastText)
+                    val fastSignals = ReceiptTextHeuristics.extractReceiptSignals(fastText)
+                    val fastScore = ReceiptTextHeuristics.calculateQualityScore(
+                        rawText = fastText,
+                        keyLines = fastKeyLines,
+                        labels = emptyList(),
+                        signals = fastSignals
+                    )
+                    val fastPromptText = buildPromptText(fastKeyLines, fastText)
+                    appLogLogger.info(
+                        source = "AI",
+                        category = "image_ocr_single_result",
+                        message = "图片OCR快速提字完成",
+                        details = "rawLineCount=${fastText.lines().count { it.isNotBlank() }},keyLineCount=${fastKeyLines.size},promptLength=${fastPromptText.length},qualityScore=$fastScore,fastPath=true,screenshotLikely=$screenshotLikely",
+                        traceId = effectiveTraceId
+                    )
+                    return@withTimeout ImageAnalysisResult(
+                        rawText = fastText,
+                        text = fastPromptText,
+                        keyLines = if (fastKeyLines.isNotEmpty()) fastKeyLines else fastText.lines().map { it.trim() }.filter { it.isNotBlank() }.take(24),
+                        labels = emptyList(),
+                        receiptSignals = fastSignals,
+                        qualityScore = fastScore,
+                        confidence = ReceiptTextHeuristics.toConfidence(fastScore),
+                        hasContent = true,
+                        selectedProfile = if (screenshotLikely) OcrPreprocessingProfile.SCREENSHOT else OcrPreprocessingProfile.BASE
+                    )
+                }
                 val labelsDeferred = async { extractLabelsFromImage(uri, context) }
-                val passDeferred = async { extractBestPassAnalysis(uri, context) }
+                val passDeferred = async { extractBestPassAnalysis(uri, context, screenshotLikely) }
 
                 val labels = labelsDeferred.await().take(5)
                 val passSelection = passDeferred.await()
                 if (passSelection == null) {
-                    val fallbackText = runCatching { extractTextFromFile(uri, context) }.getOrDefault("").trim()
+                    val fallbackText = try {
+                        extractTextFromFile(uri, context)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (_: Exception) {
+                        ""
+                    }.trim()
                     val fallbackKeyLines = ReceiptTextHeuristics.extractKeyLines(fallbackText)
                     val fallbackSignals = ReceiptTextHeuristics.extractReceiptSignals(fallbackText)
                     val fallbackHasText = fallbackText.isNotBlank() || fallbackKeyLines.isNotEmpty() || fallbackSignals.hasStrongReceiptSignals
@@ -92,7 +151,8 @@ class ImageProcessingService @Inject constructor(
                         source = "AI",
                         category = "image_ocr",
                         message = "图片OCR未选出候选结果",
-                        details = "labels=${labels.size},fallbackTextLength=${fallbackText.length},fallbackKeyLineCount=${fallbackKeyLines.size},fallbackAmountCandidates=${fallbackSignals.amounts.size},fallbackHasText=$fallbackHasText"
+                        details = "labels=${labels.size},fallbackTextLength=${fallbackText.length},fallbackKeyLineCount=${fallbackKeyLines.size},fallbackAmountCandidates=${fallbackSignals.amounts.size},fallbackHasText=$fallbackHasText,fallbackUsed=$fallbackUsed",
+                        traceId = effectiveTraceId
                     )
                     val hasLabelContent = labels.isNotEmpty()
                     return@withTimeout if (fallbackHasText || hasLabelContent) {
@@ -132,9 +192,10 @@ class ImageProcessingService @Inject constructor(
 
                 appLogLogger.info(
                     source = "AI",
-                    category = "image_ocr",
+                    category = "image_ocr_single_result",
                     message = "图片OCR分析完成",
-                    details = "rawLineCount=${best.rawText.lines().count { it.isNotBlank() }},keyLineCount=${best.keyLines.size},promptLineCount=${promptText.lines().count { it.isNotBlank() }},promptLength=${promptText.length},amountCandidates=${best.receiptSignals.amounts.size},dateCandidates=${best.receiptSignals.dates.size},merchantCandidates=${best.receiptSignals.merchants.size},qualityScore=$finalScore,confidence=${finalConfidence.name}"
+                    details = "rawLineCount=${best.rawText.lines().count { it.isNotBlank() }},keyLineCount=${best.keyLines.size},promptLineCount=${promptText.lines().count { it.isNotBlank() }},promptLength=${promptText.length},amountCandidates=${best.receiptSignals.amounts.size},dateCandidates=${best.receiptSignals.dates.size},merchantCandidates=${best.receiptSignals.merchants.size},qualityScore=$finalScore,confidence=${finalConfidence.name},hasContent=$hasContent,fallbackUsed=$fallbackUsed,labelsCount=${labels.size}",
+                    traceId = effectiveTraceId
                 )
 
                 ImageAnalysisResult(
@@ -152,10 +213,24 @@ class ImageProcessingService @Inject constructor(
                 )
             }
         } catch (e: TimeoutCancellationException) {
+            appLogLogger.warning(
+                source = "AI",
+                category = "image_ocr_single_timeout",
+                message = "单张图片OCR超时",
+                details = "timeoutMs=$timeoutMs,uriTail=${uri.toString().takeLast(64)},fallbackUsed=$fallbackUsed",
+                traceId = effectiveTraceId
+            )
             emptyResult()
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
+            appLogLogger.error(
+                source = "AI",
+                category = "image_ocr_single_exception",
+                message = "单张图片OCR失败",
+                details = "timeoutMs=$timeoutMs,uriTail=${uri.toString().takeLast(64)},fallbackUsed=$fallbackUsed,exception=${e::class.java.simpleName},message=${e.message}",
+                traceId = effectiveTraceId
+            )
             emptyResult()
         }
     }
@@ -166,20 +241,58 @@ class ImageProcessingService @Inject constructor(
     suspend fun analyzeMultipleImages(
         uris: List<Uri>,
         context: Context,
-        timeoutMs: Long = 8000
+        timeoutMs: Long = 18_000,
+        traceId: String? = null
     ): List<ImageAnalysisResult> = withContext(Dispatchers.IO) {
+        val effectiveTraceId = traceId ?: UUID.randomUUID().toString()
+        appLogLogger.info(
+            source = "AI",
+            category = "image_ocr_batch_start",
+            message = "批量图片OCR开始",
+            details = "imageCount=${uris.size},timeoutMs=$timeoutMs",
+            traceId = effectiveTraceId
+        )
         try {
             withTimeout(timeoutMs) {
                 val deferredResults = uris.map { uri ->
-                    async { analyzeImage(uri, context, 5000) }
+                    val perImageTimeout = if (
+                        uri.toString().contains("截图") || uri.toString().contains("screenshot", ignoreCase = true)
+                    ) {
+                        SCREENSHOT_BATCH_PER_IMAGE_TIMEOUT_MS
+                    } else {
+                        DEFAULT_BATCH_PER_IMAGE_TIMEOUT_MS
+                    }
+                    async { analyzeImage(uri, context, perImageTimeout, effectiveTraceId) }
                 }
-                deferredResults.awaitAll()
+                deferredResults.awaitAll().also { results ->
+                    appLogLogger.info(
+                        source = "AI",
+                        category = "image_ocr_batch_finish",
+                        message = "批量图片OCR完成",
+                        details = "imageCount=${uris.size},resultsWithContent=${results.count { it.hasContent || it.labels.isNotEmpty() || it.keyLines.isNotEmpty() || it.text.isNotBlank() }}",
+                        traceId = effectiveTraceId
+                    )
+                }
             }
         } catch (e: TimeoutCancellationException) {
+            appLogLogger.warning(
+                source = "AI",
+                category = "image_ocr_batch_timeout",
+                message = "批量图片OCR超时",
+                details = "imageCount=${uris.size},timeoutMs=$timeoutMs",
+                traceId = effectiveTraceId
+            )
             uris.map { emptyResult() }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
+            appLogLogger.error(
+                source = "AI",
+                category = "image_ocr_batch_exception",
+                message = "批量图片OCR失败",
+                details = "imageCount=${uris.size},timeoutMs=$timeoutMs,exception=${e::class.java.simpleName},message=${e.message}",
+                traceId = effectiveTraceId
+            )
             uris.map { emptyResult() }
         }
     }
@@ -212,15 +325,48 @@ class ImageProcessingService @Inject constructor(
                     }
             }
             result
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             emptyList()
         }
     }
 
-    private suspend fun extractBestPassAnalysis(uri: Uri, context: Context): com.example.aiaccounting.data.service.image.OcrSelectionResult? {
-        val variants = OcrPreprocessingUtils.preprocessVariants(context, uri)
-        val analyses = if (variants.isNotEmpty()) {
-            variants.mapNotNull { variant -> analyzePass(variant) }
+    private suspend fun extractFastPathText(uri: Uri, context: Context, screenshotLikely: Boolean): String {
+        return if (screenshotLikely) {
+            val screenshotVariant = OcrPreprocessingUtils.preprocessVariants(context, uri, screenshotLikely = true)
+                .firstOrNull { it.profile == OcrPreprocessingProfile.SCREENSHOT }
+            val bitmapText = screenshotVariant?.bitmap?.let { extractTextFromBitmap(it) }.orEmpty().trim()
+            if (bitmapText.isNotBlank()) {
+                bitmapText
+            } else {
+                extractTextFromFile(uri, context).trim()
+            }
+        } else {
+            extractTextFromFile(uri, context).trim()
+        }
+    }
+
+    private suspend fun extractBestPassAnalysis(
+        uri: Uri,
+        context: Context,
+        screenshotLikely: Boolean = false
+    ): com.example.aiaccounting.data.service.image.OcrSelectionResult? {
+        val variants = OcrPreprocessingUtils.preprocessVariants(context, uri, screenshotLikely)
+        val orderedVariants = if (screenshotLikely) {
+            variants.sortedBy { variant ->
+                when (variant.profile) {
+                    OcrPreprocessingProfile.SCREENSHOT -> 0
+                    OcrPreprocessingProfile.BASE -> 1
+                    OcrPreprocessingProfile.DETAIL -> 2
+                    OcrPreprocessingProfile.DOCUMENT -> 3
+                }
+            }
+        } else {
+            variants
+        }
+        val analyses = if (orderedVariants.isNotEmpty()) {
+            orderedVariants.mapNotNull { variant -> analyzePass(variant) }
         } else {
             listOfNotNull(analyzeOriginalPass(uri, context))
         }
@@ -306,6 +452,8 @@ class ImageProcessingService @Inject constructor(
         return try {
             val image = InputImage.fromBitmap(bitmap, 0)
             processTextRecognition(image)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             ""
         }
@@ -314,6 +462,8 @@ class ImageProcessingService @Inject constructor(
         return try {
             val image = InputImage.fromFilePath(context, uri)
             processTextRecognition(image)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             ""
         }
@@ -342,6 +492,12 @@ class ImageProcessingService @Inject constructor(
         results: List<ImageAnalysisResult>,
         userMessage: String
     ): String {
+        val usableResults = results.filter {
+            it.hasContent || it.labels.isNotEmpty() || it.keyLines.isNotEmpty() || it.text.isNotBlank()
+        }
+        if (usableResults.isEmpty()) {
+            return ""
+        }
         return buildString {
             appendLine("你是小财娘，活泼可爱的管家婆AI助手！")
             appendLine()
@@ -351,10 +507,10 @@ class ImageProcessingService @Inject constructor(
                 appendLine()
             }
 
-            appendLine("用户发了${results.size}张图片，内容如下：")
+            appendLine("用户发了${usableResults.size}张图片，内容如下：")
             appendLine()
 
-            results.forEachIndexed { index, result ->
+            usableResults.forEachIndexed { index, result ->
                 appendLine("【图${index + 1}】")
                 appendLine("识别置信度：${describeConfidence(result.confidence)}（${result.qualityScore}分）")
                 appendLine("预处理方案：${describeProfile(result.selectedProfile)}")

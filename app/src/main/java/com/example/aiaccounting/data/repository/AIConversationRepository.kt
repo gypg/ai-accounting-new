@@ -210,10 +210,30 @@ class AIConversationRepository @Inject constructor(
     }
 
     /**
+     * Restore historical message without rewriting metadata
+     */
+    suspend fun restoreMessage(
+        role: ConversationRole,
+        content: String,
+        timestamp: Long,
+        imageUri: String? = null,
+        transactionId: Long? = null
+    ): Long {
+        val conversation = AIConversation(
+            role = role,
+            content = content,
+            timestamp = timestamp,
+            transactionId = transactionId,
+            imageUri = imageUri
+        )
+        return insertConversation(conversation)
+    }
+
+    /**
      * Clear old conversations (older than 30 days)
      */
     suspend fun clearOldConversations(): Int {
-        val thirtyDaysAgo = System.currentTimeMillis() - (30 * 24 * 60 * 60 * 1000)
+        val thirtyDaysAgo = System.currentTimeMillis() - (30L * 24 * 60 * 60 * 1000)
         return deleteConversationsBefore(thirtyDaysAgo)
     }
 }

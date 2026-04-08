@@ -242,7 +242,7 @@ class AIReasoningEngine @Inject constructor(
             UserIntent.MANAGE_ACCOUNT -> generateAccountManagementActions(context, intentAnalysis)
             UserIntent.MANAGE_CATEGORY -> generateCategoryManagementActions(context, intentAnalysis)
             UserIntent.GENERAL_CONVERSATION -> generateConversationActions(context, intentAnalysis, currentButlerId)
-            UserIntent.UNKNOWN -> listOf(AIAction.RequestClarification("抱歉，我不太理解您的意思。您可以尝试说：\n• 查看账户余额\n• 分析本月支出\n• 记一笔100元的餐饮消费"))
+            UserIntent.UNKNOWN -> generateConversationActions(context, intentAnalysis.copy(intent = UserIntent.GENERAL_CONVERSATION, confidence = 0.45f), currentButlerId)
             else -> listOf(AIAction.RequestClarification("抱歉，我不太理解您的意思。"))
         }
 
@@ -1274,7 +1274,9 @@ class AIReasoningEngine @Inject constructor(
     private fun isAssistantPersonaConversation(message: String): Boolean {
         return listOf(
             "你好", "您好", "哈喽", "嗨", "hi", "hello", "hey", "谢谢", "感谢", "再见", "拜拜",
+            "你是谁", "你叫什么", "你是谁呀", "你是哪个助手", "你是干什么的", "你是做什么的",
             "你是什么模型", "什么模型", "底层模型", "底层是什么模型", "用的什么模型", "哪个模型", "啥模型",
+            "你的任务是什么", "你的职责是什么", "你的作用是什么", "你负责什么",
             "你能做什么", "你会什么", "能帮我做什么", "可以帮我做什么", "你都能干嘛", "都能干嘛"
         ).any { message.contains(it) }
     }

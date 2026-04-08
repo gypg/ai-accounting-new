@@ -1,5 +1,6 @@
 package com.example.aiaccounting.logging
 
+import android.util.Log
 import com.example.aiaccounting.data.local.entity.AppLogEntry
 import com.example.aiaccounting.data.repository.AppLogRepository
 import kotlinx.coroutines.CoroutineScope
@@ -53,6 +54,8 @@ class AppLogLogger @Inject constructor(
         scope.launch {
             runCatching {
                 repository.insertLog(entry)
+            }.onFailure { throwable ->
+                fallbackToLogcat(entry, throwable)
             }
         }
     }
@@ -62,6 +65,8 @@ class AppLogLogger @Inject constructor(
             runBlocking(Dispatchers.IO) {
                 repository.insertLog(entry)
             }
+        }.onFailure { throwable ->
+            fallbackToLogcat(entry, throwable)
         }
     }
 
@@ -77,5 +82,29 @@ class AppLogLogger @Inject constructor(
             entityType = entityType,
             entityId = entityId
         )
+    }
+
+    private fun fallbackToLogcat(entry: AppLogEntry, throwable: Throwable) {
+        val text = buildString {
+            append("log_persist_failed source=")
+            append(entry.source)
+            append(", category=")
+            append(entry.category)
+            append(", message=")
+            append(entry.message)
+            entry.traceId?.takeIf { it.isNotBlank() }?.let {
+                append(", traceId=")
+                append(it)
+            }
+            entry.details?.takeIf { it.isNotBlank() }?.let {
+                append(", details=")
+                append(it.take(2000))
+            }
+        }
+        when (entry.level) {
+            "ERROR" -> Log.e("AppLogLogger", text, throwable)
+            "WARNING" -> Log.w("AppLogLogger", text, throwable)
+            else -> Log.i("AppLogLogger", text, throwable)
+        }
     }
 }
