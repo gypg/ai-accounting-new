@@ -81,6 +81,7 @@ lint/reports/
 # Keystore files - keep secure
 *.jks
 *.keystore
+!app/debug.keystore
 release.keystore
 keystore.properties
 
