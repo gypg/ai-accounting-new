@@ -39,9 +39,10 @@ android {
         // Only create release config if credentials are available
         val keystorePasswordEnv = System.getenv("KEYSTORE_PASSWORD")
         val keyPasswordEnv = System.getenv("KEY_PASSWORD")
-        if (keystorePasswordEnv != null && keyPasswordEnv != null) {
+        val keystoreFile = file("../keystore/release.keystore")
+        if (keystorePasswordEnv != null && keyPasswordEnv != null && keystoreFile.exists()) {
             create("release") {
-                storeFile = file("../keystore/release.keystore")
+                storeFile = keystoreFile
                 storePassword = keystorePasswordEnv
                 keyAlias = "aiaccounting_release"
                 keyPassword = keyPasswordEnv
@@ -58,7 +59,8 @@ android {
                 "proguard-rules.pro"
             )
             // Use release signing if available, otherwise use debug signing for local builds
-            signingConfig = if (System.getenv("KEYSTORE_PASSWORD") != null) {
+            val keystoreFile = file("../keystore/release.keystore")
+            signingConfig = if (System.getenv("KEYSTORE_PASSWORD") != null && keystoreFile.exists()) {
                 signingConfigs.getByName("release")
             } else {
                 signingConfigs.getByName("debug")
