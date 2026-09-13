@@ -1,0 +1,7 @@
+{
+    "writerHelper.enabled": true,
+    "writerHelper.chapterSummary.outputDir": "章节概述",
+    "writerHelper.chapterSummary.dirs": [
+        "章节目录"
+    ]
+}
