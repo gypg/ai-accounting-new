@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_container"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="horizontal"
+    android:background="@drawable/widget_background"
+    android:padding="8dp"
+    android:gravity="center_vertical">
+
+    <!-- 记支出按钮 -->
+    <TextView
+        android:id="@+id/btn_add_expense"
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="1"
+        android:layout_marginEnd="4dp"
+        android:background="@drawable/widget_button_expense"
+        android:text="记支出"
+        android:textSize="12sp"
+        android:textColor="#FFFFFF"
+        android:textStyle="bold"
+        android:gravity="center" />
+
+    <!-- AI聊天按钮 -->
+    <TextView
+        android:id="@+id/btn_ai_chat"
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="1"
+        android:layout_marginStart="4dp"
+        android:layout_marginEnd="4dp"
+        android:background="@drawable/widget_button_ai"
+        android:text="AI记账"
+        android:textSize="12sp"
+        android:textColor="#FFFFFF"
+        android:textStyle="bold"
+        android:gravity="center" />
+
+    <!-- 记收入按钮 -->
+    <TextView
+        android:id="@+id/btn_add_income"
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="1"
+        android:layout_marginStart="4dp"
+        android:background="@drawable/widget_button_income"
+        android:text="记收入"
+        android:textSize="12sp"
+        android:textColor="#FFFFFF"
+        android:textStyle="bold"
+        android:gravity="center" />
+
+</LinearLayout>

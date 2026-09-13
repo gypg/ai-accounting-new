@@ -1,0 +1,1935 @@
+package com.example.aiaccounting.data.service
+
+import android.content.Context
+import android.net.Uri
+import android.util.Base64
+import com.example.aiaccounting.data.model.AIAnalysisResult
+import com.example.aiaccounting.data.model.AIConfig
+import com.example.aiaccounting.data.model.AIProvider
+import com.example.aiaccounting.data.model.ChatMessage
+import com.example.aiaccounting.data.model.MessageRole
+import com.example.aiaccounting.data.repository.AIModelPerformanceRepository
+import com.example.aiaccounting.di.AiOkHttpClient
+import com.example.aiaccounting.di.AiTestOkHttpClient
+import com.example.aiaccounting.logging.AppLogLogger
+import com.example.aiaccounting.utils.OpenAiUrlUtils
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.runBlocking
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.ByteArrayOutputStream
+import java.io.InputStream
+import java.net.ConnectException
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
+import java.nio.charset.StandardCharsets
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
+import java.util.zip.GZIPOutputStream
+import android.util.Log
+import javax.inject.Inject
+import javax.inject.Singleton
+
+/**
+ * AI服务 - 处理大模型API调用
+ */
+@Singleton
+class AIService @Inject constructor(
+    @AiOkHttpClient private val client: OkHttpClient,
+    @AiTestOkHttpClient private val testClient: OkHttpClient,
+    private val modelPerformanceRepository: AIModelPerformanceRepository,
+    private val appLogLogger: AppLogLogger? = null
+) {
+
+    private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
+    private val requestPolicyResolver = AIRequestPolicyResolver()
+    private val requestFailureClassifier = AIRequestFailureClassifier()
+    private val modelExecutionPlanner = ModelExecutionPlanner()
+    private val retryBackoffMillis = 300L
+    private val compressionThresholdBytes = 512
+    private val oversizedStreamBypassThresholdChars = 8_000
+    private val bookkeepingOutputBudgetTokens = 2_000
+    private val longTextOutputBudgetTokens = 2_500
+    private val defaultOutputBudgetTokens = 4_000
+    private val longTextOutputBudgetThresholdChars = 8_000
+    private val bookkeepingMaxInputTokens = 10_000
+    private val modelCache = ConcurrentHashMap<ModelCacheKey, CachedRemoteModels>()
+
+    private fun modelSelectionStrategy(config: AIConfig): ModelSelectionStrategy {
+        return if (config.model.isBlank()) {
+            ModelSelectionStrategy.AUTO
+        } else {
+            ModelSelectionStrategy.FIXED
+        }
+    }
+
+    private fun logNetworkDiagnostics(message: String) {
+        runCatching {
+            Log.d("AIService", message)
+        }
+    }
+
+    private fun recordModelSuccess(config: AIConfig, modelId: String, latencyMs: Long) {
+        runCatching {
+            runBlocking {
+                modelPerformanceRepository.recordSuccess(config, modelId, latencyMs)
+            }
+        }
+    }
+
+    private fun recordModelFailure(config: AIConfig, modelId: String, category: ModelPerformanceFailureCategory) {
+        runCatching {
+            runBlocking {
+                modelPerformanceRepository.recordFailure(config, modelId, category)
+            }
+        }
+    }
+
+    /**
+     * 发送对话请求（流式）
+     * 注意：当前实现为非流式，但保留流式接口以便未来扩展
+     */
+    fun sendChatStream(
+        messages: List<ChatMessage>,
+        config: AIConfig
+    ): Flow<String> = flow {
+        if (!config.isEnabled || config.apiKey.isBlank()) {
+            emit("请先配置AI API密钥")
+            return@flow
+        }
+
+        val response = when (config.provider) {
+            AIProvider.QWEN, AIProvider.DEEPSEEK, AIProvider.ZHIPU, AIProvider.BAIDU, AIProvider.CUSTOM -> sendOpenAIChatStream(messages, config)
+        }
+        emit(response)
+    }.flowOn(Dispatchers.IO)
+
+    /**
+     * 分析账单数据
+     */
+    suspend fun analyzeTransactions(
+        transactionSummary: String,
+        config: AIConfig
+    ): AIAnalysisResult = withContext(Dispatchers.IO) {
+        if (!config.isEnabled || config.apiKey.isBlank()) {
+            return@withContext AIAnalysisResult(
+                summary = "AI分析功能未启用",
+                suggestions = emptyList(),
+                insights = emptyList()
+            )
+        }
+
+        val systemPrompt = """
+            你是一位专业的财务分析师。请根据用户的账单数据提供简洁的分析和建议。
+            请以JSON格式返回，包含以下字段：
+            - summary: 总体情况总结（一句话）
+            - suggestions: 理财建议列表（3-5条）
+            - insights: 数据洞察列表（2-3条）
+        """.trimIndent()
+
+        val messages = listOf(
+            ChatMessage(MessageRole.SYSTEM, systemPrompt),
+            ChatMessage(MessageRole.USER, "请分析以下账单数据：\n$transactionSummary")
+        )
+
+        try {
+            val response = when (config.provider) {
+                AIProvider.QWEN, AIProvider.DEEPSEEK, AIProvider.ZHIPU, AIProvider.BAIDU, AIProvider.CUSTOM -> sendOpenAIChat(messages, config)
+            }
+
+            // 尝试解析JSON响应
+            parseAnalysisResponse(response)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            AIAnalysisResult(
+                summary = "分析失败: ${e.message}",
+                suggestions = listOf("请检查API配置是否正确"),
+                insights = emptyList()
+            )
+        }
+    }
+
+    /**
+     * 智能记账 - 从自然语言提取记账信息
+     */
+    suspend fun parseTransactionFromText(
+        text: String,
+        config: AIConfig
+    ): ParsedTransaction? = withContext(Dispatchers.IO) {
+        if (!config.isEnabled || config.apiKey.isBlank()) {
+            return@withContext null
+        }
+
+        val systemPrompt = """
+            你是一个智能记账助手。从用户的自然语言描述中提取记账信息。
+            请以JSON格式返回，包含以下字段：
+            - amount: 金额（数字）
+            - type: 类型（"income"收入 或 "expense"支出）
+            - category: 分类（如：餐饮、交通、购物、工资等）
+            - note: 备注信息
+            如果无法提取，返回null。
+        """.trimIndent()
+
+        val messages = listOf(
+            ChatMessage(MessageRole.SYSTEM, systemPrompt),
+            ChatMessage(MessageRole.USER, text)
+        )
+
+        try {
+            val response = when (config.provider) {
+                AIProvider.QWEN, AIProvider.DEEPSEEK, AIProvider.ZHIPU, AIProvider.BAIDU, AIProvider.CUSTOM -> sendOpenAIChat(messages, config)
+            }
+
+            parseTransactionResponse(response)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /**
+     * 获取可用模型列表
+     * @return 模型列表，失败返回空列表
+     */
+    suspend fun fetchModels(config: AIConfig): List<RemoteModel> = withContext(Dispatchers.IO) {
+        if (!config.isEnabled || config.apiKey.isBlank()) {
+            return@withContext emptyList()
+        }
+
+        try {
+            when (config.provider) {
+                AIProvider.QWEN, AIProvider.DEEPSEEK, AIProvider.ZHIPU, AIProvider.BAIDU, AIProvider.CUSTOM -> fetchOpenAIModels(config)
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun fetchOpenAIModels(config: AIConfig): List<RemoteModel> {
+        return fetchOpenAIModelsWithClient(config, client)
+    }
+
+    private fun fetchOpenAIModelsWithClient(config: AIConfig, httpClient: OkHttpClient): List<RemoteModel> {
+        val url = OpenAiUrlUtils.models(config.apiUrl)
+        val cacheKey = ModelCacheKey(
+            apiUrl = config.apiUrl.trim(),
+            apiKey = config.apiKey.trim()
+        )
+        val cachedModels = modelCache[cacheKey]
+
+        val requestBuilder = Request.Builder()
+            .url(url)
+            .header("Authorization", "Bearer ${config.apiKey.trim()}")
+            .header("Content-Type", "application/json")
+            .get()
+
+        cachedModels?.etag?.takeIf { it.isNotBlank() }?.let {
+            requestBuilder.header("If-None-Match", it)
+        }
+
+        val request = requestBuilder.build()
+
+        httpClient.newCall(request).execute().use { response ->
+            logNetworkDiagnostics("model_list_request url=$url client=${if (httpClient === testClient) "testClient" else "client"} code=${response.code} cachedEtag=${cachedModels?.etag ?: ""}")
+            if (response.code == 304) {
+                return cachedModels?.models ?: throw Exception("模型列表缓存不可用")
+            }
+
+            if (!response.isSuccessful) {
+                val body = response.body?.string().orEmpty()
+                logNetworkDiagnostics("model_list_failure url=$url client=${if (httpClient === testClient) "testClient" else "client"} code=${response.code} bodyLength=${body.length}")
+                throw Exception("获取模型列表失败: ${response.code}")
+            }
+
+            val responseBody = response.body?.string() ?: throw Exception("空响应")
+            val json = JSONObject(responseBody)
+            val data = json.getJSONArray("data")
+
+            val models = mutableListOf<RemoteModel>()
+            for (i in 0 until data.length()) {
+                val modelObj = data.getJSONObject(i)
+                val id = modelObj.optString("id", "")
+                if (id.isNotBlank()) {
+                    models.add(RemoteModel(
+                        id = id,
+                        name = modelObj.optString("name", id),
+                        description = modelObj.optString("description", modelObj.optString("object", "model"))
+                    ))
+                }
+            }
+
+            modelCache[cacheKey] = CachedRemoteModels(
+                models = models,
+                etag = response.header("ETag")
+            )
+            return models
+        }
+    }
+
+    private fun fetchClaudeModels(config: AIConfig): List<RemoteModel> {
+        // Claude API没有公开的模型列表端点，返回默认模型
+        return listOf(
+            RemoteModel("claude-3-haiku-20240307", "Claude 3 Haiku", "速度快，成本低"),
+            RemoteModel("claude-3-sonnet-20240229", "Claude 3 Sonnet", "平衡性能和成本"),
+            RemoteModel("claude-3-opus-20240229", "Claude 3 Opus", "最强能力"),
+            RemoteModel("claude-3-5-sonnet-20241022", "Claude 3.5 Sonnet", "最新版本")
+        )
+    }
+
+    private fun fetchGeminiModels(config: AIConfig): List<RemoteModel> {
+        // Gemini API需要特殊处理，返回默认模型
+        return listOf(
+            RemoteModel("gemini-1.5-flash", "Gemini 1.5 Flash", "速度快，效率高"),
+            RemoteModel("gemini-1.5-pro", "Gemini 1.5 Pro", "能力强，长上下文"),
+            RemoteModel("gemini-pro", "Gemini Pro", "标准版本"),
+            RemoteModel("gemini-ultra", "Gemini Ultra", "最强能力")
+        )
+    }
+
+    /**
+     * 测试API连接
+     * @return 测试结果，成功返回null，失败返回错误信息
+     */
+    suspend fun testConnection(config: AIConfig): String? = withContext(Dispatchers.IO) {
+        if (!config.isEnabled) {
+            return@withContext "AI助手未启用"
+        }
+
+        if (config.apiKey.isBlank()) {
+            return@withContext "API密钥不能为空"
+        }
+
+        if (config.apiUrl.isBlank()) {
+            return@withContext "API地址不能为空"
+        }
+
+        val policy = requestPolicyResolver.resolve(AIRequestKind.CONNECTION_TEST, config)
+
+        try {
+            val testMessages = listOf(
+                ChatMessage(MessageRole.USER, "Hi")
+            )
+
+            when (config.provider) {
+                AIProvider.QWEN, AIProvider.DEEPSEEK, AIProvider.ZHIPU, AIProvider.BAIDU, AIProvider.CUSTOM ->
+                    testOpenAIConnection(config, testMessages, policy)
+            }
+
+            null
+        } catch (e: OpenAIChatFailure.ModelUnavailable) {
+            if (config.model.isBlank()) {
+                "自动优选暂时不可用，请稍后重试"
+            } else {
+                "当前模型不可用，请切换模型或改用自动优选"
+            }
+        } catch (e: OpenAIChatFailure.Timeout) {
+            if (config.model.isBlank()) {
+                "自动优选连接超时，请稍后重试或手动选择模型"
+            } else {
+                "连接超时，请检查网络或稍后重试"
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            mapConnectionFailureToMessage(e)
+        }
+    }
+
+    suspend fun testChatPath(config: AIConfig): String? = withContext(Dispatchers.IO) {
+        if (!config.isEnabled) {
+            return@withContext "AI助手未启用"
+        }
+
+        if (config.apiKey.isBlank()) {
+            return@withContext "API密钥不能为空"
+        }
+
+        if (config.apiUrl.isBlank()) {
+            return@withContext "API地址不能为空"
+        }
+
+        val testMessages = listOf(
+            ChatMessage(MessageRole.USER, "Hi")
+        )
+
+        try {
+            val response = chat(testMessages, config)
+            if (response.trim().isEmpty()) {
+                "模型暂时没有返回可用内容，请稍后重试或切换模型"
+            } else {
+                null
+            }
+        } catch (e: OpenAIChatFailure.ModelUnavailable) {
+            if (config.model.isBlank()) {
+                "自动优选暂时不可用，请稍后重试"
+            } else {
+                "当前模型不可用，请切换模型或改用自动优选"
+            }
+        } catch (e: OpenAIChatFailure.Timeout) {
+            if (config.model.isBlank()) {
+                "自动优选连接超时，请稍后重试或手动选择模型"
+            } else {
+                "连接超时，请检查网络或稍后重试"
+            }
+        } catch (e: OpenAIChatFailure.EmptyReply) {
+            "模型暂时没有返回可用内容，请稍后重试或切换模型"
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            mapConnectionFailureToMessage(e)
+        }
+    }
+
+    private fun mapConnectionFailureToMessage(error: Throwable): String {
+        return when (requestFailureClassifier.classify(error)) {
+            AIRequestFailureCategory.INVALID_API_KEY -> "API密钥无效或已过期"
+            AIRequestFailureCategory.FORBIDDEN -> "没有权限访问该API"
+            AIRequestFailureCategory.NOT_FOUND -> "API地址不存在，请检查URL"
+            AIRequestFailureCategory.RATE_LIMITED -> "请求过于频繁，请稍后再试"
+            AIRequestFailureCategory.SERVER_ERROR -> "服务器错误，请稍后再试"
+            AIRequestFailureCategory.DNS_FAILURE -> "无法连接到服务器，请检查网络或API地址"
+            AIRequestFailureCategory.CONNECT_FAILURE -> "连接失败，请检查网络"
+            AIRequestFailureCategory.SSL_FAILURE -> "SSL证书错误"
+            AIRequestFailureCategory.TIMEOUT -> "连接超时，请检查网络"
+            AIRequestFailureCategory.OTHER -> "连接失败: ${error.message ?: "未知错误"}"
+        }
+    }
+
+    private fun testOpenAIConnection(config: AIConfig, messages: List<ChatMessage>, policy: AIRequestPolicy) {
+        val strategy = modelSelectionStrategy(config)
+        val primaryModel = config.model.trim()
+
+        if (strategy == ModelSelectionStrategy.FIXED) {
+            executeWithRetry(policy) {
+                testOpenAIConnectionOnce(config.copy(model = primaryModel), messages)
+            }
+            return
+        }
+
+        val candidateModels = try {
+            fetchRemoteModelIdsForTest(config)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            throw OpenAIChatFailure.Other("无法获取可用模型列表，请稍后重试")
+        }
+
+        val plan = modelExecutionPlanner.plan(
+            strategy = strategy,
+            configuredModelId = primaryModel,
+            remoteModelIds = candidateModels,
+            snapshot = null
+        )
+        val firstModel = plan.primaryModelId
+            ?: throw OpenAIChatFailure.Other("无法获取可用模型列表，请稍后重试")
+
+        try {
+            executeWithRetry(policy) {
+                testOpenAIConnectionOnce(config.copy(model = firstModel), messages)
+            }
+            return
+        } catch (e: OpenAIChatFailure.ModelUnavailable) {
+            // try next candidate
+        } catch (e: OpenAIChatFailure.Timeout) {
+            // try next candidate
+        }
+
+        if (!policy.allowModelFallback) {
+            throw OpenAIChatFailure.ModelUnavailable("model_unavailable: no alternative model")
+        }
+
+        val secondModel = plan.fallbackModelIds.firstOrNull()
+            ?: throw OpenAIChatFailure.ModelUnavailable("model_unavailable: no alternative model")
+
+        executeWithRetry(policy) {
+            testOpenAIConnectionOnce(config.copy(model = secondModel), messages)
+        }
+    }
+
+    private fun testOpenAIConnectionOnce(config: AIConfig, messages: List<ChatMessage>) {
+        val url = OpenAiUrlUtils.chatCompletions(config.apiUrl)
+
+        val messagesArray = JSONArray()
+        val first = messages.firstOrNull { it.role == MessageRole.USER }?.content?.ifBlank { "Hi" } ?: "Hi"
+        messagesArray.put(
+            JSONObject().apply {
+                put("role", "user")
+                put("content", first)
+            }
+        )
+
+        val requestBody = JSONObject().apply {
+            put("model", config.model)
+            put("messages", messagesArray)
+            put("max_tokens", 1)
+            put("temperature", 0)
+            put("stream", false)
+        }
+
+        val request = buildOpenAiJsonPostRequest(
+            url = url,
+            apiKey = config.apiKey,
+            requestKind = AIRequestKind.CONNECTION_TEST,
+            requestBody = requestBody,
+            messages = messages
+        )
+
+        try {
+            testClient.newCall(request).execute().use { response ->
+                val rawBody = response.body?.string()
+                logNetworkDiagnostics("chat_test_request url=$url client=testClient model=${config.model} code=${response.code} bodyLength=${rawBody?.length ?: 0}")
+
+                if (!response.isSuccessful) {
+                    if (isModelUnavailable(response.code, rawBody)) {
+                        throw OpenAIChatFailure.ModelUnavailable("model_unavailable: http=${response.code} body=${rawBody.orEmpty()}")
+                    }
+                    throw OpenAIChatFailure.Other("API请求失败(${response.code}): ${rawBody.orEmpty()}")
+                }
+
+                if (rawBody.isNullOrEmpty()) {
+                    throw OpenAIChatFailure.Other("空响应")
+                }
+
+                val json = JSONObject(rawBody)
+                if (!json.has("choices")) {
+                    throw OpenAIChatFailure.Other("无效的响应格式")
+                }
+            }
+        } catch (e: OpenAIChatFailure.ModelUnavailable) {
+            throw e
+        } catch (e: SocketTimeoutException) {
+            throw OpenAIChatFailure.Timeout("timeout")
+        } catch (e: ConnectException) {
+            throw OpenAIChatFailure.Timeout("connect_timeout")
+        } catch (e: UnknownHostException) {
+            throw OpenAIChatFailure.Other("UnknownHostException")
+        }
+    }
+
+    private fun testClaudeConnection(config: AIConfig, messages: List<ChatMessage>) {
+        val url = "${config.apiUrl}/messages"
+
+        val messagesArray = JSONArray()
+        messages.forEach { msg ->
+            messagesArray.put(JSONObject().apply {
+                put("role", if (msg.role == MessageRole.USER) "user" else "assistant")
+                put("content", msg.content)
+            })
+        }
+
+        val requestBody = JSONObject().apply {
+            put("model", config.model.ifEmpty { "claude-3-sonnet-20240229" })
+            put("max_tokens", 5)
+            put("messages", messagesArray)
+        }
+
+        val request = Request.Builder()
+            .url(url)
+            .header("x-api-key", config.apiKey)
+            .header("anthropic-version", "2023-06-01")
+            .header("Content-Type", "application/json")
+            .post(requestBody.toString().toRequestBody(jsonMediaType))
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw Exception("API请求失败: ${response.code}")
+            }
+            val responseBody = response.body?.string() ?: throw Exception("空响应")
+            val json = JSONObject(responseBody)
+            if (!json.has("content")) {
+                throw Exception("无效的响应格式")
+            }
+        }
+    }
+
+    private fun testGeminiConnection(config: AIConfig, messages: List<ChatMessage>) {
+        val model = config.model.ifEmpty { "gemini-pro" }
+        val url = "${config.apiUrl}/models/$model:generateContent"
+
+        val contentsArray = JSONArray()
+        messages.forEach { msg ->
+            contentsArray.put(JSONObject().apply {
+                put("role", if (msg.role == MessageRole.USER) "user" else "model")
+                put("parts", JSONArray().put(JSONObject().apply {
+                    put("text", msg.content)
+                }))
+            })
+        }
+
+        val requestBody = JSONObject().apply {
+            put("contents", contentsArray)
+        }
+
+        val request = Request.Builder()
+            .url(url)
+            .header("x-goog-api-key", config.apiKey)
+            .header("Content-Type", "application/json")
+            .post(requestBody.toString().toRequestBody(jsonMediaType))
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw Exception("API请求失败: ${response.code}")
+            }
+            val responseBody = response.body?.string() ?: throw Exception("空响应")
+            val json = JSONObject(responseBody)
+            if (!json.has("candidates")) {
+                throw Exception("无效的响应格式")
+            }
+        }
+    }
+
+    /**
+     * OpenAI API调用（流式版本）
+     * 尝试使用流式API，如果不支持则回退到非流式
+     */
+    private fun sendOpenAIChatStream(
+        messages: List<ChatMessage>,
+        config: AIConfig
+    ): String {
+        // Current implementation is non-streaming under the hood. If AUTO is enabled (model is blank),
+        // resolve a model via sendOpenAIChatNonStream directly to avoid an extra failing stream attempt.
+        if (config.model.isBlank() || shouldBypassStreamForOversizedPayload(messages)) {
+            return sendOpenAIChatNonStream(messages, config)
+        }
+
+        val url = OpenAiUrlUtils.chatCompletions(config.apiUrl)
+
+        val messagesArray = JSONArray()
+        messages.forEach { msg ->
+            messagesArray.put(JSONObject().apply {
+                put("role", msg.role.name.lowercase())
+                put("content", msg.content)
+            })
+        }
+
+        // 首先尝试流式请求
+        val streamRequestBody = JSONObject().apply {
+            put("model", config.model)
+            put("messages", messagesArray)
+            put("temperature", 0.7)
+            put("max_tokens", resolveOutputBudgetTokens(messages))
+            put("stream", true)
+        }
+
+        val streamRequest = Request.Builder()
+            .url(url)
+            .header("Authorization", "Bearer ${config.apiKey.trim()}")
+            .header("Content-Type", "application/json")
+            .header("Accept", "text/event-stream")
+            .post(streamRequestBody.toString().toRequestBody(jsonMediaType))
+            .build()
+
+        return try {
+            // 尝试流式请求
+            client.newCall(streamRequest).execute().use { response ->
+                if (!response.isSuccessful) {
+                    // 如果流式请求失败，回退到非流式
+                    return sendOpenAIChatNonStream(messages, config)
+                }
+
+                val responseBody = response.body?.string() ?: throw Exception("空响应")
+
+                // 解析SSE格式的流式响应
+                val content = StringBuilder()
+                responseBody.lines().forEach { line ->
+                    if (line.startsWith("data: ")) {
+                        val data = line.substring(6)
+                        if (data != "[DONE]") {
+                            try {
+                                val json = JSONObject(data)
+                                val choices = json.optJSONArray("choices")
+                                if (choices != null && choices.length() > 0) {
+                                    val delta = choices.getJSONObject(0).optJSONObject("delta")
+                                    val text = delta?.optString("content", "")
+                                    if (!text.isNullOrEmpty()) {
+                                        content.append(text)
+                                    }
+                                }
+                            } catch (e: Exception) {
+                                // 忽略解析错误
+                            }
+                        }
+                    }
+                }
+
+                if (content.isNotEmpty()) {
+                    content.toString()
+                } else {
+                    // 如果流式解析失败，回退到非流式
+                    sendOpenAIChatNonStream(messages, config)
+                }
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // 流式请求失败，回退到非流式
+            sendOpenAIChatNonStream(messages, config)
+        }
+    }
+
+    private fun shouldBypassStreamForOversizedPayload(messages: List<ChatMessage>): Boolean {
+        val estimatedChars = messages.sumOf { it.content.length }
+        return estimatedChars >= oversizedStreamBypassThresholdChars
+    }
+
+    private fun resolveOutputBudgetTokens(messages: List<ChatMessage>): Int {
+        if (isBookkeepingEnvelopeScenario(messages)) {
+            return bookkeepingOutputBudgetTokens
+        }
+
+        val estimatedChars = messages.sumOf { it.content.length }
+        if (estimatedChars >= longTextOutputBudgetThresholdChars) {
+            return longTextOutputBudgetTokens
+        }
+
+        return defaultOutputBudgetTokens
+    }
+
+    private fun isBookkeepingEnvelopeScenario(messages: List<ChatMessage>): Boolean {
+        val systemText = messages
+            .filter { it.role == MessageRole.SYSTEM }
+            .joinToString("\n") { it.content }
+            .lowercase()
+        return systemText.contains("仅返回 json 对象") ||
+            systemText.contains("仅返回可执行动作 envelope") ||
+            systemText.contains("\"actions\"")
+    }
+
+    private fun buildOpenAiJsonPostRequest(
+        url: String,
+        apiKey: String,
+        requestKind: AIRequestKind,
+        requestBody: JSONObject,
+        messages: List<ChatMessage> = emptyList()
+    ): Request {
+        val payload = requestBody.toString()
+        val requestBodyBuilder = Request.Builder()
+            .url(url)
+            .header("Authorization", "Bearer ${apiKey.trim()}")
+            .header("Content-Type", "application/json")
+
+        val compressedBody = compressRequestBodyIfNeeded(requestKind, payload, messages)
+        val okHttpBody = if (compressedBody != null) {
+            requestBodyBuilder.header("Content-Encoding", "gzip")
+            compressedBody.toRequestBody(jsonMediaType)
+        } else {
+            payload.toRequestBody(jsonMediaType)
+        }
+
+        return requestBodyBuilder
+            .post(okHttpBody)
+            .build()
+    }
+
+    private fun compressRequestBodyIfNeeded(
+        requestKind: AIRequestKind,
+        payload: String,
+        messages: List<ChatMessage>
+    ): ByteArray? {
+        if (requestKind == AIRequestKind.STREAM_CHAT) {
+            return null
+        }
+        if (requestKind == AIRequestKind.NON_STREAM_CHAT && isBookkeepingEnvelopeScenario(messages)) {
+            return null
+        }
+        if (payload.toByteArray(StandardCharsets.UTF_8).size < compressionThresholdBytes) {
+            return null
+        }
+        return try {
+            gzip(payload)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun gzip(value: String): ByteArray {
+        val outputStream = ByteArrayOutputStream()
+        GZIPOutputStream(outputStream).bufferedWriter(StandardCharsets.UTF_8).use { writer ->
+            writer.write(value)
+        }
+        return outputStream.toByteArray()
+    }
+
+    private data class ModelCacheKey(
+        val apiUrl: String,
+        val apiKey: String
+    )
+
+    private data class CachedRemoteModels(
+        val models: List<RemoteModel>,
+        val etag: String?
+    )
+
+    private sealed class OpenAIChatFailure(message: String) : Exception(message) {
+        data class ModelUnavailable(val details: String) : OpenAIChatFailure(details)
+        data class Timeout(val details: String) : OpenAIChatFailure(details)
+        data class EmptyReply(val details: String) : OpenAIChatFailure(details)
+        data class Other(val details: String) : OpenAIChatFailure(details)
+    }
+
+    private fun isRetryableFailure(error: Throwable): Boolean {
+        if (error is OpenAIChatFailure.EmptyReply) {
+            return true
+        }
+        return when (requestFailureClassifier.classify(error)) {
+            AIRequestFailureCategory.TIMEOUT,
+            AIRequestFailureCategory.CONNECT_FAILURE,
+            AIRequestFailureCategory.SERVER_ERROR -> true
+            else -> false
+        }
+    }
+
+    private fun retryDelayMillis(attempt: Int): Long {
+        return retryBackoffMillis * (1L shl (attempt - 1)).coerceAtLeast(1L)
+    }
+
+    private fun <T> executeWithRetry(
+        policy: AIRequestPolicy,
+        block: () -> T
+    ): T {
+        var lastError: Throwable? = null
+
+        for (attempt in 1..policy.maxAttempts) {
+            try {
+                return block()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: OpenAIChatFailure.ModelUnavailable) {
+                throw e
+            } catch (e: Throwable) {
+                lastError = e
+                val shouldRetry = policy.allowRetry && attempt < policy.maxAttempts && isRetryableFailure(e)
+                if (!shouldRetry) {
+                    throw e
+                }
+                TimeUnit.MILLISECONDS.sleep(retryDelayMillis(attempt))
+            }
+        }
+
+        throw lastError ?: IllegalStateException("retry execution failed without error")
+    }
+
+    private fun isModelUnavailable(responseCode: Int, responseBody: String?): Boolean {
+        val body = responseBody.orEmpty().lowercase()
+
+        if (responseCode == 404) {
+            return body.contains("model") && (
+                body.contains("not found") ||
+                    body.contains("does not exist") ||
+                    body.contains("unknown model") ||
+                    body.contains("invalid model") ||
+                    body.contains("model_not_found") ||
+                    body.contains("no such model")
+                )
+        }
+
+        return body.contains("model") && (
+            body.contains("not found") ||
+                body.contains("does not exist") ||
+                body.contains("unknown model") ||
+                body.contains("invalid model") ||
+                body.contains("model_not_found") ||
+                body.contains("no such model")
+            )
+    }
+
+    private fun sendOpenAIChatNonStreamOnce(
+        messages: List<ChatMessage>,
+        config: AIConfig
+    ): String {
+        val url = OpenAiUrlUtils.chatCompletions(config.apiUrl)
+
+        val messagesArray = JSONArray()
+        messages.forEach { msg ->
+            messagesArray.put(JSONObject().apply {
+                put("role", msg.role.name.lowercase())
+                put("content", msg.content)
+            })
+        }
+
+        val bookkeepingScenario = isBookkeepingEnvelopeScenario(messages)
+        val requestBody = JSONObject().apply {
+            // Keep AUTO semantics consistent: when model is blank, this call site should already have
+            // resolved a model (sendOpenAIChatNonStream resolves via /v1/models).
+            put("model", config.model)
+            put("messages", messagesArray)
+            put("temperature", 0.7)
+            put("max_tokens", resolveOutputBudgetTokens(messages))
+            if (bookkeepingScenario) {
+                put("max_input_tokens", bookkeepingMaxInputTokens)
+            }
+            put("stream", false)
+        }
+
+        val request = buildOpenAiJsonPostRequest(
+            url = url,
+            apiKey = config.apiKey,
+            requestKind = AIRequestKind.NON_STREAM_CHAT,
+            requestBody = requestBody,
+            messages = messages
+        )
+
+        try {
+            client.newCall(request).execute().use { response ->
+                val rawBody = response.body?.string()
+                logNetworkDiagnostics("chat_request url=$url client=client model=${config.model} bookkeeping=$bookkeepingScenario code=${response.code} bodyLength=${rawBody?.length ?: 0}")
+
+                if (!response.isSuccessful) {
+                    if (isModelUnavailable(response.code, rawBody)) {
+                        throw OpenAIChatFailure.ModelUnavailable("model_unavailable: http=${response.code} body=${rawBody.orEmpty()}")
+                    }
+                    throw OpenAIChatFailure.Other("API请求失败: ${response.code}")
+                }
+
+                if (rawBody.isNullOrEmpty()) {
+                    throw OpenAIChatFailure.Other("空响应")
+                }
+
+                val json = JSONObject(rawBody)
+
+                // 检查是否有错误
+                if (json.has("error")) {
+                    val error = json.getJSONObject("error")
+                    val message = error.optString("message", "未知错误")
+                    if (isModelUnavailable(responseCode = 200, responseBody = rawBody)) {
+                        throw OpenAIChatFailure.ModelUnavailable(message)
+                    }
+                    throw OpenAIChatFailure.Other(message)
+                }
+
+                val choices = json.optJSONArray("choices")
+                    ?: throw OpenAIChatFailure.EmptyReply("missing_choices")
+                if (choices.length() == 0) {
+                    throw OpenAIChatFailure.EmptyReply("empty_choices")
+                }
+                val firstChoice = choices.optJSONObject(0)
+                    ?: throw OpenAIChatFailure.EmptyReply("missing_choice_object")
+                val message = firstChoice.optJSONObject("message")
+                    ?: throw OpenAIChatFailure.EmptyReply("missing_message")
+                if (!message.has("content")) {
+                    throw OpenAIChatFailure.EmptyReply("missing_content")
+                }
+                val content = message.optString("content", "")
+                if (content.trim().isEmpty()) {
+                    throw OpenAIChatFailure.EmptyReply("empty_reply")
+                }
+                return content
+            }
+        } catch (e: OpenAIChatFailure.ModelUnavailable) {
+            throw e
+        } catch (e: SocketTimeoutException) {
+            throw OpenAIChatFailure.Timeout("timeout")
+        } catch (e: ConnectException) {
+            throw OpenAIChatFailure.Timeout("connect_timeout")
+        } catch (e: UnknownHostException) {
+            throw OpenAIChatFailure.Other("UnknownHostException")
+        }
+    }
+
+    private fun fetchRemoteModelIds(config: AIConfig): List<String> {
+        return fetchOpenAIModelsWithClient(config, client).map { it.id }.filter { it.isNotBlank() }
+    }
+
+    private fun fetchRemoteModelIdsForTest(config: AIConfig): List<String> {
+        return fetchOpenAIModelsWithClient(config, testClient).map { it.id }.filter { it.isNotBlank() }
+    }
+
+    private fun pickPreferredModel(
+        remoteModelIds: List<String>,
+        exclude: Set<String>,
+        requireImageSupport: Boolean = false
+    ): String? {
+        val candidates = if (requireImageSupport) {
+            remoteModelIds.filter { isImageSupported(AIConfig(model = it)) }
+        } else {
+            remoteModelIds
+        }
+
+        // 移除硬编码的 gptoss120b，改为自动选择第一个可用模型
+        // 优先选择规则：
+        // 1. 排除已失败的模型
+        // 2. 返回第一个可用的模型
+        return candidates.firstOrNull { it !in exclude }
+    }
+
+    private fun sendOpenAIChatNonStream(
+        messages: List<ChatMessage>,
+        config: AIConfig
+    ): String {
+        val strategy = modelSelectionStrategy(config)
+        val policy = requestPolicyResolver.resolve(AIRequestKind.NON_STREAM_CHAT, strategy)
+        val remoteModelIds = if (strategy == ModelSelectionStrategy.AUTO) {
+            try {
+                fetchRemoteModelIds(config)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                throw OpenAIChatFailure.Other("无法获取可用模型列表，请稍后重试")
+            }
+        } else {
+            emptyList()
+        }
+        val snapshot = runCatching {
+            runBlocking {
+                modelPerformanceRepository.getSnapshot(config).first()
+            }
+        }.getOrNull()
+        val plan = modelExecutionPlanner.plan(
+            strategy = strategy,
+            configuredModelId = config.model.trim(),
+            remoteModelIds = remoteModelIds,
+            snapshot = snapshot,
+            nowMillis = System.currentTimeMillis()
+        )
+        val firstModel = plan.primaryModelId
+            ?: throw OpenAIChatFailure.Other("无法获取可用模型列表，请稍后重试")
+
+        var firstFailure: OpenAIChatFailure? = null
+        try {
+            val startedAt = System.currentTimeMillis()
+            val result = executeWithRetry(policy) {
+                sendOpenAIChatNonStreamOnce(messages, config.copy(model = firstModel))
+            }
+            recordModelSuccess(config, firstModel, System.currentTimeMillis() - startedAt)
+            return result
+        } catch (e: OpenAIChatFailure.ModelUnavailable) {
+            recordModelFailure(config, firstModel, ModelPerformanceFailureCategory.MODEL_UNAVAILABLE)
+            firstFailure = e
+        } catch (e: OpenAIChatFailure.Timeout) {
+            recordModelFailure(config, firstModel, ModelPerformanceFailureCategory.TIMEOUT)
+            firstFailure = e
+        } catch (e: OpenAIChatFailure.EmptyReply) {
+            recordModelFailure(config, firstModel, ModelPerformanceFailureCategory.OTHER)
+            firstFailure = e
+        } catch (e: Throwable) {
+            recordModelFailure(config, firstModel, ModelPerformanceFailureCategory.OTHER)
+            throw e
+        }
+
+        if (!policy.allowModelFallback) {
+            throw firstFailure ?: OpenAIChatFailure.ModelUnavailable("model_unavailable: no alternative model")
+        }
+
+        val secondModel = plan.fallbackModelIds.firstOrNull()
+            ?: throw firstFailure ?: OpenAIChatFailure.ModelUnavailable("model_unavailable: no alternative model")
+
+        try {
+            val startedAt = System.currentTimeMillis()
+            val result = executeWithRetry(policy) {
+                sendOpenAIChatNonStreamOnce(messages, config.copy(model = secondModel))
+            }
+            recordModelSuccess(config, secondModel, System.currentTimeMillis() - startedAt)
+            return result
+        } catch (e: OpenAIChatFailure.ModelUnavailable) {
+            recordModelFailure(config, secondModel, ModelPerformanceFailureCategory.MODEL_UNAVAILABLE)
+            throw e
+        } catch (e: OpenAIChatFailure.Timeout) {
+            recordModelFailure(config, secondModel, ModelPerformanceFailureCategory.TIMEOUT)
+            throw e
+        } catch (e: OpenAIChatFailure.EmptyReply) {
+            recordModelFailure(config, secondModel, ModelPerformanceFailureCategory.OTHER)
+            throw e
+        } catch (e: Throwable) {
+            recordModelFailure(config, secondModel, ModelPerformanceFailureCategory.OTHER)
+            throw e
+        }
+    }
+
+    /**
+     * OpenAI API调用（非流式版本）
+     */
+    private fun sendOpenAIChatNonStream_LEGACY(
+        messages: List<ChatMessage>,
+        config: AIConfig
+    ): String {
+        val url = OpenAiUrlUtils.chatCompletions(config.apiUrl)
+
+        val messagesArray = JSONArray()
+        messages.forEach { msg ->
+            messagesArray.put(JSONObject().apply {
+                put("role", msg.role.name.lowercase())
+                put("content", msg.content)
+            })
+        }
+
+        val requestBody = JSONObject().apply {
+            // Keep AUTO semantics consistent: when model is blank, this call site should already have
+            // resolved a model (sendOpenAIChatNonStream resolves via /v1/models).
+            put("model", config.model)
+            put("messages", messagesArray)
+            put("temperature", 0.7)
+            put("max_tokens", resolveOutputBudgetTokens(messages))
+            put("stream", false)
+        }
+
+        val request = Request.Builder()
+            .url(url)
+            .header("Authorization", "Bearer ${config.apiKey.trim()}")
+            .header("Content-Type", "application/json")
+            .post(requestBody.toString().toRequestBody(jsonMediaType))
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw Exception("API请求失败: ${response.code}")
+            }
+
+            response.body?.use { body ->
+                val responseBody = body.string()
+                if (responseBody.isNullOrEmpty()) {
+                    throw Exception("空响应")
+                }
+
+                val json = JSONObject(responseBody)
+
+                // 检查是否有错误
+                if (json.has("error")) {
+                    val error = json.getJSONObject("error")
+                    throw Exception(error.optString("message", "未知错误"))
+                }
+
+                val choices = json.getJSONArray("choices")
+                if (choices.length() > 0) {
+                    return choices.getJSONObject(0)
+                        .getJSONObject("message")
+                        .getString("content")
+                }
+                throw Exception("无效的响应格式")
+            } ?: throw Exception("响应体为空")
+        }
+    }
+
+    /**
+     * OpenAI API调用（兼容旧版本）
+     */
+    private fun sendOpenAIChat(
+        messages: List<ChatMessage>,
+        config: AIConfig
+    ): String {
+        return sendOpenAIChatNonStream(messages, config)
+    }
+
+    /**
+     * 公共聊天API - 用于普通模型处理OCR后的文本
+     */
+    suspend fun chat(
+        messages: List<ChatMessage>,
+        config: AIConfig
+    ): String = withContext(Dispatchers.IO) {
+        when (config.provider) {
+            AIProvider.QWEN, AIProvider.DEEPSEEK, AIProvider.ZHIPU, AIProvider.BAIDU, AIProvider.CUSTOM -> 
+                sendOpenAIChatNonStream(messages, config)
+        }
+    }
+
+    /**
+     * Claude API调用
+     */
+    private fun sendClaudeChat(
+        messages: List<ChatMessage>,
+        config: AIConfig
+    ): String {
+        val url = "${config.apiUrl}/messages"
+
+        // 分离系统消息和用户消息
+        val systemMessage = messages.find { it.role == MessageRole.SYSTEM }?.content ?: ""
+        val userMessages = messages.filter { it.role != MessageRole.SYSTEM }
+
+        val messagesArray = JSONArray()
+        userMessages.forEach { msg ->
+            messagesArray.put(JSONObject().apply {
+                put("role", if (msg.role == MessageRole.USER) "user" else "assistant")
+                put("content", msg.content)
+            })
+        }
+
+        val requestBody = JSONObject().apply {
+            put("model", config.model.ifEmpty { "claude-3-sonnet-20240229" })
+            put("max_tokens", defaultOutputBudgetTokens)
+            put("messages", messagesArray)
+            if (systemMessage.isNotEmpty()) {
+                put("system", systemMessage)
+            }
+        }
+
+        val request = Request.Builder()
+            .url(url)
+            .header("x-api-key", config.apiKey)
+            .header("anthropic-version", "2023-06-01")
+            .header("Content-Type", "application/json")
+            .post(requestBody.toString().toRequestBody(jsonMediaType))
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw Exception("API请求失败: ${response.code}")
+            }
+
+            val responseBody = response.body?.string() ?: throw Exception("空响应")
+            val json = JSONObject(responseBody)
+            val content = json.getJSONArray("content")
+            if (content.length() > 0) {
+                return content.getJSONObject(0).getString("text")
+            }
+            throw Exception("无效的响应格式")
+        }
+    }
+
+    /**
+     * Gemini API调用
+     */
+    private fun sendGeminiChat(
+        messages: List<ChatMessage>,
+        config: AIConfig
+    ): String {
+        val model = config.model.ifEmpty { "gemini-pro" }
+        val url = "${config.apiUrl}/models/$model:generateContent"
+
+        // 构建Gemini格式的内容
+        val contentsArray = JSONArray()
+        messages.filter { it.role != MessageRole.SYSTEM }.forEach { msg ->
+            contentsArray.put(JSONObject().apply {
+                put("role", if (msg.role == MessageRole.USER) "user" else "model")
+                put("parts", JSONArray().put(JSONObject().apply {
+                    put("text", msg.content)
+                }))
+            })
+        }
+
+        val requestBody = JSONObject().apply {
+            put("contents", contentsArray)
+        }
+
+        val request = Request.Builder()
+            .url(url)
+            .header("x-goog-api-key", config.apiKey)
+            .header("Content-Type", "application/json")
+            .post(requestBody.toString().toRequestBody(jsonMediaType))
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw Exception("API请求失败: ${response.code}")
+            }
+
+            val responseBody = response.body?.string() ?: throw Exception("空响应")
+            val json = JSONObject(responseBody)
+            val candidates = json.getJSONArray("candidates")
+            if (candidates.length() > 0) {
+                val content = candidates.getJSONObject(0).getJSONObject("content")
+                val parts = content.getJSONArray("parts")
+                if (parts.length() > 0) {
+                    return parts.getJSONObject(0).getString("text")
+                }
+            }
+            throw Exception("无效的响应格式")
+        }
+    }
+
+    /**
+     * 解析分析响应
+     */
+    private fun parseAnalysisResponse(response: String): AIAnalysisResult {
+        return try {
+            // 尝试从响应中提取JSON
+            val jsonStart = response.indexOf("{")
+            val jsonEnd = response.lastIndexOf("}")
+
+            if (jsonStart != -1 && jsonEnd != -1) {
+                val jsonStr = response.substring(jsonStart, jsonEnd + 1)
+                val json = JSONObject(jsonStr)
+
+                AIAnalysisResult(
+                    summary = json.optString("summary", "分析完成"),
+                    suggestions = json.optJSONArray("suggestions")?.let { arr ->
+                        List(arr.length()) { arr.getString(it) }
+                    } ?: emptyList(),
+                    insights = json.optJSONArray("insights")?.let { arr ->
+                        List(arr.length()) { arr.getString(it) }
+                    } ?: emptyList()
+                )
+            } else {
+                // 如果不是JSON格式，使用文本作为总结
+                AIAnalysisResult(
+                    summary = response.take(200),
+                    suggestions = emptyList(),
+                    insights = emptyList()
+                )
+            }
+        } catch (e: Exception) {
+            AIAnalysisResult(
+                summary = response.take(200),
+                suggestions = emptyList(),
+                insights = emptyList()
+            )
+        }
+    }
+
+    /**
+ * 解析交易响应
+ */
+private fun parseTransactionResponse(response: String): ParsedTransaction? {
+    return try {
+        val jsonStart = response.indexOf("{")
+        val jsonEnd = response.lastIndexOf("}")
+
+        if (jsonStart != -1 && jsonEnd != -1) {
+            val jsonStr = response.substring(jsonStart, jsonEnd + 1)
+            val json = JSONObject(jsonStr)
+
+            ParsedTransaction(
+                amount = json.optDouble("amount", 0.0),
+                type = json.optString("type", "expense"),
+                category = json.optString("category", "其他"),
+                note = json.optString("note", "")
+            )
+        } else {
+            null
+        }
+    } catch (e: Exception) {
+        null
+    }
+}
+
+/**
+ * 识别图片内容并自动记账
+ * @param imageUri 图片URI
+ * @param config AI配置
+ * @param context 上下文
+ * @return 识别结果，包含是否成功、识别到的内容和记账操作
+ */
+suspend fun analyzeImageAndRecord(
+    imageUri: Uri,
+    config: AIConfig,
+    context: Context,
+    promptContext: String? = null,
+    traceId: String? = null
+): ImageAnalysisResult = withContext(Dispatchers.IO) {
+    appLogLogger?.info(
+        source = "AI",
+        category = "image_native_request_start",
+        message = "原生图片请求开始",
+        details = "provider=${config.provider.name},model=${config.model.ifBlank { "AUTO" }},uriTail=${imageUri.toString().takeLast(64)}",
+        traceId = traceId
+    )
+    if (!config.isEnabled || config.apiKey.isBlank()) {
+        return@withContext ImageAnalysisResult(
+            success = false,
+            message = "请先配置AI API密钥",
+            actions = null
+        )
+    }
+
+    try {
+        // 读取图片并转换为base64（保留真实图片MIME，避免PNG/WebP等被错误标记）
+        val encodedImage = uriToBase64(imageUri, context, traceId)
+            ?: return@withContext ImageAnalysisResult(
+                success = false,
+                message = "无法读取图片",
+                actions = null
+            )
+
+        // 构建包含图片的消息
+        val systemPrompt = """
+${promptContext?.takeIf { it.isNotBlank() } ?: "你是\"小财娘\"，一位可爱又贴心的管家婆AI助手 🌸"}
+
+【你的任务】
+分析用户提供的图片，识别其中的消费信息（如收据、账单、购物小票等），并自动记账。
+
+【需要识别的信息】
+1. 消费金额
+2. 消费类型（收入/支出）
+3. 消费分类（餐饮、交通、购物、娱乐等）
+4. 消费描述/备注
+5. 支付方式或账户线索（如现金、微信、支付宝、银行卡、银行代发等）
+
+【强制要求】
+- 只要图片中能判断出一笔或多笔交易，就优先返回 `actions`。
+- 即使账户名或分类名不完整，也要尽量返回 `add_transaction` 动作，不要因为本地可能缺少账户/分类就停止。
+- 如果无法精确命名账户或分类，可以留空字符串，交给后续记账执行链处理。
+- 如果图片里有多笔交易，请尽量逐条返回，不要只总结前几笔。
+- 只有在图片完全无法识别出任何交易意图时，才返回 `actions: []` 和解释性 `reply`。
+
+【回复格式】
+请以JSON格式返回：
+```json
+{
+  "success": true,
+  "description": "图片内容描述",
+  "actions": [
+    {"action": "add_transaction", "amount": 金额, "type": "expense", "category": "分类名", "account": "账户名", "note": "备注"}
+  ],
+  "reply": "主人～小财娘已经根据图片整理好记账动作啦～🌸"
+}
+```
+
+如果图片中没有识别到消费信息：
+```json
+{
+  "success": false,
+  "description": "图片内容描述",
+  "actions": [],
+  "reply": "主人～小财娘仔细看了一下图片，没有识别到消费信息呢。您可以手动告诉我这笔消费的具体内容哦～💕"
+}
+```
+
+如果图片无法识别或不清晰：
+```json
+{
+  "success": false,
+  "description": "图片不清晰或无法识别",
+  "actions": [],
+  "reply": "主人～图片有点模糊呢，小财娘看不太清楚。您可以重新上传一张清晰的图片，或者直接告诉我消费内容～💕"
+}
+```
+
+请用可爱管家的语气回复，多使用emoji表情～
+        """.trimIndent()
+
+        val result = when (config.provider) {
+            AIProvider.QWEN, AIProvider.DEEPSEEK, AIProvider.ZHIPU, AIProvider.BAIDU, AIProvider.CUSTOM -> {
+                try {
+                    sendOpenAIImageRequest(
+                        base64Image = encodedImage.base64,
+                        mimeType = encodedImage.mimeType,
+                        systemPrompt = systemPrompt,
+                        config = config
+                    )
+                } catch (e: Exception) {
+                    if (e.message == "UNSUPPORTED_MODEL") {
+                        appLogLogger?.warning(
+                            source = "AI",
+                            category = "image_native_request_retry",
+                            message = "原生图片请求模型不支持，准备切换模型",
+                            details = "provider=${config.provider.name},currentModel=${config.model.ifBlank { "AUTO" }}",
+                            traceId = traceId
+                        )
+                        // Best-effort fallback: try another vision-capable model from /v1/models.
+                        val ids = fetchRemoteModelIds(config)
+                        val fallback = pickPreferredModel(
+                            ids,
+                            exclude = setOf(config.model.trim()),
+                            requireImageSupport = true
+                        )
+                            ?: throw e
+                        sendOpenAIImageRequest(
+                            base64Image = encodedImage.base64,
+                            mimeType = encodedImage.mimeType,
+                            systemPrompt = systemPrompt,
+                            config = config.copy(model = fallback)
+                        )
+                    } else {
+                        throw e
+                    }
+                }
+            }
+        }
+
+        appLogLogger?.info(
+            source = "AI",
+            category = "image_native_request_finish",
+            message = "原生图片请求完成",
+            details = "responseLength=${result.length},provider=${config.provider.name},model=${config.model.ifBlank { "AUTO" }}",
+            traceId = traceId
+        )
+
+        // 解析结果
+        parseImageAnalysisResult(result)
+    } catch (e: Exception) {
+        appLogLogger?.error(
+            source = "AI",
+            category = "image_native_request_exception",
+            message = "原生图片请求失败",
+            details = "provider=${config.provider.name},model=${config.model.ifBlank { "AUTO" }},exception=${e::class.java.simpleName},message=${e.message}",
+            traceId = traceId
+        )
+        ImageAnalysisResult(
+            success = false,
+            message = "图片识别失败: ${e.message}",
+            actions = null
+        )
+    }
+}
+
+/**
+ * 将URI转换为Base64编码的图片
+ */
+private fun uriToBase64(uri: Uri, context: Context, traceId: String? = null): EncodedImage? {
+    return try {
+        val inputStream: InputStream? = context.contentResolver.openInputStream(uri)
+        inputStream?.use { stream ->
+            val outputStream = ByteArrayOutputStream()
+            val buffer = ByteArray(1024)
+            var bytesRead: Int
+            while (stream.read(buffer).also { bytesRead = it } != -1) {
+                outputStream.write(buffer, 0, bytesRead)
+            }
+            val imageBytes = outputStream.toByteArray()
+            val detectedMimeType = context.contentResolver.getType(uri)
+                ?.lowercase()
+                ?.takeIf { it.startsWith("image/") }
+                ?: "image/jpeg"
+            val compressedImage = compressImageIfNeeded(imageBytes, detectedMimeType)
+            appLogLogger?.info(
+                source = "AI",
+                category = "image_native_payload_ready",
+                message = "原生图片载荷已准备",
+                details = "uriTail=${uri.toString().takeLast(64)},originalBytes=${imageBytes.size},compressedBytes=${compressedImage.bytes.size},mimeType=${compressedImage.mimeType}",
+                traceId = traceId
+            )
+            EncodedImage(
+                base64 = Base64.encodeToString(compressedImage.bytes, Base64.NO_WRAP),
+                mimeType = compressedImage.mimeType
+            )
+        }
+    } catch (e: Exception) {
+        appLogLogger?.error(
+            source = "AI",
+            category = "image_native_payload_exception",
+            message = "原生图片读取失败",
+            details = "uriTail=${uri.toString().takeLast(64)},exception=${e::class.java.simpleName},message=${e.message}",
+            traceId = traceId
+        )
+        null
+    }
+}
+
+/**
+ * 压缩图片（如果需要）
+ * 使用JPEG压缩算法，确保图片质量的同时限制大小
+ */
+private fun compressImageIfNeeded(imageBytes: ByteArray, detectedMimeType: String): CompressedImage {
+    // 如果图片小于1MB，直接返回，避免对清晰截图无必要重编码
+    if (imageBytes.size < 1024 * 1024) {
+        return CompressedImage(bytes = imageBytes, mimeType = detectedMimeType)
+    }
+
+    return try {
+        // 解码图片
+        val bitmap = android.graphics.BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
+            ?: return CompressedImage(bytes = imageBytes, mimeType = detectedMimeType) // 解码失败返回原图
+
+        // 如果图片尺寸过大，先缩小尺寸
+        val maxDimension = 1920 // 最大边长
+        val scaledBitmap = if (bitmap.width > maxDimension || bitmap.height > maxDimension) {
+            val ratio = maxDimension.toFloat() / maxOf(bitmap.width, bitmap.height)
+            val newWidth = (bitmap.width * ratio).toInt()
+            val newHeight = (bitmap.height * ratio).toInt()
+            android.graphics.Bitmap.createScaledBitmap(bitmap, newWidth, newHeight, true).also {
+                if (it != bitmap) bitmap.recycle()
+            }
+        } else {
+            bitmap
+        }
+
+        // 先尝试无损PNG压缩，尽量保留文字边缘
+        val pngOutputStream = java.io.ByteArrayOutputStream()
+        scaledBitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, pngOutputStream)
+        val pngBytes = pngOutputStream.toByteArray()
+        if (pngBytes.size <= 1024 * 1024) {
+            if (scaledBitmap != bitmap) {
+                scaledBitmap.recycle()
+            }
+            bitmap.recycle()
+            return CompressedImage(bytes = pngBytes, mimeType = "image/png")
+        }
+
+        // PNG仍过大时再降级到JPEG压缩
+        val jpegOutputStream = java.io.ByteArrayOutputStream()
+        var quality = 90
+        do {
+            jpegOutputStream.reset()
+            scaledBitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, quality, jpegOutputStream)
+            quality -= 10
+        } while (jpegOutputStream.size() > 1024 * 1024 && quality > 30)
+
+        // 回收Bitmap
+        if (scaledBitmap != bitmap) {
+            scaledBitmap.recycle()
+        }
+        bitmap.recycle()
+
+        CompressedImage(bytes = jpegOutputStream.toByteArray(), mimeType = "image/jpeg")
+    } catch (e: Exception) {
+        // 压缩失败返回原图
+        CompressedImage(bytes = imageBytes, mimeType = detectedMimeType)
+    }
+}
+
+/**
+ * OpenAI图片识别请求
+ */
+private fun sendOpenAIImageRequest(
+    base64Image: String,
+    mimeType: String,
+    systemPrompt: String,
+    config: AIConfig
+): String {
+    val url = OpenAiUrlUtils.chatCompletions(config.apiUrl)
+
+    val messagesArray = JSONArray()
+    
+    // 系统消息
+    messagesArray.put(JSONObject().apply {
+        put("role", "system")
+        put("content", systemPrompt)
+    })
+    
+    // 用户消息（包含图片）
+    val contentArray = JSONArray()
+    contentArray.put(JSONObject().apply {
+        put("type", "text")
+        put("text", "请分析这张图片中的消费信息")
+    })
+    contentArray.put(JSONObject().apply {
+        put("type", "image_url")
+        put("image_url", JSONObject().apply {
+            put("url", "data:$mimeType;base64,$base64Image")
+        })
+    })
+    
+    messagesArray.put(JSONObject().apply {
+        put("role", "user")
+        put("content", contentArray)
+    })
+
+    val requestBody = JSONObject().apply {
+        // Keep AUTO semantics consistent with chat(): if model is blank, AIService will resolve a model based on /v1/models.
+        put("model", config.model)
+        put("messages", messagesArray)
+        put("temperature", 0.7)
+        put("max_tokens", defaultOutputBudgetTokens)
+    }
+
+    val request = Request.Builder()
+        .url(url)
+        .header("Authorization", "Bearer ${config.apiKey.trim()}")
+        .header("Content-Type", "application/json")
+        .post(requestBody.toString().toRequestBody(jsonMediaType))
+        .build()
+
+    client.newCall(request).execute().use { response ->
+        if (!response.isSuccessful) {
+            val errorBody = response.body?.string() ?: ""
+            val normalizedError = errorBody.lowercase()
+            val isImageUnsupported = normalizedError.contains("does not support images") ||
+                normalizedError.contains("image input is not supported") ||
+                normalizedError.contains("vision is not supported") ||
+                normalizedError.contains("multimodal is not supported")
+            if (isImageUnsupported) {
+                throw Exception("UNSUPPORTED_MODEL")
+            }
+            throw Exception("API请求失败(${response.code}): $errorBody")
+        }
+
+        val responseBody = response.body?.string() ?: throw Exception("空响应")
+        val json = JSONObject(responseBody)
+        
+        if (json.has("error")) {
+            val error = json.getJSONObject("error")
+            throw Exception(error.optString("message", "未知错误"))
+        }
+        
+        val choices = json.getJSONArray("choices")
+        if (choices.length() > 0) {
+            return choices.getJSONObject(0)
+                .getJSONObject("message")
+                .getString("content")
+        }
+        throw Exception("无效的响应格式")
+    }
+}
+
+/**
+ * Claude图片识别请求
+ */
+private fun sendClaudeImageRequest(
+    base64Image: String,
+    mimeType: String,
+    systemPrompt: String,
+    config: AIConfig
+): String {
+    val url = "${config.apiUrl}/messages"
+
+    val contentArray = JSONArray()
+    contentArray.put(JSONObject().apply {
+        put("type", "text")
+        put("text", "请分析这张图片中的消费信息")
+    })
+    contentArray.put(JSONObject().apply {
+        put("type", "image")
+        put("source", JSONObject().apply {
+            put("type", "base64")
+            put("media_type", mimeType)
+            put("data", base64Image)
+        })
+    })
+
+    val messagesArray = JSONArray()
+    messagesArray.put(JSONObject().apply {
+        put("role", "user")
+        put("content", contentArray)
+    })
+
+    val requestBody = JSONObject().apply {
+        put("model", config.model.ifEmpty { "claude-3-sonnet-20240229" })
+        put("max_tokens", defaultOutputBudgetTokens)
+        put("messages", messagesArray)
+        if (systemPrompt.isNotEmpty()) {
+            put("system", systemPrompt)
+        }
+    }
+
+    val request = Request.Builder()
+        .url(url)
+        .header("x-api-key", config.apiKey)
+        .header("anthropic-version", "2023-06-01")
+        .header("Content-Type", "application/json")
+        .post(requestBody.toString().toRequestBody(jsonMediaType))
+        .build()
+
+    client.newCall(request).execute().use { response ->
+        if (!response.isSuccessful) {
+            val errorBody = response.body?.string() ?: ""
+            if (errorBody.contains("image") || response.code == 400) {
+                throw Exception("UNSUPPORTED_MODEL")
+            }
+            throw Exception("API请求失败: ${response.code}")
+        }
+
+        val responseBody = response.body?.string() ?: throw Exception("空响应")
+        val json = JSONObject(responseBody)
+        val content = json.getJSONArray("content")
+        if (content.length() > 0) {
+            return content.getJSONObject(0).getString("text")
+        }
+        throw Exception("无效的响应格式")
+    }
+}
+
+/**
+ * Gemini图片识别请求
+ */
+private fun sendGeminiImageRequest(
+    base64Image: String,
+    mimeType: String,
+    systemPrompt: String,
+    config: AIConfig
+): String {
+    val model = config.model.ifEmpty { "gemini-1.5-flash" }
+    val url = "${config.apiUrl}/models/$model:generateContent"
+
+    val partsArray = JSONArray()
+    partsArray.put(JSONObject().apply {
+        put("text", systemPrompt + "\n\n请分析这张图片中的消费信息")
+    })
+    partsArray.put(JSONObject().apply {
+        put("inline_data", JSONObject().apply {
+            put("mime_type", mimeType)
+            put("data", base64Image)
+        })
+    })
+
+    val contentsArray = JSONArray()
+    contentsArray.put(JSONObject().apply {
+        put("parts", partsArray)
+    })
+
+    val requestBody = JSONObject().apply {
+        put("contents", contentsArray)
+    }
+
+    val request = Request.Builder()
+        .url(url)
+        .header("x-goog-api-key", config.apiKey)
+        .header("Content-Type", "application/json")
+        .post(requestBody.toString().toRequestBody(jsonMediaType))
+        .build()
+
+    client.newCall(request).execute().use { response ->
+        if (!response.isSuccessful) {
+            val errorBody = response.body?.string() ?: ""
+            if (errorBody.contains("image") || response.code == 400) {
+                throw Exception("UNSUPPORTED_MODEL")
+            }
+            throw Exception("API请求失败: ${response.code}")
+        }
+
+        val responseBody = response.body?.string() ?: throw Exception("空响应")
+        val json = JSONObject(responseBody)
+        val candidates = json.getJSONArray("candidates")
+        if (candidates.length() > 0) {
+            val content = candidates.getJSONObject(0).getJSONObject("content")
+            val parts = content.getJSONArray("parts")
+            if (parts.length() > 0) {
+                return parts.getJSONObject(0).getString("text")
+            }
+        }
+        throw Exception("无效的响应格式")
+    }
+}
+
+/**
+ * 解析图片识别结果
+ */
+private fun parseImageAnalysisResult(response: String): ImageAnalysisResult {
+    return try {
+        // 尝试提取JSON
+        val jsonStr = extractJsonFromResponse(response)
+        val json = JSONObject(jsonStr)
+
+        val success = json.optBoolean("success", false)
+        val description = json.optString("description", "")
+        val reply = json.optString("reply", "")
+
+        // 解析actions
+        val actions = if (json.has("actions")) {
+            val actionsArray = json.getJSONArray("actions")
+            List(actionsArray.length()) { i ->
+                val actionObj = actionsArray.getJSONObject(i)
+                ImageAction(
+                    action = actionObj.optString("action", ""),
+                    amount = actionObj.optDouble("amount", 0.0),
+                    type = actionObj.optString("type", "expense"),
+                    category = actionObj.optString("category", ""),
+                    account = actionObj.optString("account", ""),
+                    note = actionObj.optString("note", "")
+                )
+            }
+        } else null
+
+        ImageAnalysisResult(
+            success = success,
+            message = reply.ifBlank { description },
+            actions = actions
+        )
+    } catch (e: Exception) {
+        // 如果不是JSON格式，返回文本内容
+        ImageAnalysisResult(
+            success = false,
+            message = response,
+            actions = null
+        )
+    }
+}
+
+/**
+ * 从响应中提取JSON
+ */
+private fun extractJsonFromResponse(response: String): String {
+    // 尝试找到JSON代码块
+    val codeBlockRegex = Regex("```json\\s*([\\s\\S]*?)\\s*```")
+    val match = codeBlockRegex.find(response)
+    if (match != null) {
+        return match.groupValues[1].trim()
+    }
+
+    // 尝试找到JSON对象
+    val jsonStart = response.indexOf("{")
+    val jsonEnd = response.lastIndexOf("}")
+    if (jsonStart != -1 && jsonEnd != -1 && jsonEnd > jsonStart) {
+        return response.substring(jsonStart, jsonEnd + 1)
+    }
+
+    return response
+}
+
+/**
+ * 检查模型是否支持图片识别
+ * 支持所有包含视觉相关关键词的模型
+ */
+fun isImageSupported(config: AIConfig): Boolean {
+    val model = config.model.lowercase()
+    
+    // 视觉模型关键词列表
+    val visionKeywords = listOf(
+        "vision", "vl", "visual", "image", "img",
+        "gpt-4o", "gpt4o", "claude-3", "claude3",
+        "gemini-1.5", "gemini-2", "gemini-1.5-flash", "gemini-1.5-pro",
+        "glm-4v", "qwen-vl", "yi-vl", "llava",
+        "multimodal", "多模态",
+        "4v", "-v-", "_v_", " v", "v1", "v2"
+    )
+    
+    // 检查是否包含视觉关键词
+    val hasVisionKeyword = visionKeywords.any { keyword ->
+        model.contains(keyword)
+    }
+    
+    // 排除明确的非视觉模型
+    val nonVisionKeywords = listOf(
+        "embed", "embedding", "text-", "code-", "instruct-", "base"
+    )
+    val isNonVision = nonVisionKeywords.any { keyword ->
+        model.contains(keyword)
+    }
+    
+    return hasVisionKeyword && !isNonVision
+}
+}
+
+/**
+ * 解析后的交易数据
+ */
+data class ParsedTransaction(
+    val amount: Double,
+    val type: String,
+    val category: String,
+    val note: String
+)
+
+data class CompressedImage(
+    val bytes: ByteArray,
+    val mimeType: String
+)
+
+data class EncodedImage(
+    val base64: String,
+    val mimeType: String
+)
+
+/**
+ * 远程模型信息
+ */
+data class RemoteModel(
+    val id: String,
+    val name: String,
+    val description: String
+)
+
+/**
+ * 图片识别结果
+ */
+data class ImageAnalysisResult(
+    val success: Boolean,
+    val message: String,
+    val actions: List<ImageAction>?
+)
+
+/**
+ * 图片识别出的操作
+ */
+data class ImageAction(
+    val action: String,
+    val amount: Double,
+    val type: String,
+    val category: String,
+    val account: String,
+    val note: String
+)

@@ -1,0 +1,123 @@
+# AI记账版本记录
+
+## 版本命名规则
+- 版本号格式：主版本号.次版本号.修订号
+- 例如：v1.1.0
+
+## 版本历史
+
+### v1.8.4 (2026-04-07)
+**版本代号：应用内检查更新首版**
+
+#### 新增功能
+1. **GitHub Releases + 应用内检查更新**
+   - 在个人中心关于页新增可用的“检查更新”入口
+   - 在设置页“其他”区域与关于弹窗新增“检查更新”入口
+   - 应用内可检查 GitHub Releases 最新正式版本
+   - 发现新版本后可展示版本号、发布时间和更新说明，并跳转到 Release 页面下载
+
+#### 交互优化
+- 当仓库尚未发布 GitHub Release 时，更新提示明确说明“请先发布 Release 后再检查更新”
+- 已是最新版本、网络失败、接口失败等场景均有明确弹窗反馈
+
+#### 稳定性验证
+- 本地验证通过：
+  - `./gradlew :app:testDebugUnitTest --tests "com.example.aiaccounting.data.service.AppUpdateServiceTest" --tests "com.example.aiaccounting.ui.viewmodel.SettingsViewModelUpdateTest"`
+  - `./gradlew :app:compileDebugKotlin`
+
+---
+
+## 版本历史
+
+### v1.8.3 (2026-03-22)
+**版本代号：发布准备与 AI 设置收口**
+
+#### 发布准备
+1. **applicationId 确认**
+   - 确认 applicationId 为正式包名 `com.moneytalk.ai`
+   - namespace `com.example.aiaccounting` 与代码包结构保持一致
+
+2. **ProGuard 与 Release 构建验证**
+   - 验证混淆规则与资源压缩配置
+   - Release 构建链路通过
+   - Release 签名改为环境变量驱动，未注入密钥时回退 debug 签名以便 CI 验证
+
+3. **GitHub Actions 发布链路确认**
+   - `lintDebug --continue`
+   - `testDebugUnitTest --continue`
+   - `assembleDebug` / `assembleRelease`
+   - tag `v*` 自动触发 GitHub Release
+
+#### AI 设置相关更新
+- 模型选择界面新增“测试连接”按钮
+- 邀请码绑定流程支持 Auto 自动优选模型
+- 绑定后不再写死默认模型 `openai/gpt-oss-120b`
+- 模型配置持久化为空字符串时表示 Auto 模式
+- 默认邀请码网关基址为 `https://api.gdmon.dpdns.org`
+- 自动迁移并替换历史 `workers.dev` 域名配置
+
+#### 稳定性修复
+- 修复 AI Settings 拆分后 `TestResult` 命名冲突导致的 Kotlin 编译失败
+- 将模型测试结果类型独立为 `ModelTestResult`
+- 更新邀请码绑定相关单元测试，使其与 Auto 自动优选行为一致
+- 本地验证通过：
+  - `./gradlew lintDebug --continue`
+  - `./gradlew testDebugUnitTest --continue`
+
+---
+
+### v1.1.0 (2025-03-02)
+**版本代号：智能统计**
+
+#### 新增功能
+1. **统计页面日期选择弹窗**
+   - 点击右上角筛选按钮弹出日期选择器
+   - 毛玻璃背景效果
+   - 步骤式选择：年 → 月 → 日
+   - 必须先选年才能选月，选月后才能选日
+   - 支持返回上一步重新选择
+   - 圆角光滑的弹窗设计
+
+2. **AI助手图片识别**
+   - 支持发送图片给AI
+   - AI自动识别图片中的消费信息（收据、账单等）
+   - 自动根据识别结果记账
+   - 不支持图片识别的模型会提示用户
+
+3. **AI助手对话复制功能**
+   - 每条AI回复旁添加复制按钮
+   - 点击可复制到剪贴板
+
+#### 改进
+- 统计页面显示当前选择的时间范围
+- 优化日期筛选逻辑，支持年/月/日层级筛选
+
+---
+
+### v1.0.0 (初始版本)
+**版本代号：小财娘诞生**
+
+#### 核心功能
+1. **AI智能记账助手**
+   - 可爱的管家婆形象"小财娘"
+   - 支持自然语言记账
+   - 自动识别多笔消费
+   - 智能分类和命名
+   - 支持远程大模型API接入
+
+2. **账户管理**
+   - 支持多种账户类型（微信、支付宝、现金、银行卡等）
+   - 自动计算总资产
+
+3. **分类管理**
+   - 自动创建分类
+   - 支持自定义分类图标和颜色
+
+4. **统计功能**
+   - 收支趋势图表
+   - 分类占比饼图
+   - 分类明细统计
+
+5. **数据安全**
+   - 数据库加密
+   - 支持指纹/密码保护

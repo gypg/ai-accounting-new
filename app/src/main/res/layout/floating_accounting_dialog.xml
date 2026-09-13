@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/container_background"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:gravity="center"
+    android:background="#99000000"
+    android:padding="24dp">
+
+    <!-- 内容卡片 -->
+    <LinearLayout
+        android:id="@+id/container_content"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="@drawable/floating_dialog_background"
+        android:padding="24dp"
+        android:elevation="8dp">
+
+        <!-- 标题栏 -->
+        <RelativeLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="20dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="快速记账"
+                android:textSize="20sp"
+                android:textStyle="bold"
+                android:textColor="#FFFFFF"
+                android:layout_centerVertical="true" />
+
+            <ImageButton
+                android:id="@+id/btn_close"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:src="@drawable/ic_close"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:layout_alignParentEnd="true"
+                android:layout_centerVertical="true"
+                android:contentDescription="关闭" />
+
+        </RelativeLayout>
+
+        <!-- 类型选择 -->
+        <RadioGroup
+            android:id="@+id/radio_group_type"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginBottom="20dp">
+
+            <RadioButton
+                android:id="@+id/radio_expense"
+                android:layout_width="0dp"
+                android:layout_height="44dp"
+                android:layout_weight="1"
+                android:text="支出"
+                android:textSize="15sp"
+                android:textColor="#FFFFFF"
+                android:gravity="center"
+                android:button="@null"
+                android:background="@drawable/radio_expense_selector"
+                android:layout_marginEnd="8dp"
+                android:checked="true" />
+
+            <RadioButton
+                android:id="@+id/radio_income"
+                android:layout_width="0dp"
+                android:layout_height="44dp"
+                android:layout_weight="1"
+                android:text="收入"
+                android:textSize="15sp"
+                android:textColor="#FFFFFF"
+                android:gravity="center"
+                android:button="@null"
+                android:background="@drawable/radio_income_selector"
+                android:layout_marginStart="8dp" />
+
+        </RadioGroup>
+
+        <!-- 金额输入 -->
+        <EditText
+            android:id="@+id/edit_amount"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:hint="金额"
+            android:textSize="24sp"
+            android:textStyle="bold"
+            android:textColor="#FFFFFF"
+            android:textColorHint="#80FFFFFF"
+            android:gravity="center"
+            android:inputType="numberDecimal"
+            android:background="@drawable/edit_text_background"
+            android:padding="12dp"
+            android:layout_marginBottom="16dp" />
+
+        <!-- 备注输入 -->
+        <EditText
+            android:id="@+id/edit_note"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:hint="备注（可选）"
+            android:textSize="14sp"
+            android:textColor="#FFFFFF"
+            android:textColorHint="#80FFFFFF"
+            android:gravity="center_vertical"
+            android:inputType="text"
+            android:background="@drawable/edit_text_background"
+            android:padding="12dp"
+            android:layout_marginBottom="24dp" />
+
+        <!-- 确认按钮 -->
+        <Button
+            android:id="@+id/btn_confirm"
+            android:layout_width="match_parent"
+            android:layout_height="52dp"
+            android:text="确认记账"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:textColor="#FFFFFF"
+            android:background="@drawable/btn_confirm_gradient" />
+
+    </LinearLayout>
+
+</LinearLayout>

@@ -1,0 +1,47 @@
+package com.example.aiaccounting.ui.viewmodel
+
+import com.example.aiaccounting.data.model.ButlerPersonaRegistry
+
+internal class AIAssistantPendingModificationLifecycle(
+    private val modificationCoordinator: AIAssistantModificationCoordinator
+) {
+
+    private var pendingState: PendingModificationState? = null
+
+    fun currentState(): PendingModificationState? = pendingState
+
+    fun clear() {
+        pendingState = null
+    }
+
+    suspend fun begin(message: String, butlerId: String): ModificationFlowResult {
+        return when (val result = modificationCoordinator.beginModification(message, butlerId)) {
+            is ModificationFlowResult.StartConfirmation -> {
+                pendingState = result.pendingState
+                result
+            }
+            is ModificationFlowResult.Finish -> result
+        }
+    }
+
+    suspend fun continuePending(message: String, butlerId: String): ModificationFlowResult {
+        val currentPendingState = pendingState
+            ?: return ModificationFlowResult.Finish(ButlerPersonaRegistry.buildModificationNoPendingReply())
+        return when (val result = modificationCoordinator.continueModification(message, butlerId, currentPendingState)) {
+            is ModificationFlowResult.Finish -> {
+                if (result.shouldClearPending) {
+                    pendingState = null
+                }
+                result
+            }
+            is ModificationFlowResult.StartConfirmation -> {
+                pendingState = result.pendingState
+                result
+            }
+        }
+    }
+
+    internal fun seedForTest(state: PendingModificationState?) {
+        pendingState = state
+    }
+}

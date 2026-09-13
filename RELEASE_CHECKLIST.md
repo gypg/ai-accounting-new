@@ -1,0 +1,84 @@
+# AI记账 - 发布检查清单
+
+> 当前发布目标：`v1.8.4`
+
+## 一、发布前检查
+
+### 代码质量
+- [x] `./gradlew lintDebug --continue` 通过
+- [x] `./gradlew testDebugUnitTest --continue` 通过
+- [x] 最近一次 CI 编译阻塞已修复
+- [x] 文档与实现已同步
+
+### 功能检查
+- [x] AI 设置页可加载模型列表
+- [x] 模型选择界面支持测试连接按钮
+- [x] 邀请码绑定成功后可自动写入 token / API 地址
+- [x] 邀请码绑定后模型模式为 Auto 自动优选
+- [x] 普通 API 配置与保存流程可用
+
+### 构建配置
+- [x] `applicationId = com.moneytalk.ai`
+- [x] `versionName = 1.8.4`
+- [x] `versionCode = 20`
+- [x] Release 已开启混淆与资源压缩
+- [x] Release 签名走环境变量配置
+
+### 发布资产
+- [ ] 最终 APK 手工安装验证
+- [ ] GitHub Actions artifacts 中同时存在 debug / release APK
+- [ ] 商店素材最终复核
+- [ ] 发布说明最终整理
+
+## 二、执行步骤
+
+### 1. 本地验证
+```bash
+./gradlew lintDebug --continue
+./gradlew testDebugUnitTest --continue
+./gradlew assembleRelease
+```
+
+### 2. 核心手测
+- AI 设置页
+- 模型测试连接
+- 邀请码绑定流程
+- 主要记账路径
+- 启动、登录、统计页
+
+### 3. GitHub Actions 核验
+工作流顺序：
+1. `Lint Check`
+2. `Unit Tests`
+3. `Build APK`
+4. `release`（仅 tag `v*` 触发）
+
+额外确认：
+- `Upload Release APK` 不再出现 `No files were found with the provided path`
+- artifacts 中可下载 release APK
+
+### 4. Tag 与 Release
+- 创建 tag：`v1.8.4`
+- 推送 tag 到远程
+- 确认 GitHub Release 自动生成并包含 APK 产物
+
+## 三、已知问题
+
+- 历史文档中存在旧版本号、旧路径、旧发布示例，现已开始收敛，但发布前仍建议人工复核所有面向外部的说明
+- 本地 bash 环境可能出现 `uname: command not found` 日志，但当前不影响 lint / 单测通过
+- `Build Release APK` 仍可能出现 Apache POI 相关的 R8 warning：`SVGUserAgent.getViewbox()` 在 Android / R8 静态分析下被视为 unreachable；当前不阻塞构建与 artifact 上传
+- 该 warning 已确认来自 `org.apache.poi:poi-ooxml:5.2.5` jar 内的 `org.apache.poi.xslf.draw.SVGUserAgent` 路径，而当前 app 仅使用 `XSSFWorkbook` 基础 `.xlsx` 导出能力，因此本模块将其归类为 **POI 附带未使用渲染路径的静态分析噪音**，不是已确认的导出功能故障
+- 模块 2 已将 POI keep 范围收敛到当前 Excel 导出主路径，并补充 `-dontwarn org.openxmlformats.schemas.**` 以恢复 release 构建；当前 warning 仍存在，但已确认继续保持非阻塞
+- 模块 6A 已删除 direct `poi` 依赖声明，并验证 `poi` 仍由 `poi-ooxml` 传递引入；当前 release 构建结果与 warning 状态均保持不变
+- 模块 6B 已新增 Excel 导出回归测试，并验证 `ExcelExporterTest` 与 `assembleRelease` 均通过；后续若继续裁剪 POI 依赖，应以这些回归用例作为最低验证基线
+- 模块 6D 已进一步确认 warning 源头直接位于 `poi-ooxml-5.2.5.jar` 内的 `org.apache.poi.xslf.draw.SVGUserAgent` 与 `poi-5.2.5.jar` 内的 `org.apache.poi.sl.**` 演示文稿渲染链；`poi-ooxml-lite` 并非当前 warning 来源
+- 基于模块 6A~6C 的收敛结果，模块 6D 将当前 POI 线结论显式收口为：在 **不替换导出库 / 不重写 Excel 导出实现** 的前提下，当前 warning 已无明显低风险依赖裁剪空间，因此继续保持为非阻塞项
+- 后续若仍要彻底清零这条 warning，应新开独立方案评估替代导出库、CSV 降级方案或导出链路解耦，而不是继续在现有 `poi-ooxml` 依赖上做激进裁剪
+
+## 四、回滚思路
+
+若发布后发现高优先级问题：
+1. 先停止继续推广当前版本
+2. 基于 `main` 修复问题并重新执行 lint / unit test / release build
+3. 重新打补丁版本 tag
+4. 更新版本记录与发布说明
