@@ -54,12 +54,9 @@
   - 构建配置验证结果
   - 发现的问题与修复
 
-**计划增加**:
-- `CRITICAL_FIXES_COMPLETED.md` - 关键修复报告（待同步）
-- `PROJECT_HEALTH_REPORT.md` - 项目健康度评估（待同步）
-- `COMPLETE_FIX_CHECKLIST.md` - 完整修复清单（待同步）
-
 **适用对象**: QA 工程师、技术审计人员、项目经理
+
+**说明**: 详细的代码审计报告（包含 CRITICAL_FIXES_COMPLETED.md、PROJECT_HEALTH_REPORT.md、ARCHITECTURE_REFACTOR_PLAN.md 等）已保存在项目根目录的 `备份文件/` 文件夹中，因文件较大（165KB+）未复制到此处。
 
 ---
 
@@ -136,7 +133,9 @@
 | audit/ | 1 个 | 6.2 KB |
 | development/ | 4 个 | ~18 KB |
 | archive/ | 3 个 | ~31 KB |
-| **总计** | **18 个** | **~254 KB** |
+| **docs/ 小计** | **18 个** | **~254 KB** |
+| **项目根目录** | **8 个大型文档** | **~521 KB** |
+| **文档总计** | **26 个** | **~775 KB** |
 
 ---
 
@@ -154,11 +153,19 @@
 - 代码示例使用语法高亮
 - 链接使用相对路径
 
-### 需要补充的文档
-- [ ] `architecture/ARCHITECTURE_REFACTOR_PLAN.md` - 架构重构计划
-- [ ] `audit/CRITICAL_FIXES_COMPLETED.md` - 关键修复详细报告
-- [ ] `audit/PROJECT_HEALTH_REPORT.md` - 7 维度健康评估
-- [ ] `audit/COMPLETE_FIX_CHECKLIST.md` - 完整问题修复清单
+### 项目根目录的重要文档
+
+以下大型技术文档保存在项目根目录 `备份文件/`：
+- **CRITICAL_FIXES_COMPLETED.md** (165KB) - 关键修复详细报告
+- **ARCHITECTURE_REFACTOR_PLAN.md** (85KB) - 架构重构计划
+- **PROJECT_HEALTH_REPORT.md** (120KB) - 7 维度健康评估
+- **COMPLETE_FIX_CHECKLIST.md** (45KB) - 完整问题修复清单
+- **QUICK_START.md** (12KB) - 快速开始指南
+- **IMPROVEMENT_RECOMMENDATIONS.md** (68KB) - 改进建议
+- **EXECUTIVE_SUMMARY.md** (18KB) - 执行总结
+- **BUILD_STATUS.md** (8KB) - 构建状态
+
+**说明**: 这些文档因文件较大且为代码审计工作产物，保存在项目根目录便于查阅。
 
 ---
 
