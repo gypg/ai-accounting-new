@@ -68,10 +68,12 @@ jobs:
           exit 1
         fi
 
-        cp "$RELEASE_APK" "artifacts/AI记账_v${VERSION}_${SUFFIX}_${DATE}.apk"
+        # Use ASCII-only filename: the runner locale mangles CJK characters
+        APK_NAME="AIAccounting_v${VERSION}_${SUFFIX}_${DATE}.apk"
+        cp "$RELEASE_APK" "artifacts/${APK_NAME}"
 
         # Calculate SHA256
-        sha256sum "$RELEASE_APK" | awk '{print $1}' > "artifacts/AI记账_v${VERSION}_${SUFFIX}_${DATE}.apk.sha256"
+        sha256sum "$RELEASE_APK" | awk '{print $1}' > "artifacts/${APK_NAME}.sha256"
 
         echo "APK_VERSION=${VERSION}" >> $GITHUB_ENV
         echo "APK_DATE=${DATE}" >> $GITHUB_ENV
